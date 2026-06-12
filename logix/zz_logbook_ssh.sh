@@ -10,8 +10,8 @@ if [ -n "$SSH_CONNECTION" ] && [ -z "$LOGBOOK_SSH_LOGGED" ]; then
     export LOGBOOK_SSH_LOGGED=1
     export COMPCHEM_SESSION_TYPE="SSH"
     export LOGBOOK_SESSION_ID="ssh-${USER:-unknown}-$$-$(date +%s)"
-    if [ -x /opt/software/notify/logbook_ssh_login.py ]; then
-        ( /usr/bin/python3 /opt/software/notify/logbook_ssh_login.py >/dev/null 2>&1 & )
+    if [ -x /opt/software/logix/logbook_ssh_login.py ]; then
+        ( /usr/bin/python3 /opt/software/logix/logbook_ssh_login.py >/dev/null 2>&1 & )
     fi
 elif [ -z "$COMPCHEM_SESSION_TYPE" ]; then
     export COMPCHEM_SESSION_TYPE="LOCAL"

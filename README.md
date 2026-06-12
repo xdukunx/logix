@@ -21,7 +21,7 @@ to your environment.
 
 ```
   SSH login ─────┐
-  AnyDesk login ─┼──►  log_physical.py  ──►  notify.db  ──►  logbook_report.py
+  AnyDesk login ─┼──►  log_physical.py  ──►  logix.db  ──►  logbook_report.py
   Physical (WPF) ┘     (idempotent bridge)   (SQLite)       (Excel: hrs/user/type)
    sign-in popup
 ```
@@ -76,7 +76,7 @@ examples/   config.env.example — copy to config.env (gitignored)
 1. **Configure.** Copy the example config and point it at your database:
    ```bash
    cp examples/config.env.example config.env
-   # edit config.env — set NOTIFY_DB to your SQLite path. config.env is gitignored.
+   # edit config.env — set LOGIX_DB to your SQLite path. config.env is gitignored.
    ```
 2. **Linux capture.** Install the SSH hook (`zz_logbook_ssh.sh`) into
    `/etc/profile.d/`. SSH/AnyDesk logins flow through `log_physical.py`.
@@ -84,13 +84,13 @@ examples/   config.env.example — copy to config.env (gitignored)
    `windows/install_logbook_tasks.ps1` (lock/unlock triggers the WPF sign-in).
 4. **Report.** Generate the Excel summary:
    ```bash
-   python logix/logbook_report.py    # reads NOTIFY_DB, writes an .xlsx (gitignored)
+   python logix/logbook_report.py    # reads LOGIX_DB, writes an .xlsx (gitignored)
    ```
 
 ## Customization
 
 - **Paths / DB location** — all via `config.env` (gitignored), never inline
-  constants. The Linux side reads `NOTIFY_DB`.
+  constants. The Linux side reads `LOGIX_DB`.
 - **The physical sign-in UI** (`windows/logbook_popup.ps1`) is a WPF form and
   is intentionally site-specific — keep your own faculty/lab branding and
   fields here. It's the natural place to add per-system or per-user

@@ -10,7 +10,7 @@
 *.db-shm
 *.sqlite
 *.sqlite3
-notify.db
+logix.db
 
 # Windows session state — contains live usernames / session payloads
 session.json

@@ -32,7 +32,7 @@ jobs:
       - name: Import smoke test (synthetic in-memory DB)
         env:
           # Throwaway path; modules must not require a real DB to import.
-          NOTIFY_DB: ${{ runner.temp }}/synthetic_notify.db
+          LOGIX_DB: ${{ runner.temp }}/synthetic_logix.db
         run: |
           python - <<'PY'
           import importlib, pathlib, sys

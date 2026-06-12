@@ -9,8 +9,8 @@ from datetime import datetime, date, time, timedelta
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DB = Path(os.environ.get("NOTIFY_DB", "/opt/software/notify/notify.db"))
-DEFAULT_OUTDIR = Path(os.environ.get("LOGBOOK_REPORT_DIR", "/opt/software/notify/reports"))
+DEFAULT_DB = Path(os.environ.get("LOGIX_DB", "/opt/software/logix/logix.db"))
+DEFAULT_OUTDIR = Path(os.environ.get("LOGBOOK_REPORT_DIR", "/opt/software/logix/reports"))
 WINDOWS_SESSION_JSON = Path(os.environ.get("LOGBOOK_SESSION_JSON", "/mnt/c/ProgramData/MindLabLogbook/session.json"))
 
 BASE_COLUMNS = {
@@ -466,7 +466,7 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     ws["A2"].alignment = Alignment(horizontal="center")
 
     ws.merge_cells("A3:K3")
-    ws["A3"] = "Physical / AnyDesk dicatat dari Windows popup. SSH/job remote dicatat dari WSL/notify-run."
+    ws["A3"] = "Physical / AnyDesk dicatat dari Windows popup. SSH/job remote dicatat dari WSL/logix."
     ws["A3"].font = Font(color="111827", italic=True, size=11)
     ws["A3"].fill = PatternFill("solid", fgColor="F0FDFA")
     ws["A3"].alignment = Alignment(horizontal="center")

@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-LOG_PHYSICAL = Path("/opt/software/notify/log_physical.py")
+LOG_PHYSICAL = Path("/opt/software/logix/log_physical.py")
 
 
 def main() -> int:

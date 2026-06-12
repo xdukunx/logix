@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DB = Path(os.environ.get("NOTIFY_DB", "/opt/software/notify/notify.db"))
+DEFAULT_DB = Path(os.environ.get("LOGIX_DB", "/opt/software/logix/logix.db"))
 DEFAULT_SESSION_JSON = Path("/mnt/c/ProgramData/MindLabLogbook/session.json")
 
 BASE_COLUMNS = {
@@ -141,7 +141,7 @@ def truthy(v: Any) -> int:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Write a Report Logbook event into notify.db")
+    p = argparse.ArgumentParser(description="Write a Report Logbook event into logix.db")
     p.add_argument("--db", default=str(DEFAULT_DB))
     p.add_argument("--migrate", action="store_true", help="only migrate schema and exit")
     p.add_argument("--json-file", default="", help="read all event fields from a UTF-8 JSON file")

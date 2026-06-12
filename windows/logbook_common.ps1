@@ -144,11 +144,11 @@ function Invoke-WSLLogbook {
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
         Write-LogbookInfo "WSL payload event=$Event sid=$SessionId nama=$Nama nim=$Nim tujuan=$Tujuan"
-        $output = & wsl.exe -u root -e /usr/bin/python3 /opt/software/notify/log_physical.py --json-file $wslPayloadPath 2>&1
+        $output = & wsl.exe -u root -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
         $rc = $LASTEXITCODE
         if ($rc -ne 0) {
             Write-LogbookError "WSL root log returned exit code $rc for event $Event. Output: $output"
-            $output = & wsl.exe -e /usr/bin/python3 /opt/software/notify/log_physical.py --json-file $wslPayloadPath 2>&1
+            $output = & wsl.exe -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
             $rc = $LASTEXITCODE
             if ($rc -ne 0) {
                 Write-LogbookError "WSL user log returned exit code $rc for event $Event. Output: $output"
