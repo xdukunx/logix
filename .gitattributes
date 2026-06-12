@@ -1,0 +1,6 @@
+# Shell scripts MUST use LF or they break on Linux/macOS (CRLF -> `\r` errors).
+*.sh   text eol=lf
+# PowerShell is Windows-side; keep CRLF.
+*.ps1  text eol=crlf
+# Python tolerates either; normalize to LF for clean diffs.
+*.py   text eol=lf

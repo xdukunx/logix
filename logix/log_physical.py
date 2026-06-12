@@ -17,8 +17,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DB = Path(os.environ.get("LOGIX_DB", "/opt/software/logix/logix.db"))
-DEFAULT_SESSION_JSON = Path("/mnt/c/ProgramData/MindLabLogbook/session.json")
+import paths
+
+DEFAULT_DB = paths.default_db()
+DEFAULT_SESSION_JSON = paths.default_session_json()
 
 BASE_COLUMNS = {
     "id": "INTEGER PRIMARY KEY AUTOINCREMENT",

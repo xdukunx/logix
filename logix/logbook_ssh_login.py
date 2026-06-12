@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-LOG_PHYSICAL = Path("/opt/software/logix/log_physical.py")
+# Resolve the bridge next to this file (install dir), overridable via env.
+# This keeps the SSH hook portable across Linux/macOS install locations.
+LOG_PHYSICAL = Path(os.environ.get("LOGIX_LOG_PHYSICAL") or (Path(__file__).resolve().parent / "log_physical.py"))
 
 
 def main() -> int:

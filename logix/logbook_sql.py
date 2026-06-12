@@ -2,7 +2,8 @@
 from __future__ import annotations
 import argparse, sqlite3, sys, os
 from pathlib import Path
-DB=Path(os.environ.get('LOGIX_DB','/opt/software/logix/logix.db'))
+import paths
+DB=paths.default_db()
 
 def main(argv):
     p=argparse.ArgumentParser(description='Run a read-only SQLite query using Python sqlite3, avoiding broken sqlite3 CLI libraries.')

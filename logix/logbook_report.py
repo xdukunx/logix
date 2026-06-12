@@ -9,9 +9,11 @@ from datetime import datetime, date, time, timedelta
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DB = Path(os.environ.get("LOGIX_DB", "/opt/software/logix/logix.db"))
-DEFAULT_OUTDIR = Path(os.environ.get("LOGBOOK_REPORT_DIR", "/opt/software/logix/reports"))
-WINDOWS_SESSION_JSON = Path(os.environ.get("LOGBOOK_SESSION_JSON", "/mnt/c/ProgramData/MindLabLogbook/session.json"))
+import paths
+
+DEFAULT_DB = paths.default_db()
+DEFAULT_OUTDIR = paths.default_reports_dir()
+WINDOWS_SESSION_JSON = paths.default_session_json()
 
 BASE_COLUMNS = {
     "id": "INTEGER PRIMARY KEY AUTOINCREMENT",

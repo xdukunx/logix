@@ -62,35 +62,58 @@ Not yet implemented.
 ## Layout
 
 ```
-logix/      Linux capture + bridge + reporting (Python + shell)
+logix/      cross-platform core: bridge + reporting + SQL helper (Python)
+install/    one installer for all three OSes (install.py + launchers)
 windows/    PowerShell popup + monitor scripts (WPF sign-in UI)
 docs/       design docs (GSheet sync, Claude Code handoff)
 examples/   config.env.example — copy to config.env (gitignored)
 ```
 
-## Quick start
+## Platform support
 
-> Logix is environment-specific. These steps describe the shape of a deploy;
-> adapt paths to your box.
+The **core** — session logging and Excel reporting — runs natively on Linux,
+macOS, and Windows (no WSL required). The **capture** front-ends are
+OS-specific by nature:
 
-1. **Configure.** Copy the example config and point it at your database:
-   ```bash
-   cp examples/config.env.example config.env
-   # edit config.env — set LOGIX_DB to your SQLite path. config.env is gitignored.
-   ```
-2. **Linux capture.** Install the SSH hook (`zz_logbook_ssh.sh`) into
-   `/etc/profile.d/`. SSH/AnyDesk logins flow through `log_physical.py`.
-3. **Windows physical capture.** Register the popup tasks with
-   `windows/install_logbook_tasks.ps1` (lock/unlock triggers the WPF sign-in).
-4. **Report.** Generate the Excel summary:
-   ```bash
-   python logix/logbook_report.py    # reads LOGIX_DB, writes an .xlsx (gitignored)
-   ```
+| Capability | Linux | macOS | Windows |
+|---|:---:|:---:|:---:|
+| Log bridge + Excel reporting + SQL query | ✅ | ✅ | ✅ |
+| SSH login capture (`profile.d` / shell hook) | ✅ | ✅ | — |
+| Physical at-keyboard sign-in (WPF popup) | — | — | ✅ |
+
+> The physical-session popup is a Windows WPF app; macOS/Linux desktops would
+> each need their own native UI, so that piece is intentionally Windows-only.
+
+## Install
+
+One installer, system-wide, no third-party dependencies (Python 3.8+ only):
+
+```bash
+# Linux / macOS
+sudo ./install/install.sh
+
+# Windows (elevated PowerShell)
+.\install\install.ps1
+```
+
+It creates the system data dir (`/opt/software/logix`,
+`/Library/Application Support/Logix`, or `C:\ProgramData\Logix`), installs the
+core, writes a starter `config.env`, initializes the SQLite schema, and prints
+the per-OS steps to wire up capture (SSH hook on Linux/macOS; the WPF popup on
+Windows). Re-run any time to upgrade in place — it never clobbers your config
+or database.
+
+**Report:**
+```bash
+python logbook_report.py    # writes an .xlsx into <data-dir>/reports (gitignored)
+```
 
 ## Customization
 
-- **Paths / DB location** — all via `config.env` (gitignored), never inline
-  constants. The Linux side reads `LOGIX_DB`.
+- **Paths / DB location** — resolved by [`logix/paths.py`](logix/paths.py) in
+  one place: environment variable → `config.env` → OS-aware default. `config.env`
+  is parsed directly (no shell `source`), so the same file works on every OS.
+  Key knobs: `LOGIX_HOME`, `LOGIX_DB`, `LOGBOOK_REPORT_DIR`.
 - **The physical sign-in UI** (`windows/logbook_popup.ps1`) is a WPF form and
   is intentionally site-specific — keep your own faculty/lab branding and
   fields here. It's the natural place to add per-system or per-user
@@ -105,8 +128,9 @@ python -m py_compile logix/*.py     # what CI checks: parse + import on a synthe
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) compiles the
-modules and runs an import smoke test against a **synthetic** database only —
-never real PII.
+modules and runs a log→query round-trip on **Linux, macOS, and Windows**, plus
+a system-wide installer test — all against a **synthetic** database only, never
+real PII.
 
 ## License
 
