@@ -1,0 +1,51 @@
+name: CI
+
+# Light CI for a reference publication: confirm the Python modules
+# parse and import, and run any tests — on a SYNTHETIC database only.
+# Never point this at a real notify.db. No PII is ever used in CI.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test tooling
+        # Core capture/report code is stdlib-only by design; only pytest here.
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Compile all modules
+        run: python -m py_compile logix/*.py
+
+      - name: Import smoke test (synthetic in-memory DB)
+        env:
+          # Throwaway path; modules must not require a real DB to import.
+          NOTIFY_DB: ${{ runner.temp }}/synthetic_notify.db
+        run: |
+          python - <<'PY'
+          import importlib, pathlib, sys
+          sys.path.insert(0, "logix")
+          for mod in ("logbook_sql", "log_physical", "logbook_report", "logbook_ssh_login"):
+              importlib.import_module(mod)
+              print(f"imported {mod} OK")
+          PY
+
+      - name: Run tests if present
+        run: |
+          if ls tests/ test_*.py *_test.py >/dev/null 2>&1; then
+            pytest -q
+          else
+            echo "No tests yet — skipping."
+          fi

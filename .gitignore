@@ -1,0 +1,45 @@
+# ============================================================
+# CRITICAL: these patterns prevent committing sensitive data.
+# Logix processes student names, NIM, and client IPs. NONE of
+# that runtime data may ever enter version control.
+# ============================================================
+
+# Databases — contain all PII (names, NIM, IPs, session records)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+notify.db
+
+# Windows session state — contains live usernames / session payloads
+session.json
+*/MindLabLogbook/*
+ProgramData/
+
+# Generated reports — contain PII
+*.xlsx
+*.xls
+reports/
+output/
+
+# Logs — may contain IPs, usernames, hostnames
+*.log
+logs/
+
+# Google service-account credentials (for future GSheet sync)
+# NEVER commit these — they grant write access to the sheet.
+service_account.json
+*service-account*.json
+credentials.json
+client_secret*.json
+config.env
+*.env
+!*.env.example
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
