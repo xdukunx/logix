@@ -52,12 +52,15 @@ addresses. By design:
 
 ## Status
 
-Current: local capture + Excel reporting, working.
+Current: local capture + Excel reporting, working on all three OSes.
 
-Planned: optional one-way sync to a shared Google Sheet for live reporting —
-**with a redaction gate** that strips IPs and reduces names before anything
-leaves the box. See [`docs/GSHEET_SYNC_DESIGN.md`](docs/GSHEET_SYNC_DESIGN.md).
-Not yet implemented.
+GSheet sync: the **privacy-first core** — a redaction gate (strips IPs, drops
+raw NIMs, reduces names to a stable token), hourly aggregation, and idempotent
+upsert — is implemented in [`logix/gsheet_sync.py`](logix/gsheet_sync.py) and
+covered by tests ([`tests/`](tests/)). The live Google push is wired behind an
+optional `gspread` dependency and awaits validation against a real sheet. See
+[`docs/GSHEET_SYNC_DESIGN.md`](docs/GSHEET_SYNC_DESIGN.md) and
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Layout
 

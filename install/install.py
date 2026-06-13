@@ -35,6 +35,7 @@ CORE_FILES = [
     "logbook_report.py",
     "logbook_sql.py",
     "logbook_ssh_login.py",
+    "gsheet_sync.py",
 ]
 
 

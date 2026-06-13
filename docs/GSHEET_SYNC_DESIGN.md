@@ -1,7 +1,11 @@
-# Logix GSheet sync — design (future, not yet implemented)
+# Logix GSheet sync — design
 
-Status: design only. Do not implement until the redaction rules below are
-agreed and the privacy review is done.
+Status: **redaction core + aggregation + idempotent upsert implemented and
+unit-tested** in [`logix/gsheet_sync.py`](../logix/gsheet_sync.py)
+(tests: [`tests/test_gsheet_sync.py`](../tests/test_gsheet_sync.py)). The live
+Google push (`gspread`) is implemented but isolated behind a lazy import and
+not yet validated against a real service account + sheet. The redaction rules
+below are the contract the code enforces.
 
 ## Goal
 
