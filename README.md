@@ -139,10 +139,18 @@ Full runbook: [`docs/GOING_LIVE.md`](docs/GOING_LIVE.md).
   one place: environment variable → `config.env` → OS-aware default. `config.env`
   is parsed directly (no shell `source`), so the same file works on every OS.
   Key knobs: `LOGIX_HOME`, `LOGIX_DB`, `LOGBOOK_REPORT_DIR`.
-- **The physical sign-in UI** (`windows/logbook_popup.ps1`) is a WPF form and
-  is intentionally site-specific — keep your own faculty/lab branding and
-  fields here. It's the natural place to add per-system or per-user
-  customization without touching the capture/report core.
+- **The physical sign-in UI** (`windows/logbook_popup.ps1`) reads an optional
+  JSON config so each system or user can rebrand and re-field it **without
+  editing code**. Copy [`windows/logbook_config.example.json`](windows/logbook_config.example.json)
+  to either location — later overrides earlier:
+  1. built-in defaults (the original FTMM faculty UI),
+  2. `C:\lab\logbook_config.json` (machine-wide),
+  3. `%APPDATA%\MindLabLogbook\logbook_config.json` (per-user).
+
+  Override any subset of: branding (logo text/image, title, subtitle, theme
+  colors), all labels/hint text, the **access** and **purpose** dropdown
+  options, and which fields are **required**. With no config file present the
+  popup renders exactly as before.
 - The capture and report core is **stdlib-only by design** — keep new
   third-party dependencies isolated (see the GSheet sync design).
 

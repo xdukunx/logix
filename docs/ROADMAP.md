@@ -26,6 +26,15 @@ Living plan for what's built and what's next. Privacy rules in
   `gsheet_sync.py --dry-run` (preview, no creds) and `--check` (verify access).
   Operator runbook: [`GOING_LIVE.md`](GOING_LIVE.md).
 
+- **Per-user popup customization.** The Windows WPF popup reads an optional
+  cascading JSON config (built-in defaults <- `C:\lab\logbook_config.json` <-
+  `%APPDATA%\MindLabLogbook\logbook_config.json`). Rebrand (logo/title/colors),
+  relabel, change the access/purpose dropdowns, and set required fields without
+  editing code; absent config = the original FTMM UI. Config + XAML generation
+  live in `logbook_common.ps1`; covered by `windows/test_logbook_config.ps1`
+  (run in CI on windows-latest). Example:
+  [`windows/logbook_config.example.json`](../windows/logbook_config.example.json).
+
 ## Next
 
 1. **Live Google push validation.** *Blocked on real credentials only.* The
@@ -33,9 +42,6 @@ Living plan for what's built and what's next. Privacy rules in
    account + shared Sheet, then confirms two runs produce no duplicate rows
    against the live sheet (the idempotency is unit-tested; this is the
    end-to-end confirmation).
-2. **Per-user popup customization.** Extend the Windows WPF popup
-   (`windows/logbook_popup.ps1`) so fields/branding can vary per system/user
-   without touching the capture core. Windows-side only.
 
 ## Won't do (by decision)
 

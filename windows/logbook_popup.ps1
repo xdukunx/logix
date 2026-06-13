@@ -12,6 +12,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
 
 . 'C:\lab\logbook_common.ps1'
 Ensure-LogbookDirs
+$cfg = Get-LogbookConfig
 Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
 
 try {
@@ -66,171 +67,7 @@ $detectedAnyDesk = [int]$sessionInfo[1]
 $sessionId = "win-$($env:USERNAME)-$([DateTimeOffset]::Now.ToUnixTimeSeconds())-$([guid]::NewGuid().ToString('N').Substring(0,8))"
 $profileFile = Join-Path $Global:StateDir 'last_profile.json'
 
-$xaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="False" Background="#741B47"
-        FontFamily="Poppins, Montserrat, Segoe UI">
-  <Window.Resources>
-    <SolidColorBrush x:Key="PrussianBlue" Color="#073763" />
-    <SolidColorBrush x:Key="Silver" Color="#C0C0C0" />
-    <SolidColorBrush x:Key="Pompadour" Color="#741B47" />
-    <SolidColorBrush x:Key="WhiteBrush" Color="#FFFFFF" />
-
-    <Style x:Key="LabelTextStyle" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="13" />
-      <Setter Property="Foreground" Value="#FFFFFF" />
-      <Setter Property="Margin" Value="0,0,0,7" />
-    </Style>
-
-    <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
-      <Setter Property="Height" Value="44" />
-      <Setter Property="Padding" Value="12,8" />
-      <Setter Property="FontFamily" Value="Montserrat, Poppins, Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="Medium" />
-      <Setter Property="BorderBrush" Value="#C0C0C0" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Background" Value="#073763" />
-      <Setter Property="Foreground" Value="#FFFFFF" />
-      <Setter Property="CaretBrush" Value="#FFFFFF" />
-      <Setter Property="SelectionBrush" Value="#741B47" />
-      <Setter Property="SelectionTextBrush" Value="#FFFFFF" />
-    </Style>
-
-    <Style x:Key="ReadableComboBoxItemStyle" TargetType="ComboBoxItem">
-      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Background" Value="#FFFFFF" />
-      <Setter Property="Foreground" Value="#741B47" />
-      <Setter Property="Padding" Value="10,7" />
-      <Setter Property="MinHeight" Value="36" />
-      <Setter Property="BorderBrush" Value="#E6E6E6" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-    </Style>
-
-    <Style x:Key="ReadableComboBoxStyle" TargetType="ComboBox">
-      <Setter Property="Height" Value="44" />
-      <Setter Property="Padding" Value="8,6" />
-      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Background" Value="#FFFFFF" />
-      <Setter Property="Foreground" Value="#741B47" />
-      <Setter Property="BorderBrush" Value="#C0C0C0" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="TextElement.Foreground" Value="#741B47" />
-      <Setter Property="ItemContainerStyle" Value="{StaticResource ReadableComboBoxItemStyle}" />
-    </Style>
-  </Window.Resources>
-
-  <Grid>
-    <Image Name="BgImage" Stretch="Fill" Opacity="0.88">
-      <Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect>
-    </Image>
-    <Rectangle Fill="#B0741B47" />
-
-    <Border Width="790" CornerRadius="18" BorderBrush="#C0C0C0" BorderThickness="1" Background="#073763"
-            HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True">
-      <Border.Effect><DropShadowEffect BlurRadius="32" ShadowDepth="0" Opacity="0.42" Color="#741B47" /></Border.Effect>
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <Border Grid.Row="0" CornerRadius="18,18,0,0" Padding="30,22,30,22" BorderBrush="#FFFFFF" BorderThickness="0,0,0,1">
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="330" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Image Grid.Column="0" Name="LogoImage" Width="260" Height="72" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center"
-                   SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" />
-            <TextBlock Grid.Column="0" Name="LogoText" Text="FTMM" FontFamily="Poppins, Montserrat, Segoe UI Semibold" FontSize="30"
-                       FontWeight="SemiBold" Foreground="#FFFFFF" VerticalAlignment="Center" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-              <TextBlock Text="Report Logbook" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="29" FontWeight="SemiBold"
-                         Foreground="#FFFFFF" HorizontalAlignment="Right" />
-              <TextBlock Text="Computational Workstation" FontFamily="Montserrat, Poppins, Segoe UI" FontSize="14" Foreground="#C0C0C0"
-                         HorizontalAlignment="Right" Margin="0,2,0,0" />
-            </StackPanel>
-          </Grid>
-        </Border>
-
-        <StackPanel Grid.Row="1" Margin="36,28,36,34">
-          <TextBlock Text="Isi data penggunaan workstation sebelum memulai sesi." FontFamily="Poppins, Montserrat, Segoe UI" FontSize="12.5"
-                     FontWeight="SemiBold" Foreground="#FFFFFF" Margin="0,0,0,7" />
-          <TextBlock Name="StartTimeText" Text="Waktu mulai akan dicatat saat tombol Mulai sesi ditekan." FontFamily="Montserrat, Poppins, Segoe UI"
-                     FontSize="12" Foreground="#C0C0C0" Margin="0,0,0,18" />
-
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-              <TextBlock Text="Nama Pengguna" Style="{StaticResource LabelTextStyle}" />
-              <TextBox Name="NamaBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-              <TextBlock Text="NIM/NIP/NIK" Style="{StaticResource LabelTextStyle}" />
-              <TextBox Name="NimBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
-            </StackPanel>
-          </Grid>
-
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="230" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-              <TextBlock Text="Tipe Akses" Style="{StaticResource LabelTextStyle}" />
-              <ComboBox Name="AccessBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
-                <ComboBoxItem Content="Physical" />
-                <ComboBoxItem Content="AnyDesk" />
-              </ComboBox>
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-              <TextBlock Text="Tujuan Penggunaan" Style="{StaticResource LabelTextStyle}" />
-              <ComboBox Name="TujuanBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
-                <ComboBoxItem Content="Visualisasi Data" />
-                <ComboBoxItem Content="Running Data" />
-                <ComboBoxItem Content="Maintenance" />
-              </ComboBox>
-            </StackPanel>
-          </Grid>
-
-          <TextBlock Text="Keterangan Kegiatan" Style="{StaticResource LabelTextStyle}" />
-          <TextBox Name="KetBox" Style="{StaticResource InputTextBoxStyle}" Height="122" Padding="12,10" TextWrapping="Wrap" AcceptsReturn="True"
-                   VerticalScrollBarVisibility="Auto" Margin="0,0,0,20" />
-
-          <Grid Margin="0,0,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="198" />
-            </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="#073763" CornerRadius="10" Padding="12,9" BorderBrush="#C0C0C0" BorderThickness="1">
-              <TextBlock Name="HintText" Text="Mohon isi data dengan benar dan selengkap mungkin, apabila ada error atau kesalahan, segera hubungi admin."
-                         FontFamily="Montserrat, Poppins, Segoe UI" FontSize="11.5" FontWeight="SemiBold" Foreground="#C0C0C0" TextWrapping="Wrap" />
-            </Border>
-            <Button Grid.Column="2" Name="SubmitBtn" Height="48" Content="Mulai Sesi" FontFamily="Poppins, Montserrat, Segoe UI"
-                    FontSize="21" FontWeight="Bold" Background="#741B47" Foreground="#FFFFFF" BorderBrush="#C0C0C0"
-                    BorderThickness="1" IsEnabled="False" Opacity="0.45" />
-          </Grid>
-        </StackPanel>
-      </Grid>
-    </Border>
-  </Grid>
-</Window>
-"@
+$xaml = Build-LogbookPopupXaml $cfg
 
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
@@ -239,7 +76,7 @@ $window.Activate() | Out-Null
 
 $bg = New-BlurredBackgroundImage
 if ($bg -ne $null) { $window.FindName('BgImage').Source = $bg }
-$logoPath = 'C:\lab\logo.png'
+$logoPath = [string]$cfg.branding.logoPath
 if (Test-Path $logoPath) {
     try {
         $logo = New-Object System.Windows.Media.Imaging.BitmapImage
@@ -263,7 +100,7 @@ if ($null -ne $sessionBadge) {
         Write-LogbookError "SessionBadge update skipped: $($_.Exception.Message)"
     }
 }
-$window.FindName('StartTimeText').Text = "Waktu mulai akan dicatat saat tombol Mulai sesi ditekan."
+$window.FindName('StartTimeText').Text = [string]$cfg.text.startHint
 
 $nama = $window.FindName('NamaBox')
 $nim = $window.FindName('NimBox')
@@ -348,7 +185,7 @@ try {
         $last = Get-Content $profileFile -Raw | ConvertFrom-Json
         if ($last.nama) { $nama.Text = [string]$last.nama }
         if ($last.nim) { $nim.Text = [string]$last.nim }
-        $allowedPurpose = @('Visualisasi Data','Running Data','Maintenance')
+        $allowedPurpose = @($cfg.purposes)
         if ($last.tujuan -and ($allowedPurpose -contains ([string]$last.tujuan))) {
             for ($i = 0; $i -lt $tujuan.Items.Count; $i++) {
                 if ([string]$tujuan.Items[$i].Content -eq [string]$last.tujuan) { $tujuan.SelectedIndex = $i; break }
@@ -367,21 +204,27 @@ function Get-ComboText($combo) {
     return ''
 }
 
+$requiredFields = @($cfg.requiredFields)
 $validate = {
-    $purpose = Get-ComboText $tujuan
-    $atype = Get-ComboText $access
-    $ok = -not [string]::IsNullOrWhiteSpace($nama.Text) -and
-          -not [string]::IsNullOrWhiteSpace($nim.Text) -and
-          -not [string]::IsNullOrWhiteSpace($atype) -and
-          -not [string]::IsNullOrWhiteSpace($purpose) -and
-          -not [string]::IsNullOrWhiteSpace($ket.Text)
+    # A field counts as filled unless it is listed in requiredFields and empty.
+    $values = @{
+        nama       = $nama.Text
+        nim        = $nim.Text
+        access     = (Get-ComboText $access)
+        purpose    = (Get-ComboText $tujuan)
+        keterangan = $ket.Text
+    }
+    $ok = $true
+    foreach ($field in $requiredFields) {
+        if ([string]::IsNullOrWhiteSpace([string]$values[$field])) { $ok = $false; break }
+    }
     $btn.IsEnabled = $ok
     if ($ok) {
         $btn.Opacity = 1.0
-        $hint.Text = 'Siap disimpan. Nama, NIM, tujuan, dan keterangan akan dikirim ke SQLite.'
+        $hint.Text = [string]$cfg.text.hintReady
     } else {
         $btn.Opacity = 0.45
-        $hint.Text = 'Lengkapi Nama, NIM/ID, tipe akses, tujuan, dan keterangan.'
+        $hint.Text = [string]$cfg.text.hintIncomplete
     }
 }
 @($nama,$nim,$ket) | ForEach-Object { $_.Add_TextChanged($validate) }

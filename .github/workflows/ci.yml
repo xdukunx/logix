@@ -63,6 +63,15 @@ jobs:
           python -m pip install --upgrade pip pytest
           python -m pytest tests/ -q
 
+  windows-popup:
+    name: windows popup config
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate popup config layer + generated XAML
+        shell: pwsh
+        run: .\windows\test_logbook_config.ps1
+
   installer:
     name: installer (linux, system-wide)
     runs-on: ubuntu-latest

@@ -165,6 +165,284 @@ function Invoke-WSLLogbook {
     }
 }
 
+function Get-LogbookDefaultConfig {
+    # Built-in defaults = the original FTMM faculty UI. With no config file
+    # present the popup renders exactly as before.
+    return @{
+        branding = @{
+            logoText = 'FTMM'
+            logoPath = 'C:\lab\logo.png'
+            title    = 'Report Logbook'
+            subtitle = 'Computational Workstation'
+            colors   = @{ primary = '#073763'; accent = '#741B47'; muted = '#C0C0C0'; text = '#FFFFFF' }
+        }
+        text = @{
+            intro          = 'Isi data penggunaan workstation sebelum memulai sesi.'
+            startHint      = 'Waktu mulai akan dicatat saat tombol Mulai sesi ditekan.'
+            namaLabel      = 'Nama Pengguna'
+            nimLabel       = 'NIM/NIP/NIK'
+            accessLabel    = 'Tipe Akses'
+            purposeLabel   = 'Tujuan Penggunaan'
+            ketLabel       = 'Keterangan Kegiatan'
+            submit         = 'Mulai Sesi'
+            hint           = 'Mohon isi data dengan benar dan selengkap mungkin, apabila ada error atau kesalahan, segera hubungi admin.'
+            hintIncomplete = 'Lengkapi Nama, NIM/ID, tipe akses, tujuan, dan keterangan.'
+            hintReady      = 'Siap disimpan. Nama, NIM, tujuan, dan keterangan akan dikirim ke SQLite.'
+        }
+        accessTypes    = @('Physical', 'AnyDesk')
+        purposes       = @('Visualisasi Data', 'Running Data', 'Maintenance')
+        requiredFields = @('nama', 'nim', 'access', 'purpose', 'keterangan')
+    }
+}
+
+function ConvertTo-LogbookHashtable($obj) {
+    # JSON -> hashtable/array so config merges and member access stay uniform.
+    if ($obj -is [System.Management.Automation.PSCustomObject]) {
+        $h = @{}
+        foreach ($p in $obj.PSObject.Properties) { $h[$p.Name] = ConvertTo-LogbookHashtable $p.Value }
+        return $h
+    }
+    if ($obj -is [System.Collections.IEnumerable] -and $obj -isnot [string]) {
+        return @($obj | ForEach-Object { ConvertTo-LogbookHashtable $_ })
+    }
+    return $obj
+}
+
+function Merge-LogbookConfig($base, $override) {
+    # Deep-merge $override into $base. Objects merge key-by-key; arrays/scalars replace.
+    if ($null -eq $override) { return $base }
+    foreach ($key in @($override.Keys)) {
+        if ($base.Contains($key) -and ($base[$key] -is [hashtable]) -and ($override[$key] -is [hashtable])) {
+            Merge-LogbookConfig $base[$key] $override[$key]
+        } else {
+            $base[$key] = $override[$key]
+        }
+    }
+    return $base
+}
+
+function Read-LogbookConfigFile([string]$Path) {
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        $raw = Get-Content $Path -Raw -Encoding UTF8
+        $raw = $raw -replace '^﻿', ''   # tolerate a leading BOM
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        return ConvertTo-LogbookHashtable ($raw | ConvertFrom-Json)
+    } catch {
+        Write-LogbookError "Config load failed for ${Path}: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Get-LogbookConfig {
+    # Cascading: built-in defaults <- machine config <- per-user config.
+    $cfg = Get-LogbookDefaultConfig
+    $machine = Join-Path $Global:LabDir 'logbook_config.json'
+    $perUser = Join-Path (Join-Path $env:APPDATA 'MindLabLogbook') 'logbook_config.json'
+    foreach ($path in @($machine, $perUser)) {
+        $override = Read-LogbookConfigFile $path
+        if ($override) {
+            $cfg = Merge-LogbookConfig $cfg $override
+            Write-LogbookInfo "Applied config override: $path"
+        }
+    }
+    return $cfg
+}
+
+function ConvertTo-LogbookXmlText([string]$s) {
+    if ($null -eq $s) { return '' }
+    return ($s -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;')
+}
+
+function Build-LogbookPopupXaml($cfg) {
+    # Render the popup XAML from config. Pure string building (no WPF), so it is
+    # unit-testable by parsing the result as [xml].
+    $primary = [string]$cfg.branding.colors.primary
+    $accent  = [string]$cfg.branding.colors.accent
+    $muted   = [string]$cfg.branding.colors.muted
+    $text    = [string]$cfg.branding.colors.text
+    $overlay = "#B0" + $accent.TrimStart('#')
+
+    $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
+    $title    = ConvertTo-LogbookXmlText ([string]$cfg.branding.title)
+    $subtitle = ConvertTo-LogbookXmlText ([string]$cfg.branding.subtitle)
+    $tIntro   = ConvertTo-LogbookXmlText ([string]$cfg.text.intro)
+    $tStart   = ConvertTo-LogbookXmlText ([string]$cfg.text.startHint)
+    $tNama    = ConvertTo-LogbookXmlText ([string]$cfg.text.namaLabel)
+    $tNim     = ConvertTo-LogbookXmlText ([string]$cfg.text.nimLabel)
+    $tAccess  = ConvertTo-LogbookXmlText ([string]$cfg.text.accessLabel)
+    $tPurpose = ConvertTo-LogbookXmlText ([string]$cfg.text.purposeLabel)
+    $tKet     = ConvertTo-LogbookXmlText ([string]$cfg.text.ketLabel)
+    $tSubmit  = ConvertTo-LogbookXmlText ([string]$cfg.text.submit)
+    $tHint    = ConvertTo-LogbookXmlText ([string]$cfg.text.hint)
+
+    $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
+    $purposeItems = (@($cfg.purposes)    | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
+
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
+        Topmost="True" ShowInTaskbar="False" Background="$accent"
+        FontFamily="Poppins, Montserrat, Segoe UI">
+  <Window.Resources>
+    <SolidColorBrush x:Key="PrussianBlue" Color="$primary" />
+    <SolidColorBrush x:Key="Silver" Color="$muted" />
+    <SolidColorBrush x:Key="Pompadour" Color="$accent" />
+    <SolidColorBrush x:Key="WhiteBrush" Color="$text" />
+
+    <Style x:Key="LabelTextStyle" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="$text" />
+      <Setter Property="Margin" Value="0,0,0,7" />
+    </Style>
+
+    <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
+      <Setter Property="Height" Value="44" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="FontFamily" Value="Montserrat, Poppins, Segoe UI" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="Medium" />
+      <Setter Property="BorderBrush" Value="$muted" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="$primary" />
+      <Setter Property="Foreground" Value="$text" />
+      <Setter Property="CaretBrush" Value="$text" />
+      <Setter Property="SelectionBrush" Value="$accent" />
+      <Setter Property="SelectionTextBrush" Value="$text" />
+    </Style>
+
+    <Style x:Key="ReadableComboBoxItemStyle" TargetType="ComboBoxItem">
+      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Background" Value="$text" />
+      <Setter Property="Foreground" Value="$accent" />
+      <Setter Property="Padding" Value="10,7" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="BorderBrush" Value="#E6E6E6" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+
+    <Style x:Key="ReadableComboBoxStyle" TargetType="ComboBox">
+      <Setter Property="Height" Value="44" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Background" Value="$text" />
+      <Setter Property="Foreground" Value="$accent" />
+      <Setter Property="BorderBrush" Value="$muted" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="TextElement.Foreground" Value="$accent" />
+      <Setter Property="ItemContainerStyle" Value="{StaticResource ReadableComboBoxItemStyle}" />
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Image Name="BgImage" Stretch="Fill" Opacity="0.88">
+      <Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect>
+    </Image>
+    <Rectangle Fill="$overlay" />
+
+    <Border Width="790" CornerRadius="18" BorderBrush="$muted" BorderThickness="1" Background="$primary"
+            HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True">
+      <Border.Effect><DropShadowEffect BlurRadius="32" ShadowDepth="0" Opacity="0.42" Color="$accent" /></Border.Effect>
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" CornerRadius="18,18,0,0" Padding="30,22,30,22" BorderBrush="$text" BorderThickness="0,0,0,1">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="330" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Image Grid.Column="0" Name="LogoImage" Width="260" Height="72" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center"
+                   SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" />
+            <TextBlock Grid.Column="0" Name="LogoText" Text="$logoText" FontFamily="Poppins, Montserrat, Segoe UI Semibold" FontSize="30"
+                       FontWeight="SemiBold" Foreground="$text" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
+              <TextBlock Text="$title" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="29" FontWeight="SemiBold"
+                         Foreground="$text" HorizontalAlignment="Right" />
+              <TextBlock Text="$subtitle" FontFamily="Montserrat, Poppins, Segoe UI" FontSize="14" Foreground="$muted"
+                         HorizontalAlignment="Right" Margin="0,2,0,0" />
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="1" Margin="36,28,36,34">
+          <TextBlock Text="$tIntro" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="12.5"
+                     FontWeight="SemiBold" Foreground="$text" Margin="0,0,0,7" />
+          <TextBlock Name="StartTimeText" Text="$tStart" FontFamily="Montserrat, Poppins, Segoe UI"
+                     FontSize="12" Foreground="$muted" Margin="0,0,0,18" />
+
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="18" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="$tNama" Style="{StaticResource LabelTextStyle}" />
+              <TextBox Name="NamaBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Text="$tNim" Style="{StaticResource LabelTextStyle}" />
+              <TextBox Name="NimBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
+            </StackPanel>
+          </Grid>
+
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="230" />
+              <ColumnDefinition Width="18" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <TextBlock Text="$tAccess" Style="{StaticResource LabelTextStyle}" />
+              <ComboBox Name="AccessBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
+$accessItems
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Text="$tPurpose" Style="{StaticResource LabelTextStyle}" />
+              <ComboBox Name="TujuanBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
+$purposeItems
+              </ComboBox>
+            </StackPanel>
+          </Grid>
+
+          <TextBlock Text="$tKet" Style="{StaticResource LabelTextStyle}" />
+          <TextBox Name="KetBox" Style="{StaticResource InputTextBoxStyle}" Height="122" Padding="12,10" TextWrapping="Wrap" AcceptsReturn="True"
+                   VerticalScrollBarVisibility="Auto" Margin="0,0,0,20" />
+
+          <Grid Margin="0,0,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="18" />
+              <ColumnDefinition Width="198" />
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="$primary" CornerRadius="10" Padding="12,9" BorderBrush="$muted" BorderThickness="1">
+              <TextBlock Name="HintText" Text="$tHint"
+                         FontFamily="Montserrat, Poppins, Segoe UI" FontSize="11.5" FontWeight="SemiBold" Foreground="$muted" TextWrapping="Wrap" />
+            </Border>
+            <Button Grid.Column="2" Name="SubmitBtn" Height="48" Content="$tSubmit" FontFamily="Poppins, Montserrat, Segoe UI"
+                    FontSize="21" FontWeight="Bold" Background="$accent" Foreground="$text" BorderBrush="$muted"
+                    BorderThickness="1" IsEnabled="False" Opacity="0.45" />
+          </Grid>
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
+"@
+}
+
 function Get-ActiveLogbookSession {
     try {
         if (Test-Path $Global:SessionFile) {
