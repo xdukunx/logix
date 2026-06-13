@@ -111,6 +111,28 @@ or database.
 python logbook_report.py    # writes an .xlsx into <data-dir>/reports (gitignored)
 ```
 
+## Going live with GSheet sync (optional)
+
+Mirror a **redacted, aggregated** view to a Google Sheet on an hourly schedule.
+After installing, you only supply a spreadsheet id and a service-account key —
+no code editing:
+
+```bash
+# Linux / macOS (run with no flags to be prompted instead)
+sudo python3 install/setup_sync.py --sheet-id <ID> --creds /secure/sa.json \
+     --mode initials --install-deps --check --schedule
+```
+
+It writes the config, installs the Google libs, verifies sheet access, and
+registers the hourly job (systemd / launchd / Task Scheduler). Preview what
+would leave the box anytime — no creds needed:
+
+```bash
+python <install-dir>/gsheet_sync.py --dry-run
+```
+
+Full runbook: [`docs/GOING_LIVE.md`](docs/GOING_LIVE.md).
+
 ## Customization
 
 - **Paths / DB location** — resolved by [`logix/paths.py`](logix/paths.py) in

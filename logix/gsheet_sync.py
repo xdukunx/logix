@@ -28,6 +28,7 @@ Config (via env or config.env, see logix/paths.py):
 from __future__ import annotations
 
 import hmac
+import argparse
 import sqlite3
 import sys
 from hashlib import sha256
@@ -220,21 +221,68 @@ def sync(db_path: Path, sheet_id: str, creds_path: Path, mode: str = "initials",
     return len(merged)
 
 
+def _settings() -> dict[str, str]:
+    return {
+        "sheet_id": paths.get("LOGIX_GSHEET_ID"),
+        "creds": paths.get("LOGIX_GSHEET_CREDS"),
+        "mode": paths.get("LOGIX_REDACT_MODE", "initials"),
+        "salt": paths.get("LOGIX_GSHEET_SALT", ""),
+    }
+
+
+def dry_run(db_path: Path, mode: str, salt: str) -> int:
+    """Print exactly what would be pushed. No creds, no network, no writes."""
+    export = build_export(read_rows(db_path), mode, salt)
+    print(f"DRY RUN - {len(export)} aggregated row(s) would be written "
+          f"(mode={mode}). Local DB and the sheet are untouched.\n")
+    print(f"{'date':<12}{'member':<14}{'type':<12}{'hours':>8}")
+    print("-" * 46)
+    for r in export:
+        print(f"{r['date']:<12}{r['member']:<14}{r['session_type']:<12}{r['hours']:>8}")
+    print("\nOnly the columns above leave the box - no IP, no raw NIM, no names.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    sheet_id = paths.get("LOGIX_GSHEET_ID")
-    creds = paths.get("LOGIX_GSHEET_CREDS")
-    mode = paths.get("LOGIX_REDACT_MODE", "initials")
-    salt = paths.get("LOGIX_GSHEET_SALT", "")
-    if not sheet_id or not creds:
-        print("Sync not configured: set LOGIX_GSHEET_ID and LOGIX_GSHEET_CREDS "
-              "in config.env. (DB untouched.)", file=sys.stderr)
+    p = argparse.ArgumentParser(description="Logix -> Google Sheet one-way redacted sync")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--dry-run", action="store_true",
+                   help="preview the redacted rows that WOULD be pushed; no creds/network/writes")
+    g.add_argument("--check", action="store_true",
+                   help="verify config + creds + sheet access; writes nothing")
+    ns = p.parse_args(argv)
+
+    s = _settings()
+    db = paths.default_db()
+
+    if ns.dry_run:
+        try:
+            return dry_run(db, s["mode"], s["salt"])
+        except Exception as exc:
+            print(f"Dry run failed: {exc}", file=sys.stderr)
+            return 2
+
+    if not s["sheet_id"] or not s["creds"]:
+        print("Sync not configured: set LOGIX_GSHEET_ID and LOGIX_GSHEET_CREDS in "
+              "config.env (run install/setup_sync.py). DB untouched.", file=sys.stderr)
         return 1
+
+    if ns.check:
+        try:
+            existing = GSheetClient(s["sheet_id"], Path(s["creds"])).read_existing()
+        except Exception as exc:
+            print(f"CHECK FAILED (nothing written): {exc}", file=sys.stderr)
+            return 2
+        print(f"OK: connected to sheet {s['sheet_id']} — {len(existing)} existing row(s). "
+              "Credentials and sheet sharing look good.")
+        return 0
+
     try:
-        n = sync(paths.default_db(), sheet_id, Path(creds), mode, salt)
+        n = sync(db, s["sheet_id"], Path(s["creds"]), s["mode"], s["salt"])
     except Exception as exc:
         print(f"Sync failed (local DB untouched): {exc}", file=sys.stderr)
         return 2
-    print(f"OK synced {n} aggregated rows to sheet {sheet_id} (mode={mode})")
+    print(f"OK synced {n} aggregated rows to sheet {s['sheet_id']} (mode={s['mode']})")
     return 0
 
 

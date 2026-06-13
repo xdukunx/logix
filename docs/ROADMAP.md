@@ -19,17 +19,21 @@ Living plan for what's built and what's next. Privacy rules in
   the "no IP, no raw NIM ever leaves the box" guarantee is enforced by tests
   across all three redaction modes.
 
+- **Go-live tooling (Phase 2b).** `install/setup_sync.py`: writes sync config
+  into config.env, installs the optional Google libs (`requirements-sync.txt`),
+  validates the service-account key, verifies sheet access, and registers an
+  hourly schedule (systemd timer / launchd daemon / Task Scheduler). New
+  `gsheet_sync.py --dry-run` (preview, no creds) and `--check` (verify access).
+  Operator runbook: [`GOING_LIVE.md`](GOING_LIVE.md).
+
 ## Next
 
-1. **Live Google push validation (Phase 2b).** *Blocked on credentials.*
-   Needs a Google service account (JSON key) and a shared Sheet. Then:
-   `pip install gspread google-auth`, set `LOGIX_GSHEET_ID` / `LOGIX_GSHEET_CREDS`
-   / `LOGIX_REDACT_MODE` / `LOGIX_GSHEET_SALT` in `config.env`, and verify two
-   runs produce no duplicate rows against the real sheet.
-2. **Hourly scheduling.** Wrap `gsheet_sync.main()` in a systemd timer (Linux),
-   launchd agent (macOS), or Task Scheduler job (Windows). Best-effort: a failed
-   run never touches the local DB.
-3. **Per-user popup customization.** Extend the Windows WPF popup
+1. **Live Google push validation.** *Blocked on real credentials only.* The
+   tooling is ready; an operator runs `setup_sync.py` with a real service
+   account + shared Sheet, then confirms two runs produce no duplicate rows
+   against the live sheet (the idempotency is unit-tested; this is the
+   end-to-end confirmation).
+2. **Per-user popup customization.** Extend the Windows WPF popup
    (`windows/logbook_popup.ps1`) so fields/branding can vary per system/user
    without touching the capture core. Windows-side only.
 

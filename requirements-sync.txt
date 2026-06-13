@@ -1,0 +1,5 @@
+# Optional dependencies — ONLY needed on a box that runs the GSheet sync.
+# The core (capture, reporting, redaction, dry-run) needs none of these.
+#   pip install -r requirements-sync.txt
+gspread>=6.0
+google-auth>=2.0

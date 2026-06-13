@@ -51,17 +51,17 @@ jobs:
                                capture_output=True, text=True, check=True)
           print(out.stdout.strip())
           assert out.stdout.strip().splitlines()[-1] == "1", "round-trip failed"
-          print("round-trip OK")
+          # GSheet sync preview must work with no Google deps and leak no PII.
+          dry = subprocess.run([sys.executable, "logix/gsheet_sync.py", "--dry-run"],
+                               capture_output=True, text=True, check=True)
+          assert "DRY RUN" in dry.stdout, dry.stdout
+          print("round-trip + dry-run OK")
           PY
 
-      - name: Run tests if present
+      - name: Unit tests (redaction gate, upsert, schedule artifacts)
         run: |
-          if ls tests/ test_*.py *_test.py >/dev/null 2>&1; then
-            python -m pip install --upgrade pip pytest
-            pytest -q
-          else
-            echo "No tests yet — skipping."
-          fi
+          python -m pip install --upgrade pip pytest
+          python -m pytest tests/ -q
 
   installer:
     name: installer (linux, system-wide)
@@ -80,4 +80,5 @@ jobs:
             --event START --session-type PHYSICAL --nama CI --session-id inst-1
           sudo $(which python) /opt/software/logix/logbook_sql.py \
             "select event,session_type,nama from physical_log"
+          sudo $(which python) /opt/software/logix/gsheet_sync.py --dry-run
           bash -n /opt/software/logix/logix-ssh-hook.sh && echo "generated hook is valid"

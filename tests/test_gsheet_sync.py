@@ -130,3 +130,33 @@ def test_sync_reads_db_readonly(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError):
         gs.read_rows(missing)
     assert not missing.exists()
+
+
+def test_dry_run_against_synthetic_db(tmp_path, monkeypatch, capsys):
+    """End-to-end: --dry-run on a real (synthetic) DB exits 0 and leaks no PII."""
+    db = tmp_path / "synthetic.db"
+    monkeypatch.setenv("LOGIX_DB", str(db))      # env wins in paths.default_db()
+    import log_physical as lp
+    lp.main(["--event", "START", "--session-type", "SSH", "--nama", "Budi Santoso",
+             "--nim", "20231234567", "--client-ip", "192.168.40.12", "--session-id", "s1"])
+    lp.main(["--event", "END", "--session-type", "SSH", "--session-id", "s1"])
+    rc = gs.main(["--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "DRY RUN" in out
+    assert "192.168.40.12" not in out and "20231234567" not in out
+    assert "B.S." in out  # redacted member token is present
+
+
+def test_check_and_sync_unconfigured_returns_1(tmp_path, monkeypatch):
+    """Without creds/sheet id, --check / sync refuse cleanly (DB untouched)."""
+    db = tmp_path / "synthetic.db"
+    db.write_bytes(b"")  # presence only; code must bail before reading it
+    monkeypatch.setenv("LOGIX_DB", str(db))
+    for var in ("LOGIX_GSHEET_ID", "LOGIX_GSHEET_CREDS"):
+        monkeypatch.delenv(var, raising=False)
+    # paths also consults config.env; force empty resolution via monkeypatch on get
+    monkeypatch.setattr(gs.paths, "get", lambda name, default="":
+                        {"LOGIX_REDACT_MODE": "initials"}.get(name, default))
+    assert gs.main(["--check"]) == 1
+    assert gs.main([]) == 1
