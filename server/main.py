@@ -100,6 +100,42 @@ DEVICE_COLUMNS = {
     "updated_at": "TEXT NOT NULL",
 }
 
+# Policy profiles: named bundles a device can be assigned to. Seeded with the
+# 7 profiles from docs/LOGIX_CONTROL.md §5 -- data only, nothing reads or
+# enforces allowed_capabilities yet (there's only "lock" and "broadcast" to
+# allow, so there's nothing to meaningfully differentiate profiles by).
+POLICY_COLUMNS = {
+    "policy_name": "TEXT PRIMARY KEY",
+    "description": "TEXT",
+    "allowed_capabilities": "TEXT",
+    "privacy_mode_default": "TEXT",
+    "is_system_default": "INTEGER DEFAULT 0",
+    "created_at": "TEXT NOT NULL",
+    "updated_at": "TEXT NOT NULL",
+}
+
+SYSTEM_POLICY_PROFILES = [
+    ("strict_privacy", "Maximum privacy; no sync beyond what's explicitly opted into.", "local_only"),
+    ("lab_standard", "Default for shared lab workstations.", "local_only"),
+    ("exam_mode", "Locked-down posture for exam periods.", "local_only"),
+    ("instructor_demo", "Instructor-facing devices used for demonstrations.", "local_only"),
+    ("office_device", "Single-user office workstation.", "local_only"),
+    ("loaned_laptop", "Laptop loaned out to a student/staff member.", "local_only"),
+    ("server_monitoring", "Headless server; no interactive session capture.", "local_only"),
+]
+
+# Which commands a policy profile allows, and whether a reason is required.
+# 7 policies x 2 commands (the only two that exist) = 14 rows, seeded as
+# today's actual behavior (any admin token can lock/broadcast any device, no
+# reason required) expressed as data -- nothing enforces this yet.
+COMMAND_ALLOWLIST_COLUMNS = {
+    "policy_name": "TEXT NOT NULL",
+    "command_type": "TEXT NOT NULL",
+    "allowed": "INTEGER DEFAULT 1",
+    "requires_reason": "INTEGER DEFAULT 0",
+}
+KNOWN_COMMAND_TYPES = ["LOCK", "BROADCAST"]
+
 class LogPayload(BaseModel):
     timestamp: str
     event: str
@@ -186,6 +222,33 @@ def init_control_tables():
         col_defs = ",\n        ".join(f"{k} {v}" for k, v in DEVICE_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS devices (\n        {col_defs}\n    )")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_hostname ON devices(hostname)")
+
+        policy_defs = ",\n        ".join(f"{k} {v}" for k, v in POLICY_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS device_policies (\n        {policy_defs}\n    )")
+
+        allowlist_defs = ",\n        ".join(f"{k} {v}" for k, v in COMMAND_ALLOWLIST_COLUMNS.items())
+        conn.execute(
+            f"CREATE TABLE IF NOT EXISTS command_allowlist (\n        {allowlist_defs},\n"
+            "        PRIMARY KEY (policy_name, command_type)\n    )"
+        )
+
+        now = datetime.now().isoformat()
+        for policy_name, description, privacy_mode_default in SYSTEM_POLICY_PROFILES:
+            # INSERT OR IGNORE: idempotent across restarts, never clobbers an
+            # admin's later edits to a seeded row.
+            conn.execute(
+                "INSERT OR IGNORE INTO device_policies "
+                "(policy_name, description, allowed_capabilities, privacy_mode_default, "
+                "is_system_default, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                (policy_name, description, json.dumps(["lock", "broadcast"]), privacy_mode_default, now, now),
+            )
+            for command_type in KNOWN_COMMAND_TYPES:
+                conn.execute(
+                    "INSERT OR IGNORE INTO command_allowlist "
+                    "(policy_name, command_type, allowed, requires_reason) VALUES (?, ?, 1, 0)",
+                    (policy_name, command_type),
+                )
+
         conn.commit()
     finally:
         conn.close()
