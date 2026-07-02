@@ -384,14 +384,61 @@ def log_remote_action(conn, actor_email: str, target_device: str, action_type: s
     conn.commit()
 
 
+# --- RBAC (Logix Control Milestone 3, docs/LOGIX_CONTROL.md §4) -----------
+# Permissions-only: which role can call which endpoint. Deliberately does
+# NOT restrict by faculty/lab/room scope -- no backing entity for "their
+# faculty" exists yet, and inventing one here would be unscoped work.
+
+_VALID_ROLES = {"super_admin", "faculty_admin", "lab_admin", "instructor", "viewer", "auditor"}
+
+ROLE_PERMISSIONS: Dict[str, set] = {
+    "super_admin": {"*"},
+    # Same explicit set as lab_admin, NOT a wildcard -- a wildcard here would
+    # make faculty_admin functionally equal to super_admin for as long as
+    # scope enforcement (faculty-level restriction) remains unbuilt.
+    "faculty_admin": {
+        "lock", "broadcast", "devices_read", "sessions_read", "analytics_read",
+        "audit_log_read", "reports_read", "invite_create", "devices_revoke",
+    },
+    "lab_admin": {
+        "lock", "broadcast", "devices_read", "sessions_read", "analytics_read",
+        "audit_log_read", "reports_read", "invite_create", "devices_revoke",
+    },
+    "instructor": {"lock", "broadcast"},
+    "viewer": {"devices_read", "sessions_read", "analytics_read", "audit_log_read", "reports_read"},
+    "auditor": {"audit_log_read", "reports_read"},
+}
+
+
 # Resolve Auth Configurations
+def get_admin_roles() -> Dict[str, str]:
+    """Parse ADMIN_EMAILS into email->role. Backward compatible: a bare
+    email (no ':role' suffix) defaults to super_admin, so every existing
+    deployment's flat comma list keeps working unchanged. An unknown role
+    suffix fails fast (a config typo shouldn't silently misassign a role)."""
+    raw = os.environ.get("ADMIN_EMAILS", "admin@example.org")
+    roles: Dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" in entry:
+            email, role = entry.split(":", 1)
+            email = email.strip().lower()
+            role = role.strip().lower()
+            if role not in _VALID_ROLES:
+                raise RuntimeError(f"ADMIN_EMAILS: unknown role '{role}' for {email!r}")
+        else:
+            email, role = entry.strip().lower(), "super_admin"
+        roles[email] = role
+    return roles
+
+
 def get_allowed_admins():
-    emails = os.environ.get("ADMIN_EMAILS", "admin@logix.com")
-    return [e.strip().lower() for e in emails.split(",") if e.strip()]
+    return list(get_admin_roles().keys())
 
 
-# Dependency to verify token
-def verify_token(authorization: Optional[str] = Header(None)):
+def _resolve_session(authorization: Optional[str]) -> dict:
     token = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
@@ -406,7 +453,27 @@ def verify_token(authorization: Optional[str] = Header(None)):
 
     # Slide session window
     session["expires"] = datetime.now() + timedelta(hours=8)
-    return session["email"]
+    return session
+
+
+# Dependency to verify token
+def verify_token(authorization: Optional[str] = Header(None)):
+    return _resolve_session(authorization)["email"]
+
+
+def require_permission(action: str):
+    """FastAPI dependency factory: 401 on no/invalid session, 403 if the
+    session's role isn't permitted to perform `action`. Fails closed on an
+    unrecognized role (e.g. removed from ROLE_PERMISSIONS) rather than
+    raising a KeyError."""
+    def _dependency(authorization: Optional[str] = Header(None)) -> str:
+        session = _resolve_session(authorization)
+        role = session.get("role", "")
+        permissions = ROLE_PERMISSIONS.get(role, set())
+        if "*" not in permissions and action not in permissions:
+            raise HTTPException(status_code=403, detail=f"Forbidden: role '{role}' cannot perform '{action}'")
+        return session["email"]
+    return _dependency
 
 
 # Dependency to verify the shared ingest API key sent by local agents.
@@ -466,16 +533,12 @@ def google_login():
             )
         # Developer Mock Fallback (LOGIX_DEV_MODE=1 only): auto-authenticate as first whitelist admin
         mock_token = secrets.token_hex(24)
-        mock_email = get_allowed_admins()[0]
+        admin_roles = get_admin_roles()
+        mock_email = next(iter(admin_roles))
         ACTIVE_TOKENS[mock_token] = {
             "email": mock_email,
             "expires": datetime.now() + timedelta(hours=8),
-            # Inert groundwork for the real RBAC model (Milestone 3, see
-            # docs/LOGIX_CONTROL.md §4). Every session is "admin" today --
-            # this field's shape lets that milestone change the assigned
-            # value, not the signature of every function that depends on
-            # verify_token.
-            "role": "admin",
+            "role": admin_roles[mock_email],
         }
         return RedirectResponse(url=f"/?token={mock_token}")
 
@@ -530,13 +593,13 @@ def google_callback(code: str):
         if not email:
             raise HTTPException(status_code=400, detail="Google account has no associated email address.")
             
-        allowed = get_allowed_admins()
-        if email in allowed:
+        admin_roles = get_admin_roles()
+        if email in admin_roles:
             session_token = secrets.token_hex(24)
             ACTIVE_TOKENS[session_token] = {
                 "email": email,
                 "expires": datetime.now() + timedelta(hours=8),
-                "role": "admin",  # see comment at the dev-mode mock login site
+                "role": admin_roles[email],
             }
             return RedirectResponse(url=f"/?token={session_token}")
         else:
@@ -596,7 +659,7 @@ def get_config():
 
 
 @app.put("/api/config")
-def update_config(config: Dict[str, Any], email: str = Depends(verify_token)):
+def update_config(config: Dict[str, Any], email: str = Depends(require_permission("config_write"))):
     try:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4)
@@ -659,7 +722,7 @@ def get_active_workstations(email: str = Depends(verify_token)):
 # lists every device ever seen, including stale/offline ones. See
 # docs/LOGIX_CONTROL.md §5.
 @app.get("/api/devices")
-def get_devices(email: str = Depends(verify_token)):
+def get_devices(email: str = Depends(require_permission("devices_read"))):
     conn = get_db()
     try:
         rows = conn.execute("SELECT * FROM devices ORDER BY last_seen DESC").fetchall()
@@ -677,9 +740,7 @@ def get_devices(email: str = Depends(verify_token)):
 
 
 # Device enrollment (Logix Control). See docs/LOGIX_CONTROL.md §5 and the
-# locked design in API_CONTRACT.md. NOTE: invite_create is gated by
-# verify_token for now; RBAC (require_permission) lands in a later commit
-# and will replace this with Depends(require_permission("invite_create")).
+# locked design in API_CONTRACT.md.
 class EnrollInviteRequest(BaseModel):
     category: Optional[str] = "custom"
     display_name: Optional[str] = ""
@@ -717,7 +778,7 @@ def _check_enroll_rate_limit(client_ip: str):
 
 
 @app.post("/api/enroll/invite", status_code=201)
-def create_enroll_invite(payload: EnrollInviteRequest, email: str = Depends(verify_token)):
+def create_enroll_invite(payload: EnrollInviteRequest, email: str = Depends(require_permission("invite_create"))):
     category = payload.category or "custom"
     if category not in CATEGORY_PROFILES:
         raise HTTPException(status_code=400, detail=f"Unknown category: {category}")
@@ -802,7 +863,7 @@ def redeem_enroll_invite(payload: EnrollRequest, request: Request):
 
 
 @app.post("/api/devices/{device_id}/revoke")
-def revoke_device(device_id: str, email: str = Depends(verify_token)):
+def revoke_device(device_id: str, email: str = Depends(require_permission("devices_revoke"))):
     conn = get_db()
     try:
         existing = conn.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
@@ -820,7 +881,7 @@ def revoke_device(device_id: str, email: str = Depends(verify_token)):
 
 # Control Command Endpoints (Admins post commands here)
 @app.post("/api/control/lock")
-def queue_lock_command(payload: ControlRequest, email: str = Depends(verify_token)):
+def queue_lock_command(payload: ControlRequest, email: str = Depends(require_permission("lock"))):
     host = payload.hostname
     if host not in PENDING_COMMANDS:
         PENDING_COMMANDS[host] = []
@@ -842,7 +903,7 @@ def queue_lock_command(payload: ControlRequest, email: str = Depends(verify_toke
 
 
 @app.post("/api/control/broadcast")
-def queue_broadcast_command(payload: ControlRequest, email: str = Depends(verify_token)):
+def queue_broadcast_command(payload: ControlRequest, email: str = Depends(require_permission("broadcast"))):
     host = payload.hostname
     msg = payload.param or "Perhatian: Alert dari Administrator."
 
@@ -939,7 +1000,7 @@ def get_sessions(
     offset: int = 0, 
     hostname: Optional[str] = None, 
     username: Optional[str] = None,
-    email: str = Depends(verify_token)
+    email: str = Depends(require_permission("sessions_read"))
 ):
     conn = get_db()
     try:
@@ -975,7 +1036,7 @@ def get_audit_log(
     limit: int = 100,
     offset: int = 0,
     target_device: Optional[str] = None,
-    email: str = Depends(verify_token)
+    email: str = Depends(require_permission("audit_log_read"))
 ):
     conn = get_db()
     try:
@@ -1001,7 +1062,7 @@ def get_audit_log(
 
 # Rich Analytics Endpoints
 @app.get("/api/analytics")
-def get_analytics(email: str = Depends(verify_token)):
+def get_analytics(email: str = Depends(require_permission("analytics_read"))):
     conn = get_db()
     try:
         rows = conn.execute("SELECT session_id, event, timestamp, hostname, tujuan FROM physical_log ORDER BY session_id, timestamp ASC").fetchall()
@@ -1077,7 +1138,7 @@ def download_report(
     full: bool = False,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    email: str = Depends(verify_token),
+    email: str = Depends(require_permission("reports_read")),
 ):
     # start_date/end_date map directly onto logbook_report.py's existing
     # --start/--end flags (YYYY-MM-DD, end inclusive) -- that script already
