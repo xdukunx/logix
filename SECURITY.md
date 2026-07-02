@@ -53,6 +53,34 @@ Until these are resolved, run the server **only** on a trusted host bound to
 `127.0.0.1` (or behind a reverse proxy that enforces authentication), and never
 on a public interface.
 
+## Logix Control's security implications
+
+[Logix Control](docs/LOGIX_CONTROL.md) is a planned subsystem that extends
+the server's privileged surface — device control commands today (lock,
+broadcast), and eventually screen/input access. **Every caveat above
+applies with higher stakes once that capability exists.** For example, the
+in-memory/replayable-session-token caveat is currently "an admin session
+could be replayed to lock or message a device"; once screen view/remote
+control ship, the same underlying weakness becomes "an admin session could
+be replayed to view or control a user's screen" — qualitatively worse, and
+worth stating as such now rather than leaving it implicit.
+
+**What this milestone (Milestone 2, safe parts) actually adds:** a
+persisted `devices` table and an audit log (`remote_actions`) for the two
+control commands that already existed (lock, broadcast). It introduces
+**no new attack surface** beyond what `/api/control/lock` and
+`/api/control/broadcast` already had — no new auth model, no new network
+listener, no new command types, no new dependency. The audit log can prove
+a command was *queued* by an authenticated admin; it cannot yet prove the
+device *executed* it (see [docs/LOGIX_CONTROL.md §6](docs/LOGIX_CONTROL.md#6-audit-log-as-a-first-class-citizen)
+for why, and don't read a `queued` status as `done`).
+
+**Commitment for later milestones:** RBAC hardening (Milestone 3) and
+screen/remote-control (Milestones 8-9) each require a SECURITY.md revision
+*before* they ship, not after — matching this project's existing posture
+(the Batch 2 hardening pass fixed the server's known issues before it was
+committed into the public repo, not retroactively).
+
 ## Secrets and data hygiene
 
 - Never commit `config.env`, `service_account.json`, any `*.db`, generated

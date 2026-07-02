@@ -37,6 +37,9 @@ Living plan for what's built and what's next. Privacy rules in
 
 ## Next
 
+0. **Logix Control** — a separate, larger initiative (remote lab-device
+   management). Tracked in [`AUDIT_AND_ROADMAP.md` §7](AUDIT_AND_ROADMAP.md#7-logix-control-subsystem-roadmap)
+   and [`LOGIX_CONTROL.md`](LOGIX_CONTROL.md), not duplicated here.
 1. **Live Google push validation.** *Blocked on real credentials only.* The
    tooling is ready; an operator runs `setup_sync.py` with a real service
    account + shared Sheet, then confirms two runs produce no duplicate rows

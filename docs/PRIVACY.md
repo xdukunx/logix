@@ -4,9 +4,12 @@ Logix is a **device- and session-management** tool, not a surveillance tool.
 This document states what data it collects, the privacy controls available, and
 the responsibilities of anyone who deploys it.
 
-## Design boundaries (what Logix will not do)
+## Design boundaries — session/logbook core (unconditional)
 
-Logix does **not** and will not implement:
+This section covers the logbook core (`logix/`, the sign-in popup, SSH/
+AnyDesk capture, reporting). It is absolute and does not change regardless
+of what other subsystems Logix grows. The logbook core does **not** and
+will not implement:
 
 - keylogging or keystroke capture
 - screenshots or screen recording
@@ -16,9 +19,54 @@ Logix does **not** and will not implement:
 - stealth/hidden monitoring of any kind
 
 Tracking is limited to transparent device-, session-, and asset-management
-facts. If a proposed feature falls outside that scope, it does not belong here.
+facts. If a proposed feature falls outside that scope, it does not belong
+in the logbook core.
+
+## Design boundaries — Logix Control (conditional, explicit-action only)
+
+**Logix Control** ([docs/LOGIX_CONTROL.md](LOGIX_CONTROL.md)) is a separate,
+larger-permission subsystem for institution-managed device control
+(screen view, remote control, lock, file transfer, power actions). Its own
+spec includes capabilities — screen view, remote control — that would
+contradict the unconditional list above if left unqualified. This section
+exists so that contradiction is resolved explicitly, in public, before any
+of that capability is built, rather than discovered later.
+
+**As of this document, Logix Control has shipped none of the capability
+described below.** Only a persisted device registry and an audit log for
+two pre-existing commands (lock, broadcast) exist — see
+[docs/LOGIX_CONTROL.md §7](LOGIX_CONTROL.md#7-what-is-explicitly-not-built-yet)
+for the exact, current state. The commitments below are being made *ahead*
+of that capability existing, specifically so they are reviewable before
+they matter, not written to justify something already shipped.
+
+When screen view and remote control are eventually built, they will, without
+exception:
+
+- **Never run without an explicit, individually-authorized admin action**
+  that produces an audit-logged `remote_actions` row before or as the
+  action starts — no scheduled, background, or automatic screen access.
+- **Never persist screen content to disk or the server by default.** Any
+  future retention (e.g. an explicit, policy-controlled screenshot record)
+  requires its own opt-in and a stated retention period — never silent,
+  never indefinite by default.
+- **Never run silently or hidden from the local user.** A visible
+  indicator that screen view/remote control is active is required
+  whenever it runs; this is a design requirement, not a UI nicety.
+- **Still exclude keylogging, camera/microphone access, GPS, and browser
+  history absolutely** — the conditional model above does not create a
+  carve-out for any of these. They remain in the unconditional list, full
+  stop, regardless of what Logix Control eventually adds.
+- **Never record remote-control input as key logs.** Mouse/keyboard input
+  transmitted during an authorized remote-control session is relayed for
+  that session only and is not stored as a keystroke record.
 
 ## What Logix collects
+
+This table covers the logbook core. Logix Control's device-registry fields
+(`device_id`, `category`, `location`, `policy_profile`, etc.) are
+asset-management metadata about the machine, not personal data about the
+person using it — see [docs/LOGIX_CONTROL.md §5](LOGIX_CONTROL.md#5-device-identity-and-policy-profiles).
 
 | Field | Purpose | Sensitivity |
 |---|---|---|

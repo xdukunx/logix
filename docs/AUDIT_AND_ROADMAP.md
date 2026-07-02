@@ -107,3 +107,33 @@ user notice. See `docs/PRIVACY.md`.
 - Item C changes server runtime behavior; it will be gated by `LOGIX_DEV_MODE`
   so existing local dev workflows are preserved when the flag is set.
 - No change to the capture front-ends' on-disk formats is planned.
+
+## 7. Logix Control subsystem roadmap
+
+A separate, larger initiative layered on top of items A-I above: Veyon-like
+remote lab-device management (screen view, remote control, lock, broadcast,
+file transfer, power actions, RBAC, audit log), custom-built for
+institution-managed devices. Full architecture and current status in
+[docs/LOGIX_CONTROL.md](LOGIX_CONTROL.md) — this table is the roadmap of
+record; that document explains the *why* and links back here for the *what
+stage*.
+
+**Non-negotiable ordering constraint:** screen streaming and remote control
+are not designed in code-level detail, let alone built, until
+authentication, a real permission model, an audit log, a policy model, and
+persisted device identity all exist and are hardened. Milestones 1-2 build
+exactly those foundations and nothing else.
+
+| # | Milestone | Status |
+|---|---|---|
+| 1 | Public repo/docs/architecture cleanup | in progress |
+| 2 | Device registry + heartbeat persistence | in progress — safe parts only; streaming/control explicitly deferred |
+| 3 | Command queue hardening + real RBAC + audit log maturity | not started |
+| 4 | Message / open website / approved program | not started |
+| 5 | Lock screen (branded overlay) | not started |
+| 6 | File transfer | not started |
+| 7 | Screen thumbnail monitoring | not started |
+| 8 | Remote view | not started |
+| 9 | Remote control | not started |
+| 10 | Broadcast/demo mode | not started |
+| 11 | Power actions | not started |

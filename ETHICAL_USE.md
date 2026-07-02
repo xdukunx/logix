@@ -25,10 +25,15 @@ Do not deploy Logix, or a fork of it, to:
 
 - monitor a person without their knowledge that the device is managed and
   logged
-- capture data outside its documented scope (see the "Design boundaries" in
-  [docs/PRIVACY.md](docs/PRIVACY.md) — no keylogging, no screenshots, no
-  browser history, no camera/microphone, no location tracking); if you add
-  such a feature to a fork, it is no longer in the spirit of this project
+- capture data outside its documented scope (see "Design boundaries —
+  session/logbook core" in [docs/PRIVACY.md](docs/PRIVACY.md) — no
+  keylogging, no browser history, no camera/microphone, no location
+  tracking, ever; screen view/remote control are handled separately by
+  [Logix Control](docs/LOGIX_CONTROL.md) under its own explicit-action,
+  audit-logged, never-silent boundary in the same document — that model
+  extends transparent, disclosed device management, it is not a carve-out
+  for surveillance); if you add a feature outside either boundary to a
+  fork, it is no longer in the spirit of this project
 - monitor personal, non-institution-owned devices
 - build a profile of a person's behavior beyond simple session
   attendance/duration
