@@ -50,6 +50,11 @@ addresses. By design:
 - If you deploy this, you are responsible for the data it collects. Inform
   users that sessions are logged, and follow your institution's data rules.
 
+See [docs/PRIVACY.md](docs/PRIVACY.md) for exactly what's collected and the
+available privacy/sync modes, [SECURITY.md](SECURITY.md) for the server's
+current hardening status, and [ETHICAL_USE.md](ETHICAL_USE.md) for what this
+project is — and is explicitly not — meant to be used for.
+
 ## Status
 
 Current: local capture + Excel reporting, working on all three OSes.

@@ -70,3 +70,9 @@ If you deploy Logix, **you are the data controller** for everything it records:
   or `redacted_sync` unless full sync is genuinely required and justified.
 
 Logix gives you the controls; it cannot make these decisions for you.
+
+## Ethical use
+
+Logix is MIT-licensed, so nothing here is legally enforceable — but see
+[../ETHICAL_USE.md](../ETHICAL_USE.md) for the intended scope of this tool
+and what deploying it responsibly looks like.
