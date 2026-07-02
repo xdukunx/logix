@@ -94,7 +94,7 @@ OS-specific by nature:
 > The physical-session popup is a Windows WPF app; macOS/Linux desktops would
 > each need their own native UI, so that piece is intentionally Windows-only.
 
-## Install
+## Installing on a lab device (for users)
 
 One installer, system-wide, no third-party dependencies (Python 3.8+ only):
 
@@ -112,6 +112,22 @@ core, writes a starter `config.env`, initializes the SQLite schema, and prints
 the per-OS steps to wire up capture (SSH hook on Linux/macOS; the WPF popup on
 Windows). Re-run any time to upgrade in place — it never clobbers your config
 or database.
+
+**On Windows**, once the sign-in popup + monitor scheduled task are
+installed, a small setup window opens automatically
+(`windows/logbook_setup.ps1`) asking for:
+
+| Field | Required? | Notes |
+|---|---|---|
+| **Nama Device** | Yes | How this workstation shows up on the admin dashboard — e.g. "Lab PC 3 (dekat pintu)" instead of a raw hostname like `LAB-PC-03`. Defaults to the hostname if you don't have a naming scheme yet. |
+| **URL Server Administrasi** | No | Leave blank to run fully local (`privacyMode: local_only`, nothing leaves the device — see [Privacy](#privacy--read-this-first)). Fill in if an admin has a central server running (see the admin guide below) and gave you its URL. |
+| **API Key Server** | No | Only needed if the server enforces `LOGIX_INGEST_API_KEY` (it should, outside dev mode). Get this from your admin. |
+
+Use **Uji Koneksi** to verify the server URL/key actually reach a running
+server before saving. You can re-run this setup window any time — it's
+`C:\lab\logbook_setup.ps1` after install — to rename the device or update
+server details. The device only appears on the admin dashboard once it
+starts sending heartbeats (every 30s while the monitor is running).
 
 **Report:**
 ```bash
@@ -140,16 +156,16 @@ python <install-dir>/gsheet_sync.py --dry-run
 
 Full runbook: [`docs/GOING_LIVE.md`](docs/GOING_LIVE.md).
 
-## Central admin server (optional)
+## Hosting the central server (for admins)
 
 [`server/`](server/) is a small FastAPI app for fleets of workstations: a
-live dashboard (active machines, session log search, usage analytics),
-Excel report downloads, and remote lock/broadcast commands. It's a separate,
-optional component — the core agent works standalone with zero network
-dependency (`privacyMode: local_only` by default, see
+live dashboard (active machines by device name, session log search, usage
+analytics), Excel report downloads, and remote lock/broadcast commands. It's
+a separate, optional component — the core agent works standalone with zero
+network dependency (`privacyMode: local_only` by default, see
 [docs/PRIVACY.md](docs/PRIVACY.md)).
 
-Run it:
+### Quick local run (evaluation only)
 
 ```bash
 cd server
@@ -166,17 +182,97 @@ are deliberately locked down, not deliberately open:
 | `LOGIX_DEV_MODE` | `0` (default) = production posture. `1` = local dev only: allows an unauthenticated mock admin login and permissive CORS. Never set `1` on a reachable server. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth for the admin dashboard. Required for real auth outside dev mode. |
 | `ADMIN_EMAILS` | Comma-separated allowlist of Google accounts permitted to sign in. |
-| `LOGIX_INGEST_API_KEY` | Shared secret workstations send as `X-API-Key` when pushing logs/heartbeats. Required outside dev mode. |
-| `LOGIX_ALLOWED_ORIGINS` | Comma-separated dashboard origins for CORS (used instead of a wildcard outside dev mode). |
+| `LOGIX_INGEST_API_KEY` | Shared secret workstations send as `X-API-Key` when pushing logs/heartbeats. Required outside dev mode. Generate one with `openssl rand -hex 32`. |
+| `LOGIX_ALLOWED_ORIGINS` | Comma-separated dashboard origins for CORS (used instead of a wildcard outside dev mode) — e.g. `https://logix.example.org`. |
 
 See [SECURITY.md](SECURITY.md) for the server's current hardening status.
 
-To point an agent at a running server, set on the workstation:
+### Running it for real: a Linux host with systemd + a reverse proxy
+
+The server has no built-in TLS and stores tokens/heartbeats in memory (lost
+on restart, by design — see [SECURITY.md](SECURITY.md)) — it's meant to sit
+behind a reverse proxy on a host you control, not exposed directly to the
+internet.
+
+1. **Get the code onto the server** and install dependencies into a venv:
+   ```bash
+   git clone https://github.com/xdukunx/logix.git /opt/logix
+   cd /opt/logix/server
+   python3 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
+   ```
+
+2. **Write a real `.env`** (copy `.env.example`, fill in `ADMIN_EMAILS`,
+   Google OAuth credentials, a generated `LOGIX_INGEST_API_KEY`,
+   `LOGIX_ALLOWED_ORIGINS` set to your real dashboard domain, and
+   `LOGIX_DEV_MODE=0`). Keep this file outside the repo checkout or at least
+   out of git (it already matches `.gitignore`'s `*.env` pattern) and
+   readable only by the service account below.
+
+3. **Run it as a systemd service**, not a foreground terminal, under a
+   dedicated non-root user:
+   ```ini
+   # /etc/systemd/system/logix-server.service
+   [Unit]
+   Description=Logix central admin server
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=logix
+   WorkingDirectory=/opt/logix/server
+   EnvironmentFile=/opt/logix/server/.env
+   ExecStart=/opt/logix/server/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+   Restart=on-failure
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   ```bash
+   sudo useradd --system --no-create-home logix
+   sudo chown -R logix:logix /opt/logix
+   sudo systemctl enable --now logix-server
+   ```
+   Bind to `127.0.0.1`, not `0.0.0.0` — only the reverse proxy on the same
+   host should reach it directly.
+
+4. **Put nginx (or any reverse proxy) in front with TLS.** The dashboard
+   sends session tokens and devices send API keys in headers — this must be
+   HTTPS, not plain HTTP, on anything reachable beyond localhost:
+   ```nginx
+   server {
+       listen 443 ssl;
+       server_name logix.example.org;
+       ssl_certificate     /etc/letsencrypt/live/logix.example.org/fullchain.pem;
+       ssl_certificate_key /etc/letsencrypt/live/logix.example.org/privkey.pem;
+
+       location / {
+           proxy_pass http://127.0.0.1:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       }
+   }
+   ```
+   `certbot --nginx` handles issuing/renewing the certificate. Set
+   `LOGIX_ALLOWED_ORIGINS` and `GOOGLE_REDIRECT_URI` to the same
+   `https://logix.example.org` domain.
+
+5. **Firewall**: only `443` needs to be open publicly. `8000` should stay
+   bound to localhost, unreachable from outside the host.
+
+### Pointing devices at it
+
+Once the server is reachable, give each device's setup window (see the user
+guide above) the server URL and the `LOGIX_INGEST_API_KEY` value — or set
+directly in the device's `config.env`:
 
 ```bash
 LOGIX_SERVER_URL=https://logix.example.org
 LOGIX_SERVER_API_KEY=<same value as LOGIX_INGEST_API_KEY>
 ```
+
+Devices appear on the dashboard, by whatever name was set during their
+install, as soon as their next heartbeat arrives.
 
 Per-invite-code device enrollment (so each device gets its own revocable
 key instead of sharing one) is a locked design, not yet implemented — see
