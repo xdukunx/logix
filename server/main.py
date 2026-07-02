@@ -382,7 +382,13 @@ def google_login():
         mock_email = get_allowed_admins()[0]
         ACTIVE_TOKENS[mock_token] = {
             "email": mock_email,
-            "expires": datetime.now() + timedelta(hours=8)
+            "expires": datetime.now() + timedelta(hours=8),
+            # Inert groundwork for the real RBAC model (Milestone 3, see
+            # docs/LOGIX_CONTROL.md §4). Every session is "admin" today --
+            # this field's shape lets that milestone change the assigned
+            # value, not the signature of every function that depends on
+            # verify_token.
+            "role": "admin",
         }
         return RedirectResponse(url=f"/?token={mock_token}")
 
@@ -442,7 +448,8 @@ def google_callback(code: str):
             session_token = secrets.token_hex(24)
             ACTIVE_TOKENS[session_token] = {
                 "email": email,
-                "expires": datetime.now() + timedelta(hours=8)
+                "expires": datetime.now() + timedelta(hours=8),
+                "role": "admin",  # see comment at the dev-mode mock login site
             }
             return RedirectResponse(url=f"/?token={session_token}")
         else:
