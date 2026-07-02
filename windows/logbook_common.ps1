@@ -79,6 +79,48 @@ function Test-LogbookPopupRunning {
     return $false
 }
 
+# Gate Task Manager while the sign-in popup is showing, using the standard
+# Windows policy Task Manager itself honors (shows "disabled by your
+# administrator" instead of opening) rather than fighting the process.
+# Scoped to the interactive user only (HKCU), and restores whatever value
+# was there before (so it doesn't clobber a real admin/GPO-managed setting).
+# Always call this in a try/finally around the popup's ShowDialog() so it
+# is restored on every exit path, including exceptions.
+function Set-TaskManagerDisabled {
+    param([bool]$Disabled)
+    $keyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+    $markerPath = Join-Path $Global:StateDir 'taskmgr_prev_value.txt'
+    try {
+        if ($Disabled) {
+            $prev = 'none'
+            if (Test-Path $keyPath) {
+                $existing = Get-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue
+                if ($null -ne $existing -and $null -ne $existing.DisableTaskMgr) { $prev = "$($existing.DisableTaskMgr)" }
+            }
+            New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
+            $prev | Out-File -FilePath $markerPath -Encoding UTF8 -Force
+
+            if (-not (Test-Path $keyPath)) { New-Item -Path $keyPath -Force | Out-Null }
+            New-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -PropertyType DWord -Value 1 -Force | Out-Null
+            Write-LogbookInfo "Task Manager disabled for sign-in gate."
+        } else {
+            $restoreVal = 'none'
+            if (Test-Path $markerPath) {
+                $restoreVal = (Get-Content $markerPath -Raw -ErrorAction SilentlyContinue).Trim()
+            }
+            if ([string]::IsNullOrWhiteSpace($restoreVal) -or $restoreVal -eq 'none') {
+                if (Test-Path $keyPath) { Remove-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue }
+            } else {
+                New-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -PropertyType DWord -Value ([int]$restoreVal) -Force | Out-Null
+            }
+            Remove-Item -Path $markerPath -Force -ErrorAction SilentlyContinue
+            Write-LogbookInfo "Task Manager restored to prior state."
+        }
+    } catch {
+        Write-LogbookError "Task Manager policy toggle failed: $($_.Exception.Message)"
+    }
+}
+
 function Start-LogbookTimer {
     param([string]$SessionId = '')
     try {
@@ -236,7 +278,8 @@ function Read-LogbookConfigFile([string]$Path) {
 
 function Get-LogbookConfigEnv {
     param([string]$Key)
-    if ($env:$Key) { return $env:$Key }
+    $envVal = [System.Environment]::GetEnvironmentVariable($Key)
+    if ($envVal) { return $envVal }
     $cfgPath = 'C:\ProgramData\Logix\config.env'
     if (Test-Path $cfgPath) {
         try {

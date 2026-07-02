@@ -24,6 +24,17 @@ try {
     throw
 }
 
+# If a previous popup run crashed/was force-killed before it could restore
+# Task Manager (see Set-TaskManagerDisabled in logbook_common.ps1), and no
+# other popup instance is currently showing, clear that stale lock before
+# gating it again for this run.
+try {
+    $staleMarker = Join-Path $Global:StateDir 'taskmgr_prev_value.txt'
+    if ((Test-Path $staleMarker) -and -not (Test-LogbookPopupRunning)) {
+        Set-TaskManagerDisabled -Disabled $false
+    }
+} catch {}
+
 # If there is an active session and this is not an explicit new interactive unlock, only restore timer.
 # If ForceNew is set, close stale previous session first so the report gets END/Auto Finish + duration.
 if ((Test-Path $Global:SessionFile) -and -not $TestMode) {
@@ -71,6 +82,24 @@ $xaml = Build-LogbookPopupXaml $cfg
 
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
+
+# Override WindowState to normal and span all connected screens (multi-monitor coverage)
+$window.WindowState = 'Normal'
+$window.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
+$window.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
+$window.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
+$window.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+
+$window.Add_StateChanged({
+    if ($window.WindowState -ne 'Normal') {
+        $window.WindowState = 'Normal'
+        $window.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
+        $window.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
+        $window.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
+        $window.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+    }
+})
+
 $window.Topmost = $true
 $window.Activate() | Out-Null
 
@@ -286,5 +315,14 @@ $btn.Add_Click({
     }
 })
 
-$nama.Focus() | Out-Null
-[void]$window.ShowDialog()
+# Gate Task Manager for the duration of the sign-in prompt so the process
+# can't be bypassed by killing it via Task Manager; always restored in
+# `finally`, which runs on submit, on a caught exception, and on any
+# unhandled exception that unwinds out of ShowDialog().
+try {
+    Set-TaskManagerDisabled -Disabled $true
+    $nama.Focus() | Out-Null
+    [void]$window.ShowDialog()
+} finally {
+    Set-TaskManagerDisabled -Disabled $false
+}

@@ -71,4 +71,16 @@ while ($true) {
             Send-LogbookHeartbeat -Status 'LOCKED'
         }
     } catch { Write-LogbookError "Monitor heartbeat failed: $($_.Exception.Message)" }
+
+    # Safety net: logbook_popup.ps1 gates Task Manager while it's showing and
+    # restores it in a `finally` block, but a `finally` doesn't run if the
+    # popup process is force-killed (the exact scenario this gate exists
+    # for). If that marker is still around with no popup actually running,
+    # the user would otherwise be locked out of Task Manager indefinitely.
+    try {
+        $staleMarker = Join-Path $Global:StateDir 'taskmgr_prev_value.txt'
+        if ((Test-Path $staleMarker) -and -not (Test-LogbookPopupRunning)) {
+            Set-TaskManagerDisabled -Disabled $false
+        }
+    } catch { Write-LogbookError "Task Manager watchdog failed: $($_.Exception.Message)" }
 }
