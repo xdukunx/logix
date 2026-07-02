@@ -5,6 +5,7 @@ import subprocess
 import secrets
 import urllib.request
 import urllib.parse
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pathlib import Path
@@ -75,6 +76,28 @@ BASE_COLUMNS = {
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
     "synced": "INTEGER DEFAULT 0",
+}
+
+# Logix Control: persisted device registry. See docs/LOGIX_CONTROL.md §5.
+# Not enrollment (that's /api/enroll, still unimplemented per API_CONTRACT.md)
+# -- device_id here is a server-assigned stopgap keyed on first-seen hostname.
+DEVICE_COLUMNS = {
+    "device_id": "TEXT PRIMARY KEY",
+    "hostname": "TEXT NOT NULL",
+    "display_name": "TEXT",
+    "category": "TEXT NOT NULL DEFAULT 'custom'",
+    "owner": "TEXT",
+    "location": "TEXT",
+    "tags": "TEXT",
+    "status": "TEXT NOT NULL DEFAULT 'active'",
+    "enrolled_at": "TEXT",
+    "last_seen": "TEXT",
+    "privacy_mode": "TEXT DEFAULT 'local_only'",
+    "sync_enabled": "INTEGER DEFAULT 1",
+    "capabilities": "TEXT",
+    "policy_profile": "TEXT DEFAULT 'lab_standard'",
+    "created_at": "TEXT NOT NULL",
+    "updated_at": "TEXT NOT NULL",
 }
 
 class LogPayload(BaseModel):
@@ -155,6 +178,40 @@ def init_db():
         conn.close()
 
 
+# Logix Control tables, kept separate from init_db() so this file's diff for
+# each Control milestone stays isolated and reviewable. See docs/LOGIX_CONTROL.md.
+def init_control_tables():
+    conn = get_db()
+    try:
+        col_defs = ",\n        ".join(f"{k} {v}" for k, v in DEVICE_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS devices (\n        {col_defs}\n    )")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_hostname ON devices(hostname)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Upsert-on-heartbeat: devices is the durable registry (survives restart);
+# HEARTBEATS stays the fast in-memory "online now" cache, untouched by this.
+# Uses explicit SELECT-then-INSERT/UPDATE (not ON CONFLICT DO UPDATE) to match
+# the existing idempotency idiom in logix/log_physical.py.
+def upsert_device(conn, hostname: str, display_name: str):
+    now = datetime.now().isoformat()
+    existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (hostname,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE devices SET display_name = ?, last_seen = ?, status = 'active', updated_at = ? WHERE hostname = ?",
+            (display_name, now, now, hostname),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO devices (device_id, hostname, display_name, last_seen, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), hostname, display_name, now, now, now),
+        )
+    conn.commit()
+
+
 # Resolve Auth Configurations
 def get_allowed_admins():
     emails = os.environ.get("ADMIN_EMAILS", "admin@logix.com")
@@ -196,6 +253,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
 @app.on_event("startup")
 def startup_event():
     init_db()
+    init_control_tables()
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -354,19 +412,31 @@ def update_config(config: Dict[str, Any], email: str = Depends(verify_token)):
 @app.post("/api/heartbeat")
 def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key)):
     ad_id = payload.anydesk_id or ""
+    device_name = payload.device_name or payload.hostname
     HEARTBEATS[payload.hostname] = {
         "status": payload.status.upper(),
         "username": payload.username,
         "anydesk_id": ad_id,
-        "device_name": payload.device_name or payload.hostname,
+        "device_name": device_name,
         "last_seen": datetime.now()
     }
-    
+
+    # Persist to the devices registry. Must never block the heartbeat
+    # response the agent is waiting on -- log and continue on failure.
+    try:
+        conn = get_db()
+        try:
+            upsert_device(conn, payload.hostname, device_name)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     # Retrieve pending commands for this workstation
     cmds = PENDING_COMMANDS.get(payload.hostname, [])
     if cmds:
         PENDING_COMMANDS[payload.hostname] = [] # clear queue
-        
+
     return {"status": "ok", "commands": cmds}
 
 
@@ -385,6 +455,27 @@ def get_active_workstations(email: str = Depends(verify_token)):
                 "last_seen": info["last_seen"].isoformat()
             })
     return active_pcs
+
+
+# Device registry (Logix Control, Milestone 2). Persisted, unlike /api/active
+# above which only reflects the last 5 minutes of in-memory heartbeats -- this
+# lists every device ever seen, including stale/offline ones. See
+# docs/LOGIX_CONTROL.md §5.
+@app.get("/api/devices")
+def get_devices(email: str = Depends(verify_token)):
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT * FROM devices ORDER BY last_seen DESC").fetchall()
+        now = datetime.now()
+        devices = []
+        for r in rows:
+            d = dict(r)
+            live = HEARTBEATS.get(d["hostname"])
+            d["currently_online"] = bool(live and now - live["last_seen"] < timedelta(minutes=5))
+            devices.append(d)
+        return devices
+    finally:
+        conn.close()
 
 
 # Control Command Endpoints (Admins post commands here)
