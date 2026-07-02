@@ -49,6 +49,11 @@ venv/
 # *.env, credentials, reports, and logs; these are belt-and-suspenders.
 server/central_logix.db
 server/reports/
+# Runtime-generated admin config (branding/popup/report/privacy settings).
+# Written automatically from DEFAULT_CONFIG in server/main.py on first
+# startup, then edited live via the Settings tab -- mutable runtime state,
+# not source, same category as the database above.
+server/server_config.json
 *.token
 .DS_Store
 Thumbs.db
