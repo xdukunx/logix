@@ -32,6 +32,13 @@ Ensure-LogbookDirs
 Write-Host 'MindLab Report Logbook v5.6 installer' -ForegroundColor Cyan
 Write-Host 'User:' $TaskUser
 
+# One-time grant so the sign-in popup can gate Task Manager at runtime even
+# on a standard (non-admin) account — this install step runs elevated, the
+# scheduled task it registers below does not. See
+# Grant-LogbookTaskMgrGateAccess in logbook_common.ps1 for why this is safe
+# and narrowly scoped.
+Grant-LogbookTaskMgrGateAccess
+
 # Clean the old direct Start/End tasks that caused duplicate stacks.
 foreach ($t in @('MindLab Report Logbook Start','MindLab Report Logbook End','Lab Logbook Start','Lab Logbook End')) {
     try { Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue } catch {}

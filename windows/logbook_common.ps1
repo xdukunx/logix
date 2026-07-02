@@ -79,6 +79,46 @@ function Test-LogbookPopupRunning {
     return $false
 }
 
+# Install-time-only, must run elevated. The popup/monitor run as a normal
+# (often non-admin) user at runtime, and by default that account cannot
+# write HKCU:\...\Policies\System even in its own hive (Windows locks that
+# subtree down for exactly this reason). Elevation preserves the calling
+# user's identity (HKCU still resolves to the same account, just with an
+# elevated token — see the existing HKCU:\...\Run write a few lines below
+# this function's caller), so this grants that one specific account just
+# enough rights (SetValue + ReadKey on this one key, nothing broader) to
+# toggle the sign-in gate at runtime without needing to be an admin.
+# Idempotent — safe to call on every install/reinstall.
+function Grant-LogbookTaskMgrGateAccess {
+    $keyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
+    $identity = "$env:USERDOMAIN\$env:USERNAME"
+    try {
+        if (-not (Test-Path $keyPath)) { New-Item -Path $keyPath -Force | Out-Null }
+        $acl = Get-Acl -Path $keyPath
+        $already = $acl.Access | Where-Object {
+            $_.IdentityReference.Value -eq $identity -and
+            $_.AccessControlType -eq 'Allow' -and
+            ($_.RegistryRights -band [System.Security.AccessControl.RegistryRights]::SetValue)
+        }
+        if ($already) {
+            Write-LogbookInfo "Task Manager gate: $identity already has write access."
+            return
+        }
+        $rule = New-Object System.Security.AccessControl.RegistryAccessRule(
+            $identity,
+            ([System.Security.AccessControl.RegistryRights]::SetValue -bor [System.Security.AccessControl.RegistryRights]::ReadKey),
+            [System.Security.AccessControl.InheritanceFlags]::None,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path $keyPath -AclObject $acl
+        Write-LogbookInfo "Task Manager gate: granted $identity write access."
+    } catch {
+        Write-LogbookError "Grant-LogbookTaskMgrGateAccess failed for ${identity}: $($_.Exception.Message)"
+    }
+}
+
 # Gate Task Manager while the sign-in popup is showing, using the standard
 # Windows policy Task Manager itself honors (shows "disabled by your
 # administrator" instead of opening) rather than fighting the process.
