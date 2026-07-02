@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const pcsGrid = document.getElementById("pcs-grid");
     const logsTbody = document.getElementById("logs-tbody");
+    const auditLogTbody = document.getElementById("audit-log-tbody");
     const valActivePcs = document.getElementById("val-active-pcs");
     const valTotalLogs = document.getElementById("val-total-logs");
     const pcCountBadge = document.getElementById("pc-count-badge");
@@ -128,6 +129,7 @@ document.addEventListener("DOMContentLoaded", () => {
         fetchSessionLogs();
         loadConfiguration();
         fetchAnalytics();
+        fetchAuditLog();
     };
 
     // Login is handled directly by Google OAuth redirection links
@@ -449,6 +451,55 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    // Fetch and Render Control Audit Log (Logix Control, Milestone 2).
+    // "Terkirim" (queued) is not proof the device executed the command --
+    // see docs/LOGIX_CONTROL.md §6.
+    const fetchAuditLog = async () => {
+        try {
+            const res = await fetchWithAuth("/api/audit-log?limit=20");
+            if (!res.ok) throw new Error("Gagal mengambil audit log");
+            const data = await res.json();
+
+            if (data.actions.length === 0) {
+                auditLogTbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center">Belum ada tindakan admin tercatat.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            auditLogTbody.innerHTML = data.actions.map(a => {
+                const dateStr = new Date(a.timestamp).toLocaleString("id-ID");
+                const statusBadge = a.status === "queued"
+                    ? `<span class="badge" style="border-color: rgba(16,185,129,0.3); color: var(--success-color)">Terkirim</span>`
+                    : `<span class="badge" style="border-color: rgba(239,68,68,0.3); color: var(--danger-color)">${escapeHtml(a.status)}</span>`;
+
+                return `
+                    <tr>
+                        <td>${dateStr}</td>
+                        <td>${escapeHtml(a.actor_email)}</td>
+                        <td><strong>${escapeHtml(a.target_device) || "-"}</strong></td>
+                        <td>${escapeHtml(a.action_type)}</td>
+                        <td>${statusBadge}</td>
+                        <td>${escapeHtml(a.reason) || "-"}</td>
+                        <td><small>${escapeHtml(a.result_summary) || "-"}</small></td>
+                    </tr>
+                `;
+            }).join("");
+
+        } catch (err) {
+            console.error(err);
+            auditLogTbody.innerHTML = `
+                <tr>
+                    <td colspan="7" class="text-center" style="color: var(--danger-color)">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Gagal memuat audit log dari server.
+                    </td>
+                </tr>
+            `;
+        }
+    };
+
     // Load Central Configuration
     const loadConfiguration = async () => {
         try {
@@ -610,6 +661,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(() => {
         if (getToken()) {
             fetchSessionLogs();
+            fetchAuditLog();
         }
-    }, 30000); // 30s for session logs
+    }, 30000); // 30s for session logs + audit log
 });

@@ -230,6 +230,35 @@
                     <button id="btn-next" class="btn-action"><i class="fa-solid fa-chevron-right"></i></button>
                 </div>
             </section>
+
+            <!-- Logix Control: audit log for lock/broadcast commands.
+                 "Terkirim" (queued) is not proof of device-side execution --
+                 see docs/LOGIX_CONTROL.md §6. -->
+            <section class="grid-section" id="audit-log-container">
+                <div class="section-header">
+                    <h2><i class="fa-solid fa-clipboard-list"></i> Audit Log Tindakan Admin</h2>
+                </div>
+                <div class="table-wrapper">
+                    <table class="logs-table" id="table-audit-log">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Admin</th>
+                                <th>Target</th>
+                                <th>Tindakan</th>
+                                <th>Status</th>
+                                <th>Alasan</th>
+                                <th>Ringkasan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-log-tbody">
+                            <tr>
+                                <td colspan="7" class="text-center">Memuat audit log...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </main>
         
         <footer class="app-footer">
