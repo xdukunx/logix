@@ -103,3 +103,12 @@ def default_session_json() -> Path:
         base = os.environ.get("ProgramData", r"C:\ProgramData")
         return Path(base) / "MindLabLogbook" / "session.json"
     return Path("/mnt/c/ProgramData/MindLabLogbook/session.json")
+
+
+def server_url() -> str:
+    return get("LOGIX_SERVER_URL", "")
+
+
+def server_api_key() -> str:
+    return get("LOGIX_SERVER_API_KEY", "")
+

@@ -234,9 +234,168 @@ function Read-LogbookConfigFile([string]$Path) {
     }
 }
 
+function Get-LogbookConfigEnv {
+    param([string]$Key)
+    if ($env:$Key) { return $env:$Key }
+    $cfgPath = 'C:\ProgramData\Logix\config.env'
+    if (Test-Path $cfgPath) {
+        try {
+            $lines = Get-Content $cfgPath -ErrorAction SilentlyContinue
+            if ($lines) {
+                foreach ($line in $lines) {
+                    $trimmed = $line.Trim()
+                    if (-not $trimmed -or $trimmed.StartsWith('#') -or -not $trimmed.Contains('=')) { continue }
+                    if ($trimmed.StartsWith('export ')) { $trimmed = $trimmed.Substring(7) }
+                    $parts = $trimmed.Split('=', 2)
+                    if ($parts.Count -eq 2) {
+                        $k = $parts[0].Trim()
+                        $v = $parts[1].Trim().Trim("'").Trim('"')
+                        if ($k -eq $Key) { return $v }
+                    }
+                }
+            }
+        } catch {}
+    }
+    return ''
+}
+
+function Get-AnyDeskId {
+    # Check standard per-user and system-wide AnyDesk system.conf files
+    $paths = @(
+        "$env:PROGRAMDATA\AnyDesk\system.conf",
+        "$env:APPDATA\AnyDesk\system.conf"
+    )
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            try {
+                $lines = Get-Content $path -ErrorAction SilentlyContinue
+                foreach ($line in $lines) {
+                    if ($line -match 'ad\.anydesk\.id=([0-9]+)') {
+                        return $Matches[1]
+                    }
+                }
+            } catch {}
+        }
+    }
+    # Check default install locations by calling AnyDesk --get-id
+    $anydeskPaths = @(
+        "$env:ProgramFiles\AnyDesk\AnyDesk.exe",
+        "${env:ProgramFiles(x86)}\AnyDesk\AnyDesk.exe"
+    )
+    foreach ($ap in $anydeskPaths) {
+        if (Test-Path $ap) {
+            try {
+                $id = & $ap --get-id 2>$null
+                $id = "$id".Trim()
+                if ($id -match '^[0-9]+$') { return $id }
+            } catch {}
+        }
+    }
+    return ''
+}
+
+function Send-LogbookHeartbeat {
+    param(
+        [Parameter(Mandatory=$true)][string]$Status
+    )
+    try {
+        $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+        if (-not $serverUrl) { return }
+        $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
+        
+        $username = $env:USERNAME
+        if (Test-Path $Global:SessionFile) {
+            try {
+                $s = Get-ActiveLogbookSession
+                if ($s -and $s.nama) { $username = $s.nama }
+                elseif ($s -and $s.username) { $username = $s.username }
+            } catch {}
+        }
+        
+        $anydeskId = Get-AnyDeskId
+        
+        $payload = @{
+            hostname   = $env:COMPUTERNAME
+            status     = $Status
+            username   = $username
+            anydesk_id = $anydeskId
+        }
+        
+        $headers = @{
+            'Content-Type' = 'application/json'
+        }
+        if ($serverKey) { $headers['X-API-Key'] = $serverKey }
+        $body = $payload | ConvertTo-Json
+        $apiUrl = $serverUrl.TrimEnd('/') + '/api/heartbeat'
+        
+        $res = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -Headers $headers -TimeoutSec 3 -UseBasicParsing
+        if ($res -and $res.commands) {
+            foreach ($cmd in $res.commands) {
+                $name = $cmd.command.ToUpper()
+                $param = $cmd.param
+                Write-LogbookInfo "Received remote command: $name (param: $param)"
+                
+                if ($name -eq 'LOCK') {
+                    Write-LogbookInfo "Remote LOCK trigger execution."
+                    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','LOCK') | Out-Null
+                    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+                }
+                elseif ($name -eq 'BROADCAST') {
+                    Write-LogbookInfo "Remote BROADCAST alert trigger."
+                    $safeParam = $param -replace "'", "''"
+                    $alertCmd = "[System.Reflection.Assembly]::LoadWithPartialName('PresentationFramework') | Out-Null; [System.Windows.MessageBox]::Show('$safeParam', 'Pemberitahuan Admin', 'OK', 'Warning')"
+                    Start-Process powershell.exe -WindowStyle Normal -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-Command', $alertCmd) | Out-Null
+                }
+            }
+        }
+    } catch {
+        # Fail silently
+    }
+}
+
 function Get-LogbookConfig {
     # Cascading: built-in defaults <- machine config <- per-user config.
     $cfg = Get-LogbookDefaultConfig
+    
+    # Try to fetch from central server first
+    $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+    $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
+    $serverCfg = $null
+    
+    $cachePath = Join-Path $Global:StateDir 'server_config_cache.json'
+    
+    if ($serverUrl) {
+        try {
+            $headers = @{}
+            if ($serverKey) { $headers['X-API-Key'] = $serverKey }
+            $apiUrl = $serverUrl.TrimEnd('/') + '/api/config'
+            Write-LogbookInfo "Fetching config from server: $apiUrl"
+            # 2 second timeout to not block UI startup if server is offline
+            $res = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 2 -UseBasicParsing
+            if ($res) {
+                $serverCfg = ConvertTo-LogbookHashtable $res
+                # Save to cache
+                New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
+                $res | ConvertTo-Json -Depth 5 | Out-File -FilePath $cachePath -Encoding UTF8 -Force
+                Write-LogbookInfo "Cached config from server."
+            }
+        } catch {
+            Write-LogbookError "Failed to fetch server config: $($_.Exception.Message). Falling back to cache/local."
+        }
+    }
+    
+    # If server fetch failed, try to load from local cache
+    if (-not $serverCfg -and (Test-Path $cachePath)) {
+        $serverCfg = Read-LogbookConfigFile $cachePath
+        if ($serverCfg) {
+            Write-LogbookInfo "Applied cached server config."
+        }
+    }
+    
+    if ($serverCfg) {
+        $cfg = Merge-LogbookConfig $cfg $serverCfg
+    }
+    
     $machine = Join-Path $Global:LabDir 'logbook_config.json'
     $perUser = Join-Path (Join-Path $env:APPDATA 'MindLabLogbook') 'logbook_config.json'
     foreach ($path in @($machine, $perUser)) {

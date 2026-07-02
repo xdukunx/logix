@@ -39,6 +39,7 @@ BASE_COLUMNS = {
     "client_ip": "TEXT",
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
+    "synced": "INTEGER DEFAULT 0",
 }
 
 WORKSTATION_TYPES = {"PHYSICAL", "ANYDESK"}
@@ -149,6 +150,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--json-file", default="", help="read all event fields from a UTF-8 JSON file")
     p.add_argument("--repair-active", action="store_true", help="repair currently active Windows session row from session.json")
     p.add_argument("--close-open", action="store_true", help="close all open workstation sessions using session.json or CLI fields")
+    p.add_argument("--sync-to-server", action="store_true", help="sync all unsynced local logs to central API server")
     p.add_argument("--event", default="START", help="START, END, AUTO_FINISH, SSH_LOGIN, SSH_LOGOUT, UNLOCK, LOCK")
     p.add_argument("--username", default=os.environ.get("USER") or os.environ.get("USERNAME") or getpass.getuser())
     p.add_argument("--nama", default="")
@@ -204,12 +206,25 @@ def payload_from_args(ns: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def values_from_payload(payload: dict[str, Any], cols: list[str]) -> list[Any]:
+    vals = []
+    for c in cols:
+        v = payload.get(c)
+        if v is None or v == "":
+            if BASE_COLUMNS[c].upper().startswith("INTEGER"):
+                v = 0
+            else:
+                v = ""
+        vals.append(v)
+    return vals
+
+
 def insert_event(con: sqlite3.Connection, payload: dict[str, Any]) -> int:
     cols = list(BASE_COLUMNS.keys())
     cols.remove("id")
     placeholders = ",".join("?" for _ in cols)
     sql = f"INSERT INTO physical_log ({','.join(cols)}) VALUES ({placeholders})"
-    vals = [payload.get(c, "") for c in cols]
+    vals = values_from_payload(payload, cols)
     try:
         cur = con.execute(sql, vals)
         con.commit()
@@ -227,7 +242,7 @@ def insert_event(con: sqlite3.Connection, payload: dict[str, Any]) -> int:
             payload = dict(payload)
             base = norm(payload.get("session_id"), "session")
             payload["session_id"] = f"{base}-{datetime.now().strftime('%H%M%S%f')}"
-            vals = [payload.get(c, "") for c in cols]
+            vals = values_from_payload(payload, cols)
             cur = con.execute(sql, vals)
             con.commit()
             return int(cur.lastrowid)
@@ -377,6 +392,52 @@ def repair_active_from_session(con: sqlite3.Connection, session_path: Path = DEF
     return int(changed or 0)
 
 
+import urllib.request
+import urllib.error
+
+def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10) -> int:
+    url = paths.server_url()
+    if not url:
+        return 0
+    api_key = paths.server_api_key()
+    
+    rows = con.execute("SELECT * FROM physical_log WHERE COALESCE(synced, 0) = 0 ORDER BY id ASC").fetchall()
+    if not rows:
+        return 0
+        
+    payload = []
+    for r in rows:
+        d = dict(r)
+        d.pop("id", None)
+        d.pop("synced", None)
+        if d.get("anydesk_detected") is not None:
+            d["anydesk_detected"] = int(d["anydesk_detected"])
+        payload.append(d)
+        
+    req = urllib.request.Request(
+        f"{url.rstrip('/')}/api/log",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "X-API-Key": api_key
+        },
+        method="POST"
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            if response.status in (200, 201):
+                row_ids = [r["id"] for r in rows]
+                placeholders = ",".join("?" for _ in row_ids)
+                con.execute(f"UPDATE physical_log SET synced = 1 WHERE id IN ({placeholders})", row_ids)
+                con.commit()
+                return len(row_ids)
+    except Exception as e:
+        print(f"Sync to server failed: {e}", file=sys.stderr)
+        
+    return 0
+
+
 def main(argv: list[str]) -> int:
     ns = parse_args(argv)
     db_path = Path(ns.db)
@@ -385,6 +446,10 @@ def main(argv: list[str]) -> int:
         migrate(con)
         if ns.migrate:
             print(f"OK migrated: {db_path}")
+            return 0
+        if ns.sync_to_server:
+            n = sync_unsynced_logs(con)
+            print(f"OK synced logs to server: {n}")
             return 0
         if ns.repair_active:
             n = repair_active_from_session(con)
@@ -399,6 +464,14 @@ def main(argv: list[str]) -> int:
             close_open_workstation_sessions(con, payload, "AUTO_FINISH")
         rowid = insert_event(con, payload)
         print(f"OK logged {payload['event']} id={rowid} -> {db_path}")
+        
+        # Proactively attempt inline synchronization with a short timeout
+        if paths.server_url():
+            try:
+                sync_unsynced_logs(con, timeout=3)
+            except Exception:
+                pass
+                
         return 0
     except Exception as exc:
         print(f"ERROR log_physical.py: {exc}", file=sys.stderr)

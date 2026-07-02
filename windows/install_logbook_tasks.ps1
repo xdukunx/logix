@@ -7,6 +7,25 @@ $ErrorActionPreference = 'Stop'
 
 $lab = 'C:\lab'
 New-Item -ItemType Directory -Force -Path $lab | Out-Null
+
+# Copy scripts from installer source folder to C:\lab
+$files = @(
+    'logbook_common.ps1',
+    'logbook_popup.ps1',
+    'logbook_monitor.ps1',
+    'logbook_timer.ps1',
+    'logbook_end.ps1',
+    'logbook_setup.ps1',
+    'cleanup_logbook_state.ps1',
+    'debug_logbook_detection.ps1'
+)
+foreach ($f in $files) {
+    $src = Join-Path $PSScriptRoot $f
+    if (Test-Path $src) {
+        Copy-Item -Path $src -Destination (Join-Path $lab $f) -Force
+    }
+}
+
 . 'C:\lab\logbook_common.ps1'
 Ensure-LogbookDirs
 
@@ -43,6 +62,9 @@ try {
 
 Write-Host 'OK: single monitor installed. Old duplicate Start/End tasks removed.' -ForegroundColor Green
 Get-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' | Select-Object TaskName, State
+
+Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
+Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_setup.ps1') -Wait | Out-Null
 
 if ($RunNow) {
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_monitor.ps1') | Out-Null

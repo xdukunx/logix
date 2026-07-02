@@ -52,16 +52,23 @@ try {
     Write-LogbookError "Register session switch failed: $($_.Exception.Message)"
 }
 
+try {
+    if (Test-Path $Global:SessionFile) { Send-LogbookHeartbeat -Status 'ACTIVE' } else { Send-LogbookHeartbeat -Status 'LOCKED' }
+} catch {}
+
 while ($true) {
     Start-Sleep -Seconds 30
     try {
-        # Keep timer alive if session is active; do not open new popup from heartbeat.
         if (Test-Path $Global:SessionFile) {
+            Send-LogbookHeartbeat -Status 'ACTIVE'
+            # Keep timer alive if session is active; do not open new popup from heartbeat.
             $timers = Get-ProcessByCommandPattern 'logbook_timer\.ps1'
             if (($timers | Measure-Object).Count -eq 0) {
                 $s = Get-ActiveLogbookSession
                 if ($s -and $s.session_id) { Start-LogbookTimer -SessionId $s.session_id | Out-Null }
             }
+        } else {
+            Send-LogbookHeartbeat -Status 'LOCKED'
         }
     } catch { Write-LogbookError "Monitor heartbeat failed: $($_.Exception.Message)" }
 }
