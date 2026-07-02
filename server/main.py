@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Query, Body, Cookie
+from fastapi import FastAPI, HTTPException, Header, Depends, Query, Body, Cookie, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -79,8 +79,10 @@ BASE_COLUMNS = {
 }
 
 # Logix Control: persisted device registry. See docs/LOGIX_CONTROL.md §5.
-# Not enrollment (that's /api/enroll, still unimplemented per API_CONTRACT.md)
-# -- device_id here is a server-assigned stopgap keyed on first-seen hostname.
+# device_id is still assigned as a stopgap on first-seen hostname via
+# upsert_device() for devices that never go through /api/enroll (e.g. an
+# existing deployment that hasn't adopted invite-code enrollment yet) --
+# real enrollment (below) additionally sets api_key/category/enrolled_at.
 DEVICE_COLUMNS = {
     "device_id": "TEXT PRIMARY KEY",
     "hostname": "TEXT NOT NULL",
@@ -96,8 +98,49 @@ DEVICE_COLUMNS = {
     "sync_enabled": "INTEGER DEFAULT 1",
     "capabilities": "TEXT",
     "policy_profile": "TEXT DEFAULT 'lab_standard'",
+    # Per-device ingest credential, issued at successful /api/enroll.
+    # Plaintext, matching the existing shared LOGIX_INGEST_API_KEY precedent
+    # (verify_api_key already compares that as a raw value via
+    # secrets.compare_digest -- hashing only this one column would be an
+    # inconsistent, one-off pattern). UNIQUE makes the per-device lookup in
+    # verify_api_key a single indexed row match and stops an enrollment
+    # collision from silently overwriting another device's key. NULL until
+    # enrolled, and set back to NULL on revoke -- never returned by
+    # GET /api/devices (see get_devices()).
+    "api_key": "TEXT UNIQUE",
     "created_at": "TEXT NOT NULL",
     "updated_at": "TEXT NOT NULL",
+}
+
+# Device enrollment (Logix Control). Locked design in API_CONTRACT.md:
+# single-use invite code, 15-minute TTL, DB-persisted (not an in-memory
+# dict like ACTIVE_TOKENS -- a restart must not silently invalidate codes
+# an admin already handed out without them being able to see that).
+ENROLLMENT_INVITE_COLUMNS = {
+    "invite_code": "TEXT PRIMARY KEY",
+    "category": "TEXT NOT NULL DEFAULT 'custom'",
+    "display_name": "TEXT",
+    "note": "TEXT",
+    "created_by": "TEXT NOT NULL",
+    "created_at": "TEXT NOT NULL",
+    "expires_at": "TEXT NOT NULL",
+    "used_at": "TEXT",
+    "used_by_device_id": "TEXT",
+}
+
+INVITE_TTL_MINUTES = 15
+
+# category -> agent profile defaults, per API_CONTRACT.md §4. A module-level
+# constant for now; the contract describes this as eventually server-side
+# config rather than code, matching how device_policies shipped seeded-but-
+# not-yet-editable.
+CATEGORY_PROFILES = {
+    "lab_workstation": {"heartbeat_interval_seconds": 30, "popup_frequency": "every_unlock"},
+    "office_workstation": {"heartbeat_interval_seconds": 60, "popup_frequency": "every_unlock"},
+    "loaned_laptop": {"heartbeat_interval_seconds": 300, "popup_frequency": "once_per_day"},
+    "mobile_device": {"heartbeat_interval_seconds": 300, "popup_frequency": "once_per_day"},
+    "server": {"heartbeat_interval_seconds": 300, "popup_frequency": "never"},
+    "custom": {"heartbeat_interval_seconds": 60, "popup_frequency": "every_unlock"},
 }
 
 # Policy profiles: named bundles a device can be assigned to. Seeded with the
@@ -259,6 +302,17 @@ def init_control_tables():
         conn.execute(f"CREATE TABLE IF NOT EXISTS devices (\n        {col_defs}\n    )")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_hostname ON devices(hostname)")
 
+        # Additive migration: a devices table created before enrollment
+        # shipped won't have api_key yet. Matches the ALTER TABLE ADD COLUMN
+        # idiom already used in logix/log_physical.py's migrate().
+        existing_device_cols = {row["name"] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
+        if "api_key" not in existing_device_cols:
+            conn.execute("ALTER TABLE devices ADD COLUMN api_key TEXT")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key)")
+
+        invite_defs = ",\n        ".join(f"{k} {v}" for k, v in ENROLLMENT_INVITE_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS enrollment_invites (\n        {invite_defs}\n    )")
+
         policy_defs = ",\n        ".join(f"{k} {v}" for k, v in POLICY_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS device_policies (\n        {policy_defs}\n    )")
 
@@ -359,6 +413,24 @@ def verify_token(authorization: Optional[str] = Header(None)):
 # Unset LOGIX_INGEST_API_KEY only ever happens in dev mode; production
 # deployments must configure it, otherwise ingest is rejected outright.
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    # A per-device key issued by /api/enroll takes priority over the shared
+    # bootstrap key. Guard empty/missing header BEFORE the DB lookup -- a
+    # NULL api_key column (unenrolled or revoked device) must never match
+    # an empty/missing X-API-Key.
+    if x_api_key:
+        conn = get_db()
+        try:
+            # Single indexed lookup via the UNIQUE constraint/index on
+            # devices.api_key -- not a table scan. Plaintext exact match,
+            # matching the shared key's own secrets.compare_digest precedent
+            # (not constant-time against the DB, an accepted tradeoff at
+            # this project's scale -- self-hosted, low hundreds of devices).
+            row = conn.execute("SELECT device_id FROM devices WHERE api_key = ?", (x_api_key,)).fetchone()
+            if row:
+                return
+        finally:
+            conn.close()
+
     expected = os.environ.get("LOGIX_INGEST_API_KEY", "")
     if not expected:
         if LOGIX_DEV_MODE:
@@ -595,12 +667,155 @@ def get_devices(email: str = Depends(verify_token)):
         devices = []
         for r in rows:
             d = dict(r)
+            d.pop("api_key", None)  # never expose the ingest credential, even to admins
             live = HEARTBEATS.get(d["hostname"])
             d["currently_online"] = bool(live and now - live["last_seen"] < timedelta(minutes=5))
             devices.append(d)
         return devices
     finally:
         conn.close()
+
+
+# Device enrollment (Logix Control). See docs/LOGIX_CONTROL.md §5 and the
+# locked design in API_CONTRACT.md. NOTE: invite_create is gated by
+# verify_token for now; RBAC (require_permission) lands in a later commit
+# and will replace this with Depends(require_permission("invite_create")).
+class EnrollInviteRequest(BaseModel):
+    category: Optional[str] = "custom"
+    display_name: Optional[str] = ""
+    note: Optional[str] = ""
+
+
+class EnrollRequest(BaseModel):
+    invite_code: str
+    hostname: str
+    os: Optional[str] = ""
+    os_version: Optional[str] = ""
+    agent_version: Optional[str] = ""
+
+
+# Naive in-memory sliding-window rate limit for POST /api/enroll, keyed by
+# source IP. This endpoint has no auth (the device has no key yet), so it's
+# the one ingest-adjacent surface that needs its own abuse guard. In-memory
+# is an accepted tradeoff HERE specifically (unlike the invite codes
+# themselves, which must survive a restart) -- a restart just resets the
+# attempt counter, no invite/device data is lost.
+_ENROLL_ATTEMPTS: Dict[str, List[datetime]] = {}
+ENROLL_RATE_LIMIT_MAX_ATTEMPTS = 10
+ENROLL_RATE_LIMIT_WINDOW_MINUTES = 5
+
+
+def _check_enroll_rate_limit(client_ip: str):
+    now = datetime.now()
+    window_start = now - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
+    attempts = [t for t in _ENROLL_ATTEMPTS.get(client_ip, []) if t > window_start]
+    if len(attempts) >= ENROLL_RATE_LIMIT_MAX_ATTEMPTS:
+        _ENROLL_ATTEMPTS[client_ip] = attempts
+        raise HTTPException(status_code=429, detail="Too many enrollment attempts, try again later")
+    attempts.append(now)
+    _ENROLL_ATTEMPTS[client_ip] = attempts
+
+
+@app.post("/api/enroll/invite", status_code=201)
+def create_enroll_invite(payload: EnrollInviteRequest, email: str = Depends(verify_token)):
+    category = payload.category or "custom"
+    if category not in CATEGORY_PROFILES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {category}")
+
+    # High-entropy, grouped for readability -- not a short PIN (the contract
+    # explicitly rules that out since this endpoint has no other auth).
+    invite_code = "-".join(secrets.token_hex(2).upper() for _ in range(4))
+    now = datetime.now()
+    expires_at = now + timedelta(minutes=INVITE_TTL_MINUTES)
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO enrollment_invites "
+            "(invite_code, category, display_name, note, created_by, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (invite_code, category, payload.display_name, payload.note, email,
+             now.isoformat(), expires_at.isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"invite_code": invite_code, "expires_at": expires_at.isoformat(), "category": category}
+
+
+@app.post("/api/enroll")
+def redeem_enroll_invite(payload: EnrollRequest, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    _check_enroll_rate_limit(client_ip)
+
+    conn = get_db()
+    try:
+        invite = conn.execute(
+            "SELECT * FROM enrollment_invites WHERE invite_code = ?", (payload.invite_code,)
+        ).fetchone()
+        if not invite:
+            raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
+        if invite["used_at"]:
+            raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
+        if datetime.now() > datetime.fromisoformat(invite["expires_at"]):
+            raise HTTPException(status_code=410, detail="Invite code expired")
+
+        category = invite["category"] or "custom"
+        device_id = str(uuid.uuid4())
+        api_key = secrets.token_hex(32)
+        now = datetime.now().isoformat()
+
+        existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (payload.hostname,)).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE devices SET api_key = ?, category = ?, enrolled_at = ?, "
+                "display_name = COALESCE(NULLIF(?, ''), display_name), status = 'active', updated_at = ? "
+                "WHERE hostname = ?",
+                (api_key, category, now, invite["display_name"], now, payload.hostname),
+            )
+            device_id = existing["device_id"]
+        else:
+            conn.execute(
+                "INSERT INTO devices (device_id, hostname, display_name, category, api_key, "
+                "enrolled_at, last_seen, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (device_id, payload.hostname, invite["display_name"] or payload.hostname, category,
+                 api_key, now, now, now, now),
+            )
+
+        conn.execute(
+            "UPDATE enrollment_invites SET used_at = ?, used_by_device_id = ? WHERE invite_code = ?",
+            (now, device_id, payload.invite_code),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    profile = CATEGORY_PROFILES.get(category, CATEGORY_PROFILES["custom"])
+    return {
+        "device_id": device_id,
+        "api_key": api_key,
+        "category": category,
+        "profile": profile,
+        "server_time": datetime.now().isoformat(),
+    }
+
+
+@app.post("/api/devices/{device_id}/revoke")
+def revoke_device(device_id: str, email: str = Depends(verify_token)):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Device not found")
+        conn.execute(
+            "UPDATE devices SET api_key = NULL, updated_at = ? WHERE device_id = ?",
+            (datetime.now().isoformat(), device_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "success", "detail": f"Revoked API key for device {device_id}"}
 
 
 # Control Command Endpoints (Admins post commands here)
