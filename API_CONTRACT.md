@@ -1,10 +1,14 @@
 # Logix — device enrollment API contract
 
-Status: **locked design, not yet implemented** (roadmap item E in
-[docs/AUDIT_AND_ROADMAP.md](docs/AUDIT_AND_ROADMAP.md)). This document is the
-contract the server and the installer/agent both build against, so the two
-can be implemented in parallel without rework. Terminology matches the repo,
-not an earlier planning draft: devices are assigned a `category` (see
+Status: **implemented** (roadmap item E in
+[docs/AUDIT_AND_ROADMAP.md](docs/AUDIT_AND_ROADMAP.md)) — `POST
+/api/enroll/invite`, `POST /api/enroll`, `POST
+/api/devices/{device_id}/revoke`, and the agent-side `device.json` identity
+file described below all exist in `server/main.py` / `logix/paths.py` /
+`windows/logbook_setup.ps1`, covered by `tests/test_server_enroll.py`. This
+document remains the contract reference for the exact shapes and error
+codes. Terminology matches the repo, not an earlier planning draft: devices
+are assigned a `category` (see
 [docs/config.schema.json](docs/config.schema.json)), not a "device_profile."
 
 ## Design decisions this contract encodes

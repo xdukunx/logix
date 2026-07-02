@@ -60,10 +60,9 @@ The full staged milestone list lives in `docs/AUDIT_AND_ROADMAP.md` §7 —
 this document does not duplicate it, only points at it, so there is one
 source of truth for "what stage are we at."
 
-## 4. Roles and permission model (target state — not yet implemented)
+## 4. Roles and permission model (Milestone 3 — implemented)
 
-The eventual model has six roles, each with a narrow, named set of
-permitted actions:
+Six roles, each with a narrow, named set of permitted actions:
 
 | Role | Intent |
 |---|---|
@@ -74,26 +73,32 @@ permitted actions:
 | Viewer | Read-only: device status, session history, audit log |
 | Auditor | Read-only, audit log and compliance reporting only, no device state |
 
-**None of this is implemented.** Today there is exactly one tier: any
-email in `ADMIN_EMAILS` can perform every admin action, gated only by
-`verify_token`. This milestone adds a single inert `role: "admin"` field to
-every session (§6) — a no-op today, purely so the real model above can be
-introduced later by changing what value gets assigned, not by changing the
-shape of every function that currently depends on `verify_token`. Building
-the six-role model itself is Milestone 3, deliberately not this one:
-there's nothing to differentiate roles by until Control has more than two
-commands.
+`server/main.py`'s `ROLE_PERMISSIONS` maps each role to a set of
+permission strings, and `require_permission(action)` gates every endpoint
+that has a real permission boundary. `ADMIN_EMAILS` accepts `email:role`
+pairs (`admin@x.org:lab_admin`); a bare email with no `:role` suffix
+defaults to `super_admin`, so existing deployments keep working unchanged.
+
+**Explicit, deliberate limitation:** this is permissions-only. There is no
+faculty/lab/room *scope* restriction — a `faculty_admin` and a
+`super_admin` differ in which actions they can take, not in which devices
+they can take them on, because no backing entity for "their faculty" or
+"assigned labs" exists yet. See `tests/test_server_rbac.py` for the
+permission matrix this implements.
 
 ## 5. Device identity and policy profiles
 
 Three axes describe a device in Control:
 
-- **`device_id`** — the durable identity. In this milestone, server-
-  generated on first-seen `hostname` (a stopgap — see the limitation note
-  below). The real mechanism is invite-code enrollment
-  (`/api/enroll`, spec'd in `API_CONTRACT.md`, not yet implemented), which
-  will have the agent generate and persist its own local `device.json`
-  identity instead of relying on the server to infer one from a hostname.
+- **`device_id`** — the durable identity. Invite-code enrollment
+  (`POST /api/enroll/invite` + `POST /api/enroll`, spec'd in
+  `API_CONTRACT.md`) is now implemented: the server generates `device_id`
+  and a per-device API key on redemption, and the agent persists both
+  locally in `device.json` (`logix/paths.py`) rather than the server
+  inferring identity from `hostname`. A device that hasn't enrolled yet
+  still upserts by `hostname` on heartbeat as a fallback (see the
+  limitation note below) — enrollment is optional, not required, for a
+  device to appear on the dashboard.
 - **`category`** — `lab_workstation | office_workstation | loaned_laptop |
   mobile_device | server | custom` (locked in `docs/AUDIT_AND_ROADMAP.md`
   §4, unchanged here — never call this `device_profile`).
@@ -106,13 +111,13 @@ Three axes describe a device in Control:
   against anything; it exists so later milestones edit existing rows
   instead of designing the table from scratch.
 
-**Known, accepted limitation:** this milestone uses `hostname` as the
-`devices` upsert key. A reimaged or renamed device will appear as a new
-row rather than updating its old one. This is the exact reason
-`AUDIT_AND_ROADMAP.md` §4 specifies `device_id` as the durable identity
-long-term — it's accepted here as a documented, temporary simplification,
-not a silent gap, and will be resolved when real enrollment
-(agent-assigned, agent-persisted `device_id`) lands.
+**Known, accepted limitation:** an *unenrolled* device still upserts by
+`hostname` (the pre-enrollment fallback path). A reimaged or renamed
+unenrolled device will appear as a new row rather than updating its old
+one. Enrolling a device (redeeming an invite code) resolves this for that
+device, since its `device_id` then persists in `device.json` independent
+of hostname. Unenrolled operation remains supported for backward
+compatibility and low-friction first-run use.
 
 ## 6. Audit log as a first-class citizen
 
@@ -150,11 +155,9 @@ the codebase as of this milestone:
 - Run-approved-program / open-approved-website execution
 - Any enforcement of `device_policies` or `command_allowlist` — both exist
   as seeded data only
-- Real role-based access control — one inert field, no enforcement
-- `/api/enroll` (invite-code device enrollment) — still the locked design
-  in `API_CONTRACT.md`, unimplemented
-- Any agent-side (PowerShell) changes — this milestone is entirely
-  server-side
+- Faculty/lab/room *scope* restriction within RBAC (§4) — roles gate
+  which actions, not which devices; no backing entity for "their faculty"
+  exists yet
 
 ## 8. Relationship to PRIVACY.md and ETHICAL_USE.md
 

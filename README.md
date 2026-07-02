@@ -25,6 +25,32 @@ to your environment.
 
 ---
 
+## Quick start
+
+**On a lab workstation** (records sessions locally; no server required):
+
+```bash
+git clone https://github.com/xdukunx/logix.git
+cd logix
+
+# Linux / macOS
+sudo ./install/install.sh
+
+# Windows (elevated PowerShell)
+.\install\install.ps1
+```
+
+That's it for local-only use. Full details, including the Windows sign-in
+popup setup wizard, are in [Installing on a lab device](#installing-on-a-lab-device-for-users).
+
+**Running a central admin server** (to see all your lab's workstations on one
+dashboard): see [Hosting the central server](#hosting-the-central-server-for-admins) —
+it's a `pip install` and one `python -m uvicorn` away for a quick local trial,
+with a full production walkthrough (systemd, HTTPS, Google OAuth) for the
+real thing.
+
+---
+
 ## How it works
 
 ```
@@ -130,6 +156,7 @@ installed, a small setup window opens automatically
 | **Nama Device** | Yes | How this workstation shows up on the admin dashboard — e.g. "Lab PC 3 (dekat pintu)" instead of a raw hostname like `LAB-PC-03`. Defaults to the hostname if you don't have a naming scheme yet. |
 | **URL Server Administrasi** | No | Leave blank to run fully local (`privacyMode: local_only`, nothing leaves the device — see [Privacy](#privacy--read-this-first)). Fill in if an admin has a central server running (see the admin guide below) and gave you its URL. |
 | **API Key Server** | No | Only needed if the server enforces `LOGIX_INGEST_API_KEY` (it should, outside dev mode). Get this from your admin. |
+| **Kode Enrollment** | No | An admin-issued invite code (`POST /api/enroll/invite`, 15-minute TTL — see [`API_CONTRACT.md`](API_CONTRACT.md)). If filled, this device redeems it for its own per-device API key on save, replacing the shared key above. Recommended over a shared key for any real deployment. |
 
 Use **Uji Koneksi** to verify the server URL/key actually reach a running
 server before saving. You can re-run this setup window any time — it's
