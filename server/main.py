@@ -213,7 +213,22 @@ DEFAULT_CONFIG = {
     },
     "accessTypes": ["Physical", "AnyDesk"],
     "purposes": ["Visualisasi Data", "Running Data", "Maintenance"],
-    "requiredFields": ["nama", "nim", "access", "purpose", "keterangan"]
+    "requiredFields": ["nama", "nim", "access", "purpose", "keterangan"],
+    "devices": {
+        "device_types": ["Laptop", "PC", "Lab Workstation", "Office Workstation", "Loaned Laptop", "Server"],
+        "naming_pattern": "{type} - {room} - {number}"
+    },
+    "reports": {
+        "default_scope": "today",
+        "include_branding": True,
+        "include_purpose_summary": True,
+        "include_device_summary": True
+    },
+    "privacy": {
+        "notice": "This system records session information only.",
+        "collected": ["device name", "session start and end", "selected purpose", "workstation status"],
+        "not_collected": ["keystrokes", "screenshots", "browser history", "private files"]
+    }
 }
 
 
@@ -842,7 +857,24 @@ def get_analytics(email: str = Depends(verify_token)):
 
 # Report Generation Endpoint
 @app.get("/api/reports")
-def download_report(today: bool = False, full: bool = False, email: str = Depends(verify_token)):
+def download_report(
+    today: bool = False,
+    full: bool = False,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    email: str = Depends(verify_token),
+):
+    # start_date/end_date map directly onto logbook_report.py's existing
+    # --start/--end flags (YYYY-MM-DD, end inclusive) -- that script already
+    # validates and parses them; this endpoint just passes them through.
+    if start_date or end_date:
+        for label, value in (("start_date", start_date), ("end_date", end_date)):
+            if value:
+                try:
+                    datetime.strptime(value, "%Y-%m-%d")
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"Invalid {label}, expected YYYY-MM-DD")
+
     out_file = REPORTS_DIR / f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
     cmd = [
         "python",
@@ -850,11 +882,16 @@ def download_report(today: bool = False, full: bool = False, email: str = Depend
         "--db", str(DB_PATH),
         "--out", str(out_file)
     ]
-    if today:
+    if start_date or end_date:
+        if start_date:
+            cmd.extend(["--start", start_date])
+        if end_date:
+            cmd.extend(["--end", end_date])
+    elif today:
         cmd.append("--today")
     elif full:
         cmd.append("--full")
-        
+
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         if out_file.exists():

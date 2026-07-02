@@ -37,6 +37,12 @@ def _load_main(monkeypatch, tmp_path, *, dev_mode="0", ingest_key="",
     return module
 
 
+def _login(client):
+    res = client.get("/api/auth/google/login", follow_redirects=False)
+    token = res.headers["location"].split("token=")[1]
+    return {"Authorization": f"Bearer {token}"}
+
+
 # --- Fix #1: auth-bypass gate ------------------------------------------------
 
 def test_google_login_mock_blocked_outside_dev_mode(monkeypatch, tmp_path):
@@ -148,3 +154,20 @@ def test_report_script_path_exists_on_disk(monkeypatch, tmp_path):
     module = _load_main(monkeypatch, tmp_path)
     script = module.BASE_DIR.parent / "logix" / "logbook_report.py"
     assert script.exists(), f"expected report script at {script}"
+
+
+# --- Report date-range params (dashboard redesign) --------------------------
+
+def test_reports_rejects_malformed_date(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="1")
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        res = client.get("/api/reports", params={"start_date": "not-a-date"}, headers=headers)
+    assert res.status_code == 400
+
+
+def test_reports_requires_auth(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        res = client.get("/api/reports")
+    assert res.status_code == 401
