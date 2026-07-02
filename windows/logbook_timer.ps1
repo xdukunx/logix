@@ -20,44 +20,61 @@ if (-not (Test-Path $Global:SessionFile)) { exit 0 }
 $session = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
 if ($SessionId -and $session.session_id -ne $SessionId) { exit 0 }
 $start = [datetime]$session.start_time
+$cfg = Get-LogbookConfig
+$deviceName = Get-LogbookDeviceDisplayName
 
-$xaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="286" Height="92" WindowStyle="None" ResizeMode="NoResize"
-        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
-  <Border CornerRadius="18" BorderBrush="#C0C0C0" BorderThickness="1" Padding="14,10">
-    <Border.Background>
-      <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#073763" Offset="0" />
-        <GradientStop Color="#741B47" Offset="1" />
-      </LinearGradientBrush>
-    </Border.Background>
-    <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="0" Opacity="0.42" Color="#741B47" /></Border.Effect>
-    <Grid>
-      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-      <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <TextBlock Name="Pulse" Text="●" FontFamily="Segoe UI" FontSize="12" Foreground="#C0C0C0" Margin="0,1,7,0" />
-        <TextBlock Name="Label" Grid.Column="1" Text="Physical | User" FontFamily="Segoe UI Semibold" FontSize="12" Foreground="#FFFFFF" />
-      </Grid>
-      <TextBlock Name="Clock" Grid.Row="1" Text="00:00:00" FontFamily="Consolas" FontSize="32" Foreground="#FFFFFF" Margin="0,2,0,0" />
-    </Grid>
-  </Border>
-</Window>
-"@
+$xaml = Build-LogbookTimerXaml -cfg $cfg -session $session -deviceName $deviceName
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
-$clock = $window.FindName('Clock')
-$label = $window.FindName('Label')
+$clockMain = $window.FindName('ClockMain')
+$clockSeconds = $window.FindName('ClockSeconds')
 $pulse = $window.FindName('Pulse')
-$label.Text = "$($session.session_type) | $($session.nama)"
+$messageStrip = $window.FindName('MessageStrip')
+$messageText = $window.FindName('MessageText')
 
 $script:allowClose = $false
 $script:tick = 0
+$script:messageHideAtTick = -1
 $window.Add_Closing({ param($s,$e) if (-not $script:allowClose) { $e.Cancel = $true } })
 $window.Add_KeyDown({ param($s,$e) if ($e.Key -eq 'Escape' -or $e.SystemKey -eq 'F4') { $e.Handled = $true } })
 $window.Add_MouseLeftButtonDown({ try { $window.DragMove() } catch {} })
+
+$msgPath = Join-Path $Global:StateDir 'incoming_message.json'
+
+# Reason -> accent color for the message strip's left border. Emergency
+# always reads as urgent red regardless of the faculty's chosen brand
+# accent; anything else (Direction Message and future reasons) uses the
+# configured accent color instead.
+function Get-LogbookMessageBorderColor([string]$Reason, $Cfg) {
+    if ($Reason -eq 'Emergency Alert') { return '#EF4444' }
+    return [string]$Cfg.branding.colors.accent
+}
+
+# Show a message that arrived just before this window existed (e.g. sent a
+# moment before the timer finished launching) instead of silently dropping
+# it -- only within a short grace window, so a stale leftover file from a
+# crashed prior session doesn't resurface hours later.
+function Show-LogbookPendingMessage {
+    if (-not (Test-Path $msgPath)) { return }
+    try {
+        $msg = Get-Content $msgPath -Raw | ConvertFrom-Json
+        $receivedAt = [datetime]$msg.received_at
+        if (((Get-Date) - $receivedAt).TotalMinutes -gt 5) {
+            Remove-Item $msgPath -Force -ErrorAction SilentlyContinue
+            return
+        }
+        $messageText.Text = [string]$msg.text
+        $messageStrip.BorderBrush = New-Object System.Windows.Media.SolidColorBrush(
+            [System.Windows.Media.ColorConverter]::ConvertFromString((Get-LogbookMessageBorderColor $msg.reason $cfg))
+        )
+        $messageStrip.Visibility = 'Visible'
+        $script:messageHideAtTick = $script:tick + 20
+    } catch {
+        Write-LogbookError "Timer: failed to show pending message: $($_.Exception.Message)"
+    } finally {
+        Remove-Item $msgPath -Force -ErrorAction SilentlyContinue
+    }
+}
 
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromSeconds(1)
@@ -77,10 +94,24 @@ $timer.Add_Tick({
             return
         }
     } catch {}
+
     $elapsed = (Get-Date) - $start
-    $clock.Text = ('{0:00}:{1:00}:{2:00}' -f [math]::Floor($elapsed.TotalHours), $elapsed.Minutes, $elapsed.Seconds)
+    $clockMain.Text = ('{0:00}:{1:00}' -f [math]::Floor($elapsed.TotalHours), $elapsed.Minutes)
+    $clockSeconds.Text = ('{0:00}' -f $elapsed.Seconds)
     $script:tick += 1
-    if (($script:tick % 2) -eq 0) { $pulse.Text = '●' } else { $pulse.Text = '○' }
+    if (($script:tick % 2) -eq 0) { $pulse.Text = [char]0x25CF } else { $pulse.Text = [char]0x25CB }
+
+    Show-LogbookPendingMessage
+
+    if ($script:messageHideAtTick -ge 0 -and $script:tick -ge $script:messageHideAtTick) {
+        $messageStrip.Visibility = 'Collapsed'
+        $script:messageHideAtTick = -1
+    }
 })
+
+# A message sent just before this process finished launching would
+# otherwise be missed until the first tick a second later -- check once
+# immediately too.
+Show-LogbookPendingMessage
 $timer.Start()
 [void]$window.ShowDialog()

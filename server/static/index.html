@@ -80,21 +80,13 @@
 
                 <section class="grid-section message-card" id="message-broadcast-card">
                     <div class="section-header">
-                        <h2><i class="fa-solid fa-comment-dots"></i> Message Active Devices</h2>
+                        <h2><i class="fa-solid fa-triangle-exclamation"></i> Emergency Alert</h2>
                         <span class="badge" id="pc-count-badge">0 Aktif</span>
                     </div>
-                    <div class="message-type-row">
-                        <button type="button" class="message-type-btn active" data-type="direction" id="message-type-direction">
-                            <i class="fa-solid fa-message"></i> Direction Message
-                        </button>
-                        <button type="button" class="message-type-btn" data-type="emergency" id="message-type-emergency">
-                            <i class="fa-solid fa-triangle-exclamation"></i> Emergency Alert
-                        </button>
-                    </div>
-                    <textarea id="message-textarea" placeholder="Write a message or direction for active workstations..."></textarea>
+                    <textarea id="message-textarea" placeholder="Write an emergency alert for all active workstations..."></textarea>
                     <div class="message-card-footer">
-                        <span class="message-helper" id="message-helper-text">Everything active is the target — no device selection needed.</span>
-                        <button id="btn-send-message" class="btn-action btn-primary"><i class="fa-solid fa-paper-plane"></i> Send to Active Devices</button>
+                        <span class="message-helper" id="message-helper-text">Sent to every active device — no individual selection needed. For a single device, right-click its card instead.</span>
+                        <button id="btn-send-message" class="btn-action btn-danger"><i class="fa-solid fa-triangle-exclamation"></i> Send Emergency Alert to All</button>
                     </div>
                 </section>
 

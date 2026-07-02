@@ -977,7 +977,7 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
         for h in HEARTBEATS.keys():
             if h not in PENDING_COMMANDS:
                 PENDING_COMMANDS[h] = []
-            PENDING_COMMANDS[h].append({"command": "BROADCAST", "param": msg})
+            PENDING_COMMANDS[h].append({"command": "BROADCAST", "param": msg, "reason": payload.reason or "Direction Message"})
         detail = "Broadcast queued for all hosts"
         # One audit row for this one admin action, not one per fanned-out
         # host -- an admin took a single action; that's what the log reflects.
@@ -994,7 +994,7 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
 
     if host not in PENDING_COMMANDS:
         PENDING_COMMANDS[host] = []
-    PENDING_COMMANDS[host].append({"command": "BROADCAST", "param": msg})
+    PENDING_COMMANDS[host].append({"command": "BROADCAST", "param": msg, "reason": payload.reason or "Direction Message"})
     detail = f"Broadcast queued for {host}"
     try:
         conn = get_db()

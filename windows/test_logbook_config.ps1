@@ -44,5 +44,23 @@ try {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 }
 
+Write-Host "session timer -> XAML"
+$session = [pscustomobject]@{ session_type = 'Physical'; nama = 'Nama & "Contoh"'; tujuan = 'Running Data' }
+$timerXaml = Build-LogbookTimerXaml -cfg $cfg -session $session -deviceName 'LAB-PC-01 <Test>'
+$timerDoc = [xml]$timerXaml
+Assert ($timerDoc.Window.Width -eq '340') "timer window width 340"
+$namaValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'NamaValue' }).Text
+Assert ($namaValue -eq 'Nama & "Contoh"') "nama with ampersand/quote escaped and round-trips"
+$deviceValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'DeviceValue' }).Text
+Assert ($deviceValue -eq 'LAB-PC-01 <Test>') "device name with angle bracket escaped and round-trips"
+$clockMain = $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'ClockMain' }
+Assert ($clockMain.Text -eq '00:00') "clock starts at 00:00"
+$messageStrip = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MessageStrip' }
+Assert ($messageStrip.Visibility -eq 'Collapsed') "message strip starts collapsed"
+$shapePaths = $timerDoc.SelectNodes("//*[local-name()='Path']")
+Assert ($shapePaths.Count -eq 1) "exactly one chamfered-shape Path element"
+$pathData = $shapePaths[0].Data
+Assert ($pathData.StartsWith('M 20,0') -and $pathData.TrimEnd().EndsWith('Z')) "shape path data starts/ends correctly (closed geometry)"
+
 if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nAll popup-config checks passed." -ForegroundColor Green

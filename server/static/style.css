@@ -494,45 +494,6 @@ body {
     gap: 14px;
 }
 
-.message-type-row {
-    display: flex;
-    gap: 10px;
-}
-
-.message-type-btn {
-    flex: 1;
-    padding: 10px;
-    border-radius: 10px;
-    border: 1px solid var(--border-color);
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    transition: all var(--transition-speed);
-}
-
-.message-type-btn:hover {
-    border-color: rgba(255, 255, 255, 0.2);
-}
-
-.message-type-btn.active[data-type="direction"] {
-    border-color: var(--primary-color);
-    color: var(--primary-color);
-    background: rgba(37, 99, 235, 0.1);
-}
-
-.message-type-btn.active[data-type="emergency"] {
-    border-color: var(--danger-color);
-    color: var(--danger-color);
-    background: rgba(239, 68, 68, 0.1);
-}
-
 .message-card textarea {
     min-height: 80px;
     resize: vertical;

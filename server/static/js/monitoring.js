@@ -11,10 +11,8 @@ const contextMenu = document.getElementById("ws-context-menu");
 const messageTextarea = document.getElementById("message-textarea");
 const btnSendMessage = document.getElementById("btn-send-message");
 const messageHelperText = document.getElementById("message-helper-text");
-const messageTypeButtons = document.querySelectorAll(".message-type-btn");
 
 let activeDeviceCount = 0;
-let selectedMessageType = "direction"; // "direction" | "emergency"
 
 // Send Lock Command
 const lockWorkstation = async (hostname) => {
@@ -33,20 +31,22 @@ const lockWorkstation = async (hostname) => {
     }
 };
 
-// Send an Emergency Alert to one specific workstation (not the "ALL"
-// broadcast in the message card below). Reuses /api/control/broadcast,
-// which already accepts a single hostname.
-const sendEmergencyAlert = async (hostname) => {
-    const message = prompt(`Emergency Alert untuk ${hostname}:`, "");
+// Send a direct message to one specific workstation -- shows inline near
+// the user's session timer, not a modal (see windows/logbook_timer.ps1).
+// Distinct from the Emergency Alert card below, which always targets every
+// active device. Reuses /api/control/broadcast, which already accepts a
+// single hostname.
+const sendDirectMessage = async (hostname) => {
+    const message = prompt(`Pesan untuk ${hostname}:`, "");
     if (!message || !message.trim()) return;
     try {
         const res = await fetchWithAuth("/api/control/broadcast", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ hostname, param: message.trim(), reason: "Emergency Alert" })
+            body: JSON.stringify({ hostname, param: message.trim(), reason: "Direction Message" })
         });
-        if (!res.ok) throw new Error("Gagal mengirim emergency alert");
-        showToast(`Emergency Alert dikirim ke ${hostname}`);
+        if (!res.ok) throw new Error("Gagal mengirim pesan");
+        showToast(`Pesan dikirim ke ${hostname}`);
     } catch (err) {
         showToast(err.message, true);
     }
@@ -120,7 +120,7 @@ const showContextMenu = (x, y, card) => {
     const sep = document.createElement("li");
     sep.className = "context-menu-separator";
     contextMenu.appendChild(sep);
-    contextMenu.appendChild(menuItem("Emergency Alert", "fa-triangle-exclamation", { danger: true, onClick: () => sendEmergencyAlert(hostname) }));
+    contextMenu.appendChild(menuItem("Send Message", "fa-message", { onClick: () => sendDirectMessage(hostname) }));
 
     contextMenu.classList.add("visible");
     // Clamp so the menu never renders off-screen.
@@ -151,8 +151,8 @@ const updateMessageCardGating = () => {
     const hasActiveDevices = activeDeviceCount > 0;
     btnSendMessage.disabled = !hasActiveDevices;
     messageHelperText.textContent = hasActiveDevices
-        ? "Everything active is the target — no device selection needed."
-        : "No active devices to message right now.";
+        ? "Sent to every active device — no individual selection needed. For a single device, right-click its card instead."
+        : "No active devices to alert right now.";
 };
 
 // Fetch and Render Active Workstations
@@ -206,7 +206,7 @@ export const fetchActiveWorkstations = async () => {
                         </div>
                     ` : ""}
                     ${isUserActive ? `
-                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Rename, Emergency Alert)</div>
+                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Rename, Send Message)</div>
                     ` : ""}
                 </div>
             `;
@@ -217,19 +217,11 @@ export const fetchActiveWorkstations = async () => {
     }
 };
 
-// Message type selector (Direction Message / Emergency Alert)
-messageTypeButtons.forEach(btn => {
-    btn.addEventListener("click", () => {
-        selectedMessageType = btn.dataset.type;
-        messageTypeButtons.forEach(b => b.classList.toggle("active", b === btn));
-    });
-});
-
-// Send message/broadcast to all active workstations. Both message types
-// target every active device automatically -- Direction Message is a
-// general instruction, Emergency Alert additionally requires confirmation.
-// Both reuse the existing /api/control/broadcast endpoint (hostname: "ALL"),
-// which already produces an audit-log row via the `reason` field.
+// Send an Emergency Alert to every active workstation. Always targets
+// "ALL" and always confirms -- this card no longer has a non-emergency
+// mode; a targeted message to one device is the context menu's "Send
+// Message" action above. Reuses the existing /api/control/broadcast
+// endpoint, which already produces an audit-log row via the `reason` field.
 btnSendMessage.addEventListener("click", async () => {
     const message = messageTextarea.value.trim();
     if (!message) {
@@ -238,20 +230,16 @@ btnSendMessage.addEventListener("click", async () => {
     }
     if (activeDeviceCount === 0) return;
 
-    if (selectedMessageType === "emergency") {
-        if (!confirm("Emergency alert will be sent to all active workstations. Continue?")) return;
-    }
-
-    const reason = selectedMessageType === "emergency" ? "Emergency Alert" : "Direction Message";
+    if (!confirm("Emergency alert will be sent to all active workstations. Continue?")) return;
 
     try {
         const res = await fetchWithAuth("/api/control/broadcast", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ hostname: "ALL", param: message, reason })
+            body: JSON.stringify({ hostname: "ALL", param: message, reason: "Emergency Alert" })
         });
         if (!res.ok) throw new Error("Gagal mengirim pesan");
-        showToast(`${reason} sent to all active workstations.`);
+        showToast("Emergency Alert sent to all active workstations.");
         messageTextarea.value = "";
     } catch (err) {
         showToast(err.message, true);
