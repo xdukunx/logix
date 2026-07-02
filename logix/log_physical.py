@@ -399,7 +399,9 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10) -> int:
     url = paths.server_url()
     if not url:
         return 0
-    api_key = paths.server_api_key()
+    # Per-device key takes priority once enrolled; mirrors verify_api_key's
+    # fallback order on the server.
+    api_key = paths.device_api_key() or paths.server_api_key()
     
     rows = con.execute("SELECT * FROM physical_log WHERE COALESCE(synced, 0) = 0 ORDER BY id ASC").fetchall()
     if not rows:

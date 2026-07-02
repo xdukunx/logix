@@ -377,6 +377,21 @@ function Get-AnyDeskId {
     return ''
 }
 
+function Get-LogbookDeviceApiKey {
+    # Per-device key from device.json (written by logbook_setup.ps1 on a
+    # successful /api/enroll). Mirrors the server's own verify_api_key
+    # fallback order: per-device key first, shared LOGIX_SERVER_API_KEY
+    # from config.env as the bootstrap/unenrolled fallback.
+    $identityPath = 'C:\ProgramData\Logix\device.json'
+    if (Test-Path $identityPath) {
+        try {
+            $obj = Get-Content $identityPath -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($obj -and $obj.api_key) { return [string]$obj.api_key }
+        } catch {}
+    }
+    return ''
+}
+
 function Send-LogbookHeartbeat {
     param(
         [Parameter(Mandatory=$true)][string]$Status
@@ -384,7 +399,8 @@ function Send-LogbookHeartbeat {
     try {
         $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
         if (-not $serverUrl) { return }
-        $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
+        $serverKey = Get-LogbookDeviceApiKey
+        if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
         
         $username = $env:USERNAME
         if (Test-Path $Global:SessionFile) {

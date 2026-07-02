@@ -54,6 +54,10 @@ $xaml = @"
 
       <TextBlock Text="API KEY SERVER (OPSIONAL)" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,16,0,6"/>
       <TextBox Name="ApiKeyBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+
+      <TextBlock Text="KODE ENROLLMENT (OPSIONAL, DARI ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,16,0,6"/>
+      <TextBox Name="EnrollCodeBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <TextBlock Text="Jika diisi, device ini akan didaftarkan otomatis dan mendapat API key sendiri (menggantikan API Key Server di atas)." FontSize="10" Foreground="#64748b" Margin="0,4,0,0" TextWrapping="Wrap"/>
     </StackPanel>
 
     <!-- Status Report Area -->
@@ -87,6 +91,7 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 $nameBox = $window.FindName('DeviceNameBox')
 $urlBox = $window.FindName('ServerUrlBox')
 $keyBox = $window.FindName('ApiKeyBox')
+$enrollCodeBox = $window.FindName('EnrollCodeBox')
 $statusText = $window.FindName('StatusText')
 $testBtn = $window.FindName('TestBtn')
 $saveBtn = $window.FindName('SaveBtn')
@@ -136,6 +141,7 @@ $saveBtn.Add_Click({
     $name = $nameBox.Text.Trim()
     $url = $urlBox.Text.Trim()
     $key = $keyBox.Text.Trim()
+    $enrollCode = $enrollCodeBox.Text.Trim()
 
     # Device name is required (defaults to the hostname, so this only fires
     # if the user deliberately clears it) — it's how this workstation shows
@@ -144,6 +150,33 @@ $saveBtn.Add_Click({
         $statusText.Text = "Error: Nama Device tidak boleh kosong."
         $statusText.Foreground = [System.Windows.Media.Brushes]::Red
         return
+    }
+
+    # If an enrollment code was given, redeem it first. Its device_id/api_key
+    # go to device.json (per API_CONTRACT.md), not into config.env — the
+    # per-device key must survive independently of this wizard running again.
+    if ($enrollCode) {
+        if (-not $url) {
+            $statusText.Text = "Error: URL Server wajib diisi untuk enrollment."
+            $statusText.Foreground = [System.Windows.Media.Brushes]::Red
+            return
+        }
+        try {
+            $enrollUrl = $url.TrimEnd('/') + '/api/enroll'
+            $body = @{ invite_code = $enrollCode; hostname = $env:COMPUTERNAME; os = 'windows'; os_version = [System.Environment]::OSVersion.VersionString } | ConvertTo-Json
+            $enrolled = Invoke-RestMethod -Uri $enrollUrl -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 10 -UseBasicParsing
+
+            $identityPath = 'C:\ProgramData\Logix\device.json'
+            $identityParent = Split-Path $identityPath
+            if (-not (Test-Path $identityParent)) {
+                New-Item -ItemType Directory -Force -Path $identityParent | Out-Null
+            }
+            @{ device_id = $enrolled.device_id; api_key = $enrolled.api_key; category = $enrolled.category } | ConvertTo-Json | Out-File -FilePath $identityPath -Encoding UTF8 -Force
+        } catch {
+            $statusText.Text = "Enrollment gagal: $($_.Exception.Message)"
+            $statusText.Foreground = [System.Windows.Media.Brushes]::Tomato
+            return
+        }
     }
 
     try {

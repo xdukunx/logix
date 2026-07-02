@@ -13,6 +13,7 @@ directly here, so a single config.env works on all three OSes — no shell
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -110,5 +111,53 @@ def server_url() -> str:
 
 
 def server_api_key() -> str:
+    """The shared bootstrap/dev ingest key (LOGIX_INGEST_API_KEY on the
+    server side). Used only when this device hasn't been enrolled yet --
+    see device_api_key() for the per-device key, which takes priority."""
     return get("LOGIX_SERVER_API_KEY", "")
+
+
+# --- Device identity (Logix Control enrollment) -----------------------------
+# Per API_CONTRACT.md: local-first, retryable identity, deliberately kept
+# separate from config.env (which is operator-supplied config written once
+# by the setup wizard). device.json is server-assigned at /api/enroll and
+# must survive independently of whether the wizard runs again.
+
+def device_identity_path() -> Path:
+    v = get("LOGIX_DEVICE_IDENTITY_FILE")
+    return Path(v) if v else data_home() / "device.json"
+
+
+def _read_device_identity() -> dict:
+    path = device_identity_path()
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def device_id() -> str:
+    return str(_read_device_identity().get("device_id", ""))
+
+
+def device_api_key() -> str:
+    """The per-device key issued at enrollment. Takes priority over the
+    shared server_api_key() wherever both are consulted -- mirrors the
+    server's own fallback order in verify_api_key."""
+    return str(_read_device_identity().get("api_key", ""))
+
+
+def device_category() -> str:
+    return str(_read_device_identity().get("category", ""))
+
+
+def write_device_identity(device_id: str, api_key: str, category: str = "") -> Path:
+    """Persist the identity returned by a successful POST /api/enroll."""
+    path = device_identity_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"device_id": device_id, "api_key": api_key, "category": category}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
 
