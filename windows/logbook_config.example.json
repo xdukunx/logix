@@ -1,8 +1,8 @@
 {
-  "_comment": "Logix popup customization. Copy to C:\\lab\\logbook_config.json (machine-wide) or %APPDATA%\\MindLabLogbook\\logbook_config.json (per-user). Per-user overrides machine, machine overrides built-in defaults. Every key is optional — omit anything you want left at the default. With no file present the popup renders the original FTMM faculty UI.",
+  "_comment": "Logix popup customization. Copy to C:\\lab\\logbook_config.json (machine-wide) or %APPDATA%\\MindLabLogbook\\logbook_config.json (per-user). Per-user overrides machine, machine overrides built-in defaults. Every key is optional — omit anything you want left at the default.",
 
   "branding": {
-    "logoText": "FTMM",
+    "logoText": "Logix",
     "logoPath": "C:\\lab\\logo.png",
     "title": "Report Logbook",
     "subtitle": "Computational Workstation",

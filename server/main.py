@@ -230,7 +230,7 @@ class ControlRequest(BaseModel):
 
 DEFAULT_CONFIG = {
     "branding": {
-        "logoText": "FTMM",
+        "logoText": "Logix",
         "logoPath": "C:\\lab\\logo.png",
         "title": "Report Logbook",
         "subtitle": "Computational Workstation",

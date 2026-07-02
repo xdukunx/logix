@@ -456,7 +456,7 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     ws.merge_cells("A1:K1")
-    ws["A1"] = "MINDLAB  |  REPORT LOGBOOK"
+    ws["A1"] = "LOGIX  |  REPORT LOGBOOK"
     ws["A1"].font = Font(color="FFFFFF", bold=True, size=16)
     ws["A1"].fill = dark
     ws["A1"].alignment = Alignment(horizontal="center")

@@ -248,11 +248,11 @@ function Invoke-WSLLogbook {
 }
 
 function Get-LogbookDefaultConfig {
-    # Built-in defaults = the original FTMM faculty UI. With no config file
-    # present the popup renders exactly as before.
+    # Built-in defaults. With no config file present the popup renders
+    # these out of the box.
     return @{
         branding = @{
-            logoText = 'FTMM'
+            logoText = 'Logix'
             logoPath = 'C:\lab\logo.png'
             title    = 'Report Logbook'
             subtitle = 'Computational Workstation'

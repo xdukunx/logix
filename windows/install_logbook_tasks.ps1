@@ -29,7 +29,7 @@ foreach ($f in $files) {
 . 'C:\lab\logbook_common.ps1'
 Ensure-LogbookDirs
 
-Write-Host 'MindLab Report Logbook v5.6 installer' -ForegroundColor Cyan
+Write-Host 'Logix Report Logbook installer' -ForegroundColor Cyan
 Write-Host 'User:' $TaskUser
 
 # One-time grant so the sign-in popup can gate Task Manager at runtime even

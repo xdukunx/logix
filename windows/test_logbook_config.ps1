@@ -16,7 +16,7 @@ $xaml = Build-LogbookPopupXaml $cfg
 $doc = [xml]$xaml
 Assert ($doc.Window.Background -eq '#741B47') "default accent on window background"
 $logo = ($doc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'LogoText' }).Text
-Assert ($logo -eq 'FTMM') "default logo text FTMM"
+Assert ($logo -eq 'Logix') "default logo text Logix"
 $items = $doc.SelectNodes("//*[local-name()='ComboBoxItem']")
 Assert ($items.Count -eq 5) "2 access + 3 purpose = 5 combo items"
 
