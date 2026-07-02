@@ -1,10 +1,12 @@
 // Monitoring tab: active-device summary, workstation cards, empty state,
-// lock command, and the inline message/broadcast card.
+// lock command, the right-click context menu (active sessions only), and
+// the inline message/broadcast card.
 import { fetchWithAuth, escapeHtml, showToast } from "./api.js";
 
 const pcsGrid = document.getElementById("pcs-grid");
 const valActivePcs = document.getElementById("val-active-pcs");
 const pcCountBadge = document.getElementById("pc-count-badge");
+const contextMenu = document.getElementById("ws-context-menu");
 
 const messageTextarea = document.getElementById("message-textarea");
 const btnSendMessage = document.getElementById("btn-send-message");
@@ -31,13 +33,119 @@ const lockWorkstation = async (hostname) => {
     }
 };
 
-// Delegated listener for lock buttons (data-attribute + event delegation,
-// not inline onclick -- avoids JS-string-context injection via
-// agent-supplied hostname).
-pcsGrid.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-lock-hostname]");
-    if (btn) lockWorkstation(btn.dataset.lockHostname);
+// Send an Emergency Alert to one specific workstation (not the "ALL"
+// broadcast in the message card below). Reuses /api/control/broadcast,
+// which already accepts a single hostname.
+const sendEmergencyAlert = async (hostname) => {
+    const message = prompt(`Emergency Alert untuk ${hostname}:`, "");
+    if (!message || !message.trim()) return;
+    try {
+        const res = await fetchWithAuth("/api/control/broadcast", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, param: message.trim(), reason: "Emergency Alert" })
+        });
+        if (!res.ok) throw new Error("Gagal mengirim emergency alert");
+        showToast(`Emergency Alert dikirim ke ${hostname}`);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
+// Rename a device from the dashboard. Sticks across future heartbeats --
+// see display_name_set_by_admin in server/main.py.
+const renameWorkstation = async (hostname, currentName) => {
+    const name = prompt(`Nama baru untuk ${hostname}:`, currentName || "");
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+        showToast("Nama tidak boleh kosong.", true);
+        return;
+    }
+    try {
+        const res = await fetchWithAuth("/api/devices/rename", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, display_name: trimmed })
+        });
+        if (!res.ok) throw new Error("Gagal mengubah nama device");
+        showToast(`Device diganti nama menjadi "${trimmed}"`);
+        fetchActiveWorkstations();
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
+// --- Right-click context menu (active sessions only) -----------------------
+// Built and positioned on demand rather than kept in the DOM per-card --
+// one shared <ul>, populated from the clicked card's data-* attributes.
+
+const hideContextMenu = () => {
+    contextMenu.classList.remove("visible");
+    contextMenu.innerHTML = "";
+};
+
+const menuItem = (label, icon, { disabled = false, danger = false, onClick = null, title = "" } = {}) => {
+    const li = document.createElement("li");
+    li.className = "context-menu-item" + (disabled ? " disabled" : "") + (danger ? " danger" : "");
+    li.innerHTML = `<i class="fa-solid ${icon}"></i> ${escapeHtml(label)}`;
+    if (title) li.title = title;
+    if (!disabled && onClick) {
+        li.addEventListener("click", () => {
+            hideContextMenu();
+            onClick();
+        });
+    }
+    return li;
+};
+
+const showContextMenu = (x, y, card) => {
+    const hostname = card.dataset.hostname;
+    const deviceName = card.dataset.deviceName;
+    const anydeskId = card.dataset.anydeskId;
+
+    contextMenu.innerHTML = "";
+    if (anydeskId) {
+        const link = document.createElement("a");
+        link.href = `anydesk:${anydeskId}`;
+        link.className = "context-menu-item";
+        link.innerHTML = `<i class="fa-solid fa-desktop"></i> Remote`;
+        link.addEventListener("click", hideContextMenu);
+        contextMenu.appendChild(link);
+    } else {
+        contextMenu.appendChild(menuItem("Remote", "fa-desktop", { disabled: true, title: "AnyDesk ID tidak terdeteksi" }));
+    }
+    contextMenu.appendChild(menuItem("Lock", "fa-lock", { onClick: () => lockWorkstation(hostname) }));
+    contextMenu.appendChild(menuItem("Rename", "fa-pen", { onClick: () => renameWorkstation(hostname, deviceName) }));
+    const sep = document.createElement("li");
+    sep.className = "context-menu-separator";
+    contextMenu.appendChild(sep);
+    contextMenu.appendChild(menuItem("Emergency Alert", "fa-triangle-exclamation", { danger: true, onClick: () => sendEmergencyAlert(hostname) }));
+
+    contextMenu.classList.add("visible");
+    // Clamp so the menu never renders off-screen.
+    const rect = contextMenu.getBoundingClientRect();
+    const maxX = window.innerWidth - rect.width - 8;
+    const maxY = window.innerHeight - rect.height - 8;
+    contextMenu.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
+    contextMenu.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
+};
+
+pcsGrid.addEventListener("contextmenu", (e) => {
+    const card = e.target.closest(".workstation-card");
+    if (!card || card.dataset.active !== "true") return; // let the browser's default menu show
+    e.preventDefault();
+    showContextMenu(e.clientX, e.clientY, card);
 });
+
+document.addEventListener("click", (e) => {
+    if (!contextMenu.contains(e.target)) hideContextMenu();
+});
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideContextMenu();
+});
+window.addEventListener("scroll", hideContextMenu, true);
+window.addEventListener("resize", hideContextMenu);
 
 const updateMessageCardGating = () => {
     const hasActiveDevices = activeDeviceCount > 0;
@@ -81,7 +189,11 @@ export const fetchActiveWorkstations = async () => {
             const showHostnameMeta = pc.device_name && pc.device_name !== pc.hostname;
 
             return `
-                <div class="workstation-card">
+                <div class="workstation-card"
+                     data-hostname="${hostname}"
+                     data-device-name="${deviceName}"
+                     data-anydesk-id="${escapeHtml(pc.anydesk_id) || ""}"
+                     data-active="${isUserActive}">
                     <div class="ws-status-light ${statusClass}"></div>
                     <div class="ws-host">${deviceName}</div>
                     ${showHostnameMeta ? `<div class="ws-meta">Hostname: ${hostname}</div>` : ""}
@@ -93,26 +205,9 @@ export const fetchActiveWorkstations = async () => {
                             <strong>${escapeHtml(pc.username)}</strong>
                         </div>
                     ` : ""}
-                    <div class="ws-controls">
-                        ${pc.anydesk_id ? `
-                            <a href="anydesk:${escapeHtml(pc.anydesk_id)}" class="btn-anydesk-remote" title="Remote via AnyDesk">
-                                <i class="fa-solid fa-desktop"></i> Remote
-                            </a>
-                        ` : `
-                            <button class="btn-anydesk-remote" style="opacity:0.4; cursor:not-allowed;" title="AnyDesk ID tidak terdeteksi" disabled>
-                                <i class="fa-solid fa-desktop"></i> Remote
-                            </button>
-                        `}
-                        ${isUserActive ? `
-                            <button class="btn-ws-lock" data-lock-hostname="${hostname}">
-                                <i class="fa-solid fa-lock"></i> Lock
-                            </button>
-                        ` : `
-                            <button class="btn-ws-lock" style="opacity:0.4; cursor:not-allowed;" disabled>
-                                <i class="fa-solid fa-lock"></i> Lock
-                            </button>
-                        `}
-                    </div>
+                    ${isUserActive ? `
+                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Rename, Emergency Alert)</div>
+                    ` : ""}
                 </div>
             `;
         }).join("");

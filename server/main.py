@@ -108,6 +108,11 @@ DEVICE_COLUMNS = {
     # enrolled, and set back to NULL on revoke -- never returned by
     # GET /api/devices (see get_devices()).
     "api_key": "TEXT UNIQUE",
+    # Set by PUT /api/devices/rename. Once true, upsert_device() (heartbeat
+    # path) stops overwriting display_name with whatever the agent reports --
+    # otherwise an admin rename would silently revert on the device's next
+    # heartbeat (every 30s by default). See CATEGORY_PROFILES for interval.
+    "display_name_set_by_admin": "INTEGER DEFAULT 0",
     "created_at": "TEXT NOT NULL",
     "updated_at": "TEXT NOT NULL",
 }
@@ -309,6 +314,8 @@ def init_control_tables():
         if "api_key" not in existing_device_cols:
             conn.execute("ALTER TABLE devices ADD COLUMN api_key TEXT")
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key)")
+        if "display_name_set_by_admin" not in existing_device_cols:
+            conn.execute("ALTER TABLE devices ADD COLUMN display_name_set_by_admin INTEGER DEFAULT 0")
 
         invite_defs = ",\n        ".join(f"{k} {v}" for k, v in ENROLLMENT_INVITE_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS enrollment_invites (\n        {invite_defs}\n    )")
@@ -351,15 +358,31 @@ def init_control_tables():
 # Upsert-on-heartbeat: devices is the durable registry (survives restart);
 # HEARTBEATS stays the fast in-memory "online now" cache, untouched by this.
 # Uses explicit SELECT-then-INSERT/UPDATE (not ON CONFLICT DO UPDATE) to match
-# the existing idempotency idiom in logix/log_physical.py.
-def upsert_device(conn, hostname: str, display_name: str):
+# the existing idempotency idiom in logix/log_physical.py. Returns the
+# *effective* display_name -- callers (post_heartbeat) must use this, not the
+# name they passed in, so the in-memory HEARTBEATS cache and the /api/active
+# view it feeds also respect an admin rename (see display_name_set_by_admin).
+def upsert_device(conn, hostname: str, display_name: str) -> str:
     now = datetime.now().isoformat()
-    existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (hostname,)).fetchone()
+    existing = conn.execute(
+        "SELECT device_id, display_name_set_by_admin, display_name FROM devices WHERE hostname = ?", (hostname,)
+    ).fetchone()
     if existing:
-        conn.execute(
-            "UPDATE devices SET display_name = ?, last_seen = ?, status = 'active', updated_at = ? WHERE hostname = ?",
-            (display_name, now, now, hostname),
-        )
+        if existing["display_name_set_by_admin"]:
+            # An admin renamed this device from the dashboard -- that name
+            # is authoritative until explicitly changed again, regardless
+            # of what this heartbeat's agent-reported name says.
+            conn.execute(
+                "UPDATE devices SET last_seen = ?, status = 'active', updated_at = ? WHERE hostname = ?",
+                (now, now, hostname),
+            )
+            conn.commit()
+            return existing["display_name"]
+        else:
+            conn.execute(
+                "UPDATE devices SET display_name = ?, last_seen = ?, status = 'active', updated_at = ? WHERE hostname = ?",
+                (display_name, now, now, hostname),
+            )
     else:
         conn.execute(
             "INSERT INTO devices (device_id, hostname, display_name, last_seen, created_at, updated_at) "
@@ -367,6 +390,7 @@ def upsert_device(conn, hostname: str, display_name: str):
             (str(uuid.uuid4()), hostname, display_name, now, now, now),
         )
     conn.commit()
+    return display_name
 
 
 def log_remote_action(conn, actor_email: str, target_device: str, action_type: str,
@@ -397,11 +421,11 @@ ROLE_PERMISSIONS: Dict[str, set] = {
     # make faculty_admin functionally equal to super_admin for as long as
     # scope enforcement (faculty-level restriction) remains unbuilt.
     "faculty_admin": {
-        "lock", "broadcast", "devices_read", "sessions_read", "analytics_read",
+        "lock", "broadcast", "devices_read", "devices_write", "sessions_read", "analytics_read",
         "audit_log_read", "reports_read", "invite_create", "devices_revoke",
     },
     "lab_admin": {
-        "lock", "broadcast", "devices_read", "sessions_read", "analytics_read",
+        "lock", "broadcast", "devices_read", "devices_write", "sessions_read", "analytics_read",
         "audit_log_read", "reports_read", "invite_create", "devices_revoke",
     },
     "instructor": {"lock", "broadcast"},
@@ -673,6 +697,20 @@ def update_config(config: Dict[str, Any], email: str = Depends(require_permissio
 def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key)):
     ad_id = payload.anydesk_id or ""
     device_name = payload.device_name or payload.hostname
+
+    # Persist to the devices registry first -- upsert_device() returns the
+    # *effective* display_name (an admin rename overrides what the agent
+    # reported), which HEARTBEATS below must also use. Must never block the
+    # heartbeat response the agent is waiting on -- log and continue on failure.
+    try:
+        conn = get_db()
+        try:
+            device_name = upsert_device(conn, payload.hostname, device_name)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     HEARTBEATS[payload.hostname] = {
         "status": payload.status.upper(),
         "username": payload.username,
@@ -680,17 +718,6 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
         "device_name": device_name,
         "last_seen": datetime.now()
     }
-
-    # Persist to the devices registry. Must never block the heartbeat
-    # response the agent is waiting on -- log and continue on failure.
-    try:
-        conn = get_db()
-        try:
-            upsert_device(conn, payload.hostname, device_name)
-        finally:
-            conn.close()
-    except Exception:
-        pass
 
     # Retrieve pending commands for this workstation
     cmds = PENDING_COMMANDS.get(payload.hostname, [])
@@ -877,6 +904,44 @@ def revoke_device(device_id: str, email: str = Depends(require_permission("devic
     finally:
         conn.close()
     return {"status": "success", "detail": f"Revoked API key for device {device_id}"}
+
+
+class RenameDeviceRequest(BaseModel):
+    hostname: str
+    display_name: str
+
+
+# Keyed by hostname, not device_id, matching ControlRequest's existing
+# convention for the "live session" surface (GET /api/active doesn't carry
+# device_id today). Marks display_name_set_by_admin so upsert_device() stops
+# overwriting it from the agent's own heartbeat-reported name -- see the
+# comment on that column.
+@app.put("/api/devices/rename")
+def rename_device(payload: RenameDeviceRequest, email: str = Depends(require_permission("devices_write"))):
+    name = payload.display_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="display_name cannot be empty")
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (payload.hostname,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Device not found")
+        conn.execute(
+            "UPDATE devices SET display_name = ?, display_name_set_by_admin = 1, updated_at = ? WHERE hostname = ?",
+            (name, datetime.now().isoformat(), payload.hostname),
+        )
+        conn.commit()
+        # Synchronous, server-side-only edit -- no agent round-trip, so
+        # 'done' applies immediately (unlike LOCK/BROADCAST's 'queued').
+        log_remote_action(conn, email, payload.hostname, "RENAME", "done", result_summary=f"Renamed to '{name}'")
+    finally:
+        conn.close()
+    # Reflect instantly in the in-memory "online now" cache too -- otherwise
+    # /api/active (what the Monitoring tab actually polls) wouldn't show the
+    # new name until this device's next heartbeat, up to 30s away.
+    if payload.hostname in HEARTBEATS:
+        HEARTBEATS[payload.hostname]["device_name"] = name
+    return {"status": "success", "display_name": name}
 
 
 # Control Command Endpoints (Admins post commands here)

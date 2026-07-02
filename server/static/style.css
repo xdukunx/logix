@@ -632,51 +632,12 @@ body {
     text-overflow: ellipsis;
 }
 
-/* Card Control Buttons */
-.ws-controls {
-    display: flex;
-    gap: 8px;
+/* Right-click hint on active-session cards (see .context-menu below) */
+.ws-context-hint {
     margin-top: 8px;
-}
-
-.btn-anydesk-remote {
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #fca5a5;
-    flex: 1.2;
-    text-decoration: none;
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 6px 0;
-    cursor: pointer;
-    transition: all var(--transition-speed);
-}
-
-.btn-anydesk-remote:hover {
-    background: var(--danger-color);
-    color: white;
-}
-
-.btn-ws-lock {
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    color: #fcd34d;
-    flex: 1;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 6px 0;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all var(--transition-speed);
-}
-
-.btn-ws-lock:hover {
-    background: var(--warning-color);
-    color: black;
+    font-size: 10.5px;
+    color: var(--muted-color);
+    font-style: italic;
 }
 
 /* Settings layout */
@@ -1041,6 +1002,64 @@ input[type="color"]::-webkit-color-swatch {
     background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
     border-radius: 4px;
     transition: width 1s ease-out;
+}
+
+/* Workstation right-click context menu (active sessions only) */
+.context-menu {
+    position: fixed;
+    z-index: 10001;
+    background: #0f172a;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    padding: 6px;
+    min-width: 190px;
+    list-style: none;
+    display: none;
+}
+
+.context-menu.visible {
+    display: block;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.context-menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.context-menu-item.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.context-menu-item.disabled:hover {
+    background: none;
+}
+
+.context-menu-item.danger {
+    color: var(--danger-color);
+}
+
+.context-menu-item i {
+    width: 16px;
+    text-align: center;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 6px 4px;
 }
 
 /* Modal Dialog */
