@@ -1,0 +1,33 @@
+<svg viewBox="0 0 800 560" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#080d16"/>
+    </radialGradient>
+    <linearGradient id="btn" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="560" fill="url(#bg)"/>
+
+  <!-- login card -->
+  <rect x="220" y="120" width="360" height="320" rx="20" fill="#1e293b" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.08"/>
+
+  <!-- shield icon -->
+  <path d="M400 155 L430 168 L430 200 C430 225 415 245 400 253 C385 245 370 225 370 200 L370 168 Z"
+        fill="none" stroke="#2563eb" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M388 200 L397 210 L414 190" fill="none" stroke="#2563eb" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="400" y="285" text-anchor="middle" fill="#f8fafc" font-size="22" font-weight="700">Logix Admin</text>
+  <text x="400" y="308" text-anchor="middle" fill="#94a3b8" font-size="13">Silakan masuk menggunakan surel terdaftar.</text>
+
+  <!-- google button -->
+  <rect x="260" y="345" width="280" height="46" rx="10" fill="url(#btn)"/>
+  <circle cx="298" cy="368" r="9" fill="#ffffff"/>
+  <text x="298" y="372" text-anchor="middle" fill="#2563eb" font-size="12" font-weight="700">G</text>
+  <text x="415" y="373" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">Masuk dengan Google</text>
+
+  <text x="400" y="480" text-anchor="middle" fill="#475569" font-size="11">Logix &#8212; institution-managed, transparent device logbook</text>
+</svg>

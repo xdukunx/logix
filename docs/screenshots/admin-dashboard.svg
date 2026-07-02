@@ -1,0 +1,82 @@
+<svg viewBox="0 0 1300 820" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+  <rect width="1300" height="820" fill="#080d16"/>
+
+  <!-- ============ Sidebar ============ -->
+  <rect x="0" y="0" width="230" height="820" fill="#0a0e1a" stroke="#ffffff" stroke-opacity="0.08"/>
+
+  <!-- brand -->
+  <rect x="24" y="28" width="26" height="26" rx="6" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+  <rect x="30" y="34" width="14" height="4" fill="#2563eb"/>
+  <rect x="30" y="41" width="14" height="4" fill="#2563eb"/>
+  <text x="60" y="46" fill="#f8fafc" font-size="16" font-weight="700">Logix Admin</text>
+
+  <!-- nav: Monitoring (active) -->
+  <rect x="20" y="88" width="190" height="38" rx="10" fill="#2563eb"/>
+  <rect x="34" y="101" width="14" height="12" rx="2" fill="#ffffff"/>
+  <text x="58" y="111" fill="#ffffff" font-size="13" font-weight="700">Monitoring</text>
+
+  <!-- nav: Analytics -->
+  <path d="M36 158 L36 148 M40 158 L40 143 M44 158 L44 152" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+  <text x="58" y="161" fill="#94a3b8" font-size="13" font-weight="600">Analytics</text>
+
+  <!-- nav: Settings -->
+  <circle cx="40" cy="196" r="7" fill="none" stroke="#94a3b8" stroke-width="2"/>
+  <text x="58" y="200" fill="#94a3b8" font-size="13" font-weight="600">Settings</text>
+
+  <!-- sidebar footer -->
+  <line x1="20" y1="740" x2="210" y2="740" stroke="#ffffff" stroke-opacity="0.08"/>
+  <circle cx="30" cy="762" r="4" fill="#10b981"/>
+  <text x="42" y="766" fill="#10b981" font-size="11">Server Terhubung</text>
+  <rect x="20" y="780" width="190" height="30" rx="8" fill="#ef4444" fill-opacity="0.1" stroke="#ef4444" stroke-opacity="0.3"/>
+  <text x="115" y="800" text-anchor="middle" fill="#ef4444" font-size="12" font-weight="600">Keluar</text>
+
+  <!-- ============ Top header ============ -->
+  <text x="256" y="58" fill="#f8fafc" font-size="24" font-weight="700">Monitoring</text>
+  <rect x="1120" y="30" width="150" height="40" rx="10" fill="#2563eb"/>
+  <text x="1195" y="55" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700">&#8681; Download Report</text>
+
+  <!-- ============ Stat card ============ -->
+  <rect x="256" y="92" width="260" height="96" rx="14" fill="#0f172a" stroke="#ffffff" stroke-opacity="0.08"/>
+  <rect x="276" y="112" width="48" height="48" rx="10" fill="#2563eb" fill-opacity="0.12"/>
+  <rect x="290" y="128" width="20" height="16" rx="2" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <text x="340" y="128" fill="#94a3b8" font-size="12" font-weight="600">Active Devices</text>
+  <text x="340" y="158" fill="#f8fafc" font-size="30" font-weight="700">1</text>
+
+  <!-- ============ Message card ============ -->
+  <rect x="256" y="206" width="1014" height="150" rx="14" fill="#0f172a" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="280" y="238" fill="#f8fafc" font-size="15" font-weight="700">&#128172; Message Active Devices</text>
+  <rect x="1140" y="222" width="90" height="24" rx="12" fill="none" stroke="#ffffff" stroke-opacity="0.15"/>
+  <text x="1185" y="238" text-anchor="middle" fill="#94a3b8" font-size="11">1 Aktif</text>
+
+  <rect x="280" y="256" width="220" height="34" rx="10" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb"/>
+  <text x="390" y="277" text-anchor="middle" fill="#2563eb" font-size="12" font-weight="700">Direction Message</text>
+  <rect x="510" y="256" width="200" height="34" rx="10" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.1"/>
+  <text x="610" y="277" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="700">Emergency Alert</text>
+
+  <rect x="280" y="300" width="990" height="34" rx="8" fill="#000000" fill-opacity="0.2" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="292" y="321" fill="#475569" font-size="12">Write a message or direction for active workstations&#8230;</text>
+
+  <!-- ============ Workstation section ============ -->
+  <rect x="256" y="378" width="1014" height="410" rx="14" fill="#0f172a" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="280" y="412" fill="#f8fafc" font-size="15" font-weight="700">&#128421; Status Workstation</text>
+  <line x1="280" y1="428" x2="1246" y2="428" stroke="#ffffff" stroke-opacity="0.08"/>
+
+  <!-- one device card -->
+  <rect x="280" y="452" width="230" height="220" rx="12" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.08"/>
+  <circle cx="490" cy="470" r="5" fill="#10b981"/>
+  <text x="298" y="484" fill="#f8fafc" font-size="15" font-weight="700">Lab PC 3</text>
+  <text x="298" y="504" fill="#94a3b8" font-size="11">Hostname: LAB-PC-03</text>
+  <text x="298" y="522" fill="#94a3b8" font-size="11">Status: Dalam Penggunaan</text>
+  <text x="298" y="540" fill="#94a3b8" font-size="11">&#128337; Aktif: 14:32</text>
+
+  <rect x="298" y="556" width="194" height="46" rx="8" fill="#ffffff" fill-opacity="0.02" stroke="#ffffff" stroke-opacity="0.08"/>
+  <text x="310" y="573" fill="#94a3b8" font-size="10">Pengguna:</text>
+  <text x="310" y="590" fill="#f8fafc" font-size="12" font-weight="700">Budi Santoso</text>
+
+  <rect x="298" y="618" width="90" height="30" rx="6" fill="#ef4444" fill-opacity="0.15" stroke="#ef4444" stroke-opacity="0.3"/>
+  <text x="343" y="637" text-anchor="middle" fill="#fca5a5" font-size="11" font-weight="600">Remote</text>
+  <rect x="398" y="618" width="94" height="30" rx="6" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-opacity="0.3"/>
+  <text x="445" y="637" text-anchor="middle" fill="#fcd34d" font-size="11" font-weight="600">&#128274; Lock</text>
+
+  <text x="1246" y="788" text-anchor="end" fill="#334155" font-size="10">Illustrative mockup &#8212; not a live screenshot</text>
+</svg>

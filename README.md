@@ -15,6 +15,14 @@ Built for the **MindLab** computational-chemistry workstation (a shared
 Windows + WSL2 box). It's published as a reference; adapt paths and detection
 to your environment.
 
+<p align="center">
+  <img src="docs/screenshots/login-screen.svg" alt="Logix admin login screen mockup" width="46%">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/admin-dashboard.svg" alt="Logix admin dashboard Monitoring tab mockup" width="46%">
+</p>
+
+<p align="center"><sub>Illustrative mockups of the central admin server's dashboard (<a href="#hosting-the-central-server-for-admins">optional, self-hosted</a>) — not live screenshots.</sub></p>
+
 ---
 
 ## How it works
