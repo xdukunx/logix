@@ -136,6 +136,26 @@ COMMAND_ALLOWLIST_COLUMNS = {
 }
 KNOWN_COMMAND_TYPES = ["LOCK", "BROADCAST"]
 
+# Audit log for every Control command, retrofitted onto the two that already
+# existed (lock, broadcast) rather than left as an empty table for a future
+# feature. IMPORTANT LIMITATION, stated here and in docs/LOGIX_CONTROL.md §6:
+# status can only ever be 'queued' or 'failed' -- this proves an admin queued
+# a command, not that the device executed it. True execution confirmation
+# needs the agent to report outcomes back, which does not exist yet.
+REMOTE_ACTION_COLUMNS = {
+    "action_id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "actor_email": "TEXT NOT NULL",
+    "target_device": "TEXT",
+    "target_device_id": "TEXT",
+    "action_type": "TEXT NOT NULL",
+    "status": "TEXT NOT NULL",
+    "reason": "TEXT",
+    "param": "TEXT",
+    "timestamp": "TEXT NOT NULL",
+    "error_message": "TEXT",
+    "result_summary": "TEXT",
+}
+
 class LogPayload(BaseModel):
     timestamp: str
     event: str
@@ -163,6 +183,7 @@ class HeartbeatPayload(BaseModel):
 class ControlRequest(BaseModel):
     hostname: str
     param: Optional[str] = ""
+    reason: Optional[str] = ""
 
 DEFAULT_CONFIG = {
     "branding": {
@@ -232,6 +253,10 @@ def init_control_tables():
             "        PRIMARY KEY (policy_name, command_type)\n    )"
         )
 
+        action_defs = ",\n        ".join(f"{k} {v}" for k, v in REMOTE_ACTION_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS remote_actions (\n        {action_defs}\n    )")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_remote_actions_timestamp ON remote_actions(timestamp)")
+
         now = datetime.now().isoformat()
         for policy_name, description, privacy_mode_default in SYSTEM_POLICY_PROFILES:
             # INSERT OR IGNORE: idempotent across restarts, never clobbers an
@@ -272,6 +297,21 @@ def upsert_device(conn, hostname: str, display_name: str):
             "VALUES (?, ?, ?, ?, ?, ?)",
             (str(uuid.uuid4()), hostname, display_name, now, now, now),
         )
+    conn.commit()
+
+
+def log_remote_action(conn, actor_email: str, target_device: str, action_type: str,
+                       status: str, reason: str = "", param: str = "",
+                       error_message: str = "", result_summary: str = ""):
+    device_row = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (target_device,)).fetchone()
+    target_device_id = device_row["device_id"] if device_row else None
+    conn.execute(
+        "INSERT INTO remote_actions "
+        "(actor_email, target_device, target_device_id, action_type, status, reason, param, "
+        "timestamp, error_message, result_summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (actor_email, target_device, target_device_id, action_type, status, reason, param,
+         datetime.now().isoformat(), error_message, result_summary),
+    )
     conn.commit()
 
 
@@ -548,26 +588,62 @@ def queue_lock_command(payload: ControlRequest, email: str = Depends(verify_toke
     if host not in PENDING_COMMANDS:
         PENDING_COMMANDS[host] = []
     PENDING_COMMANDS[host].append({"command": "LOCK", "param": ""})
-    return {"status": "success", "detail": f"Lock command queued for {host}"}
+    detail = f"Lock command queued for {host}"
+
+    # Audit logging must never block the real command from being queued --
+    # it already was, above, regardless of what happens here.
+    try:
+        conn = get_db()
+        try:
+            log_remote_action(conn, email, host, "LOCK", "queued", reason=payload.reason, result_summary=detail)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    return {"status": "success", "detail": detail}
 
 
 @app.post("/api/control/broadcast")
 def queue_broadcast_command(payload: ControlRequest, email: str = Depends(verify_token)):
     host = payload.hostname
     msg = payload.param or "Perhatian: Alert dari Administrator."
-    
+
     if host == "ALL":
         # Broadcast to all known heartbeating hosts
         for h in HEARTBEATS.keys():
             if h not in PENDING_COMMANDS:
                 PENDING_COMMANDS[h] = []
             PENDING_COMMANDS[h].append({"command": "BROADCAST", "param": msg})
-        return {"status": "success", "detail": "Broadcast queued for all hosts"}
-    
+        detail = "Broadcast queued for all hosts"
+        # One audit row for this one admin action, not one per fanned-out
+        # host -- an admin took a single action; that's what the log reflects.
+        try:
+            conn = get_db()
+            try:
+                log_remote_action(conn, email, "ALL", "BROADCAST", "queued",
+                                   reason=payload.reason, param=msg, result_summary=detail)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        return {"status": "success", "detail": detail}
+
     if host not in PENDING_COMMANDS:
         PENDING_COMMANDS[host] = []
     PENDING_COMMANDS[host].append({"command": "BROADCAST", "param": msg})
-    return {"status": "success", "detail": f"Broadcast queued for {host}"}
+    detail = f"Broadcast queued for {host}"
+    try:
+        conn = get_db()
+        try:
+            log_remote_action(conn, email, host, "BROADCAST", "queued",
+                               reason=payload.reason, param=msg, result_summary=detail)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    return {"status": "success", "detail": detail}
 
 
 # Logging Endpoints
@@ -651,6 +727,37 @@ def get_sessions(
         rows = conn.execute(query, args).fetchall()
         sessions = [dict(r) for r in rows]
         return {"total": total, "sessions": sessions}
+    finally:
+        conn.close()
+
+
+# Audit log for Control commands (Logix Control, Milestone 2). Read-only.
+# Rows show 'queued', never 'done' -- see docs/LOGIX_CONTROL.md §6 for why.
+@app.get("/api/audit-log")
+def get_audit_log(
+    limit: int = 100,
+    offset: int = 0,
+    target_device: Optional[str] = None,
+    email: str = Depends(verify_token)
+):
+    conn = get_db()
+    try:
+        query = "SELECT * FROM remote_actions WHERE 1=1"
+        count_query = "SELECT COUNT(*) FROM remote_actions WHERE 1=1"
+        args = []
+
+        if target_device:
+            query += " AND target_device LIKE ?"
+            count_query += " AND target_device LIKE ?"
+            args.append(f"%{target_device}%")
+
+        total = conn.execute(count_query, args).fetchone()[0]
+        query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        args.extend([limit, offset])
+
+        rows = conn.execute(query, args).fetchall()
+        actions = [dict(r) for r in rows]
+        return {"total": total, "actions": actions}
     finally:
         conn.close()
 
