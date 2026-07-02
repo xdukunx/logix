@@ -3,7 +3,7 @@
 > **Log · Track · Integrate** — an access logbook for a shared lab workstation.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://img.shields.io/badge/CI-py__compile%20%2B%20import%20smoke-brightgreen.svg)](.github/workflows/ci.yml)
+[![CI](https://img.shields.io/badge/CI-compile%20%2B%20round--trip%20%2B%20unit%20tests-brightgreen.svg)](.github/workflows/ci.yml)
 [![status: reference](https://img.shields.io/badge/status-reference%20publication-orange.svg)](#status)
 [![PII: local only](https://img.shields.io/badge/PII-local%20only-critical.svg)](#privacy--read-this-first)
 
@@ -73,7 +73,9 @@ optional `gspread` dependency and awaits validation against a real sheet. See
 logix/      cross-platform core: bridge + reporting + SQL helper (Python)
 install/    one installer for all three OSes (install.py + launchers)
 windows/    PowerShell popup + monitor scripts (WPF sign-in UI)
-docs/       design docs (GSheet sync, Claude Code handoff)
+server/     optional central admin server + dashboard (FastAPI) — see below
+docs/       design + audit docs (roadmap, privacy, GSheet sync, getting started)
+tests/      pytest suite: core round-trip, redaction gate, server hardening
 examples/   config.env.example — copy to config.env (gitignored)
 ```
 
@@ -138,6 +140,48 @@ python <install-dir>/gsheet_sync.py --dry-run
 
 Full runbook: [`docs/GOING_LIVE.md`](docs/GOING_LIVE.md).
 
+## Central admin server (optional)
+
+[`server/`](server/) is a small FastAPI app for fleets of workstations: a
+live dashboard (active machines, session log search, usage analytics),
+Excel report downloads, and remote lock/broadcast commands. It's a separate,
+optional component — the core agent works standalone with zero network
+dependency (`privacyMode: local_only` by default, see
+[docs/PRIVACY.md](docs/PRIVACY.md)).
+
+Run it:
+
+```bash
+cd server
+pip install -r requirements.txt
+cp .env.example .env   # fill in and load before starting — see below
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+It **must** be configured before any shared/production use — the defaults
+are deliberately locked down, not deliberately open:
+
+| Env var | Purpose |
+|---|---|
+| `LOGIX_DEV_MODE` | `0` (default) = production posture. `1` = local dev only: allows an unauthenticated mock admin login and permissive CORS. Never set `1` on a reachable server. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth for the admin dashboard. Required for real auth outside dev mode. |
+| `ADMIN_EMAILS` | Comma-separated allowlist of Google accounts permitted to sign in. |
+| `LOGIX_INGEST_API_KEY` | Shared secret workstations send as `X-API-Key` when pushing logs/heartbeats. Required outside dev mode. |
+| `LOGIX_ALLOWED_ORIGINS` | Comma-separated dashboard origins for CORS (used instead of a wildcard outside dev mode). |
+
+See [SECURITY.md](SECURITY.md) for the server's current hardening status.
+
+To point an agent at a running server, set on the workstation:
+
+```bash
+LOGIX_SERVER_URL=https://logix.example.org
+LOGIX_SERVER_API_KEY=<same value as LOGIX_INGEST_API_KEY>
+```
+
+Per-invite-code device enrollment (so each device gets its own revocable
+key instead of sharing one) is a locked design, not yet implemented — see
+[API_CONTRACT.md](API_CONTRACT.md).
+
 ## Customization
 
 - **Paths / DB location** — resolved by [`logix/paths.py`](logix/paths.py) in
@@ -162,13 +206,15 @@ Full runbook: [`docs/GOING_LIVE.md`](docs/GOING_LIVE.md).
 ## Development
 
 ```bash
-python -m py_compile logix/*.py     # what CI checks: parse + import on a synthetic DB
+python -m py_compile logix/*.py     # parse + import check
+python -m pytest tests/ -q          # redaction gate, upsert, server hardening
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) compiles the
-modules and runs a log→query round-trip on **Linux, macOS, and Windows**, plus
-a system-wide installer test — all against a **synthetic** database only, never
-real PII.
+modules, runs a log→query round-trip on **Linux, macOS, and Windows**, runs
+the full `tests/` suite (including `tests/test_server_security.py`, the
+server hardening smoke tests), and runs a system-wide installer test — all
+against a **synthetic** database only, never real PII.
 
 ## License
 
