@@ -2,7 +2,8 @@ name: CI
 
 # Light CI for a reference publication. Confirms the cross-platform core
 # (bridge + report + SQL helper) parses, imports, and round-trips a log entry
-# on Linux, macOS, and Windows — on a SYNTHETIC database only.
+# on Linux, macOS, and Windows — on a SYNTHETIC database only. Also runs the
+# server/main.py security-hardening smoke tests (tests/test_server_security.py).
 # Never point this at a real logix.db. No PII is ever used in CI.
 
 on:
@@ -58,9 +59,9 @@ jobs:
           print("round-trip + dry-run OK")
           PY
 
-      - name: Unit tests (redaction gate, upsert, schedule artifacts)
+      - name: Unit tests (redaction gate, upsert, schedule artifacts, server hardening)
         run: |
-          python -m pip install --upgrade pip pytest
+          python -m pip install --upgrade pip pytest httpx -r server/requirements.txt
           python -m pytest tests/ -q
 
   windows-popup:

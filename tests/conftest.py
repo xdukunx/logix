@@ -7,3 +7,5 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "logix"))
 # Installer-side tools (setup_sync) live here.
 sys.path.insert(0, str(_ROOT / "install"))
+# Preview server component (main.py) is not a package; import it flat too.
+sys.path.insert(0, str(_ROOT / "server"))

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logix - Lab Station Admin Oversight</title>
+    <meta name="description" content="Central administration dashboard to oversee and manage shared computational workstations.">
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+    <!-- Login Page Overlay -->
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-card">
+            <div class="login-brand">
+                <i class="fa-solid fa-shield-halved"></i>
+                <h2>Logix Admin</h2>
+                <p>Silakan masuk menggunakan surel terdaftar.</p>
+            </div>
+            <div class="login-actions" style="margin-top: 24px; text-align: center;">
+                <a href="/api/auth/google/login" class="btn-action btn-primary btn-block" style="display: flex; justify-content: center; text-decoration: none; font-size: 14px; padding: 12px;">
+                    <i class="fa-brands fa-google"></i> Masuk dengan Google
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container (Hidden until logged in) -->
+    <div class="app-container hidden" id="app-wrapper">
+        <!-- Sidebar/Navbar -->
+        <header class="app-header">
+            <div class="header-brand">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-server pulse-animation"></i>
+                </div>
+                <div class="brand-text">
+                    <h1>Logix Admin</h1>
+                    <p>Workstation Access Oversight</p>
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="header-status">
+                    <div class="status-indicator online"></div>
+                    <span>Server Terhubung</span>
+                </div>
+                <button id="btn-logout" class="btn-action btn-sm btn-logout"><i class="fa-solid fa-right-from-bracket"></i> Keluar</button>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-content">
+            <!-- Stats Row -->
+            <section class="stats-row" id="stats-section">
+                <div class="stat-card" id="stat-active-pcs">
+                    <div class="stat-icon"><i class="fa-solid fa-desktop"></i></div>
+                    <div class="stat-data">
+                        <h3>PC Aktif Saat Ini</h3>
+                        <p class="stat-value" id="val-active-pcs">0</p>
+                    </div>
+                </div>
+                <div class="stat-card" id="stat-total-logs">
+                    <div class="stat-icon"><i class="fa-solid fa-list-check"></i></div>
+                    <div class="stat-data">
+                        <h3>Total Catatan Sesi</h3>
+                        <p class="stat-value" id="val-total-logs">0</p>
+                    </div>
+                </div>
+                <div class="stat-card" id="stat-report-dl">
+                    <div class="stat-icon"><i class="fa-solid fa-file-excel"></i></div>
+                    <div class="stat-data">
+                        <h3>Laporan Logbook</h3>
+                        <div class="report-buttons">
+                            <button id="btn-dl-today" class="btn-action btn-sm"><i class="fa-solid fa-calendar-day"></i> Hari Ini</button>
+                            <button id="btn-dl-full" class="btn-action btn-sm btn-primary"><i class="fa-solid fa-download"></i> Semua</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dashboard Split Layout -->
+            <div class="dashboard-grid">
+                <!-- Left: Workstations Monitor -->
+                <section class="grid-section col-8" id="workstations-monitor">
+                    <div class="section-header">
+                        <h2><i class="fa-solid fa-display"></i> Status Workstation</h2>
+                        <div class="header-actions">
+                            <button id="btn-show-broadcast" class="btn-action btn-sm"><i class="fa-solid fa-bullhorn"></i> Emergency Alert</button>
+                            <span class="badge" id="pc-count-badge">0 Terdeteksi</span>
+                        </div>
+                    </div>
+                    <div class="workstations-grid" id="pcs-grid">
+                        <div class="loading-placeholder">
+                            <i class="fa-solid fa-circle-notch fa-spin"></i>
+                            <p>Memuat status PC...</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Right: Config Manager -->
+                <section class="grid-section col-4" id="config-manager">
+                    <div class="section-header">
+                        <h2><i class="fa-solid fa-sliders"></i> Pengaturan Popup</h2>
+                        <button id="btn-save-config" class="btn-action btn-sm btn-primary"><i class="fa-solid fa-save"></i> Simpan</button>
+                    </div>
+                    <form id="config-form" class="config-form">
+                        <!-- Branding section -->
+                        <div class="form-group-section">
+                            <h3>Branding & Identitas</h3>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="cfg-logo-text">Teks Logo</label>
+                                    <input type="text" id="cfg-logo-text" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cfg-title">Judul Utama</label>
+                                    <input type="text" id="cfg-title" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-subtitle">Sub-Judul</label>
+                                <input type="text" id="cfg-subtitle" required>
+                            </div>
+                        </div>
+
+                        <!-- Theme colors -->
+                        <div class="form-group-section">
+                            <h3>Warna Tema (Hex)</h3>
+                            <div class="color-picker-grid">
+                                <div class="color-input-group">
+                                    <label for="cfg-color-primary">Primary</label>
+                                    <div class="color-picker-wrapper">
+                                        <input type="color" id="cfg-color-primary-picker">
+                                        <input type="text" id="cfg-color-primary" pattern="^#[0-9A-Fa-f]{6}$" required>
+                                    </div>
+                                </div>
+                                <div class="color-input-group">
+                                    <label for="cfg-color-accent">Accent</label>
+                                    <div class="color-picker-wrapper">
+                                        <input type="color" id="cfg-color-accent-picker">
+                                        <input type="text" id="cfg-color-accent" pattern="^#[0-9A-Fa-f]{6}$" required>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dropdowns choices -->
+                        <div class="form-group-section">
+                            <h3>Pilihan Dropdown (Pisahkan koma)</h3>
+                            <div class="form-group">
+                                <label for="cfg-access-types">Tipe Akses</label>
+                                <textarea id="cfg-access-types" rows="2" required></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg-purposes">Tujuan Akses</label>
+                                <textarea id="cfg-purposes" rows="2" required></textarea>
+                            </div>
+                        </div>
+                    </form>
+                </section>
+            </div>
+
+            <!-- Rich Analytics Section -->
+            <section class="grid-section" id="analytics-container">
+                <div class="section-header">
+                    <h2><i class="fa-solid fa-chart-line"></i> Analisis Penggunaan Stasiun Lab</h2>
+                </div>
+                <div class="analytics-grid">
+                    <!-- Utilization chart -->
+                    <div class="analytics-card">
+                        <h3>Top Workstation (Total Jam Kerja)</h3>
+                        <div id="chart-utilization" class="svg-chart-container">
+                            <p class="text-secondary">Tidak ada data untuk dirender</p>
+                        </div>
+                    </div>
+                    <!-- Hour breakdown chart -->
+                    <div class="analytics-card">
+                        <h3>Distribusi Aktivitas per Jam</h3>
+                        <div id="chart-hourly" class="svg-chart-container">
+                            <p class="text-secondary">Tidak ada data untuk dirender</p>
+                        </div>
+                    </div>
+                    <!-- Purpose breakdown -->
+                    <div class="analytics-card">
+                        <h3>Tujuan Penggunaan</h3>
+                        <div id="chart-purposes" class="svg-chart-container">
+                            <p class="text-secondary">Tidak ada data untuk dirender</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Bottom: Log Book Table -->
+            <section class="grid-section" id="logs-container">
+                <div class="section-header logs-header">
+                    <h2><i class="fa-solid fa-history"></i> Catatan Riwayat Sesi</h2>
+                    <div class="search-box">
+                        <input type="text" id="log-search-input" placeholder="Cari Nama / PC...">
+                        <i class="fa-solid fa-search"></i>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table class="logs-table" id="table-logs">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Workstation</th>
+                                <th>Sesi</th>
+                                <th>Tipe</th>
+                                <th>Nama Pengguna</th>
+                                <th>NIM/NIP</th>
+                                <th>Tujuan</th>
+                                <th>Keterangan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-tbody">
+                            <tr>
+                                <td colspan="8" class="text-center">Memuat catatan...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-pagination">
+                    <button id="btn-prev" class="btn-action" disabled><i class="fa-solid fa-chevron-left"></i></button>
+                    <span id="page-indicator">Halaman 1</span>
+                    <button id="btn-next" class="btn-action"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </section>
+        </main>
+        
+        <footer class="app-footer">
+            <p>&copy; 2026 Logix Lab Station Management. Privacy First - Encrypted Central Log.</p>
+        </footer>
+    </div>
+
+    <!-- Emergency Broadcast Alert Modal -->
+    <div id="broadcast-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-bullhorn text-danger"></i> Kirim Emergency Alert</h2>
+                <span class="close-modal" id="close-broadcast">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="broadcast-form">
+                    <div class="form-group">
+                        <label for="broadcast-target">Target Workstation</label>
+                        <select id="broadcast-target">
+                            <option value="ALL">Semua Workstation</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-top: 16px;">
+                        <label for="broadcast-message">Pesan Alert</label>
+                        <textarea id="broadcast-message" rows="3" placeholder="Contoh: Lab akan ditutup dalam 10 menit, segera simpan pekerjaan Anda!" required></textarea>
+                    </div>
+                    <button type="submit" class="btn-action btn-primary btn-block" style="margin-top: 20px; width: 100%; justify-content: center;">
+                        <i class="fa-solid fa-paper-plane"></i> Kirim Broadcast
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -43,3 +43,15 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# --- Additive hardening (batch 1) ---------------------------------------
+# Server runtime + editor/OS cruft. The patterns above already block *.db,
+# *.env, credentials, reports, and logs; these are belt-and-suspenders.
+server/central_logix.db
+server/reports/
+*.token
+.DS_Store
+Thumbs.db
+node_modules/
+.idea/
+.vscode/
