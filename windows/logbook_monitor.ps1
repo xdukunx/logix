@@ -35,6 +35,14 @@ Start-Sleep -Seconds 2
 Invoke-InitialPopupOrTimer
 
 # SessionSwitch action intentionally spawns helper scripts instead of calling WPF in this hidden monitor process.
+# NOTE: this scriptblock runs as a PSEventJob (Register-ObjectEvent), a
+# different execution context than the rest of this script. Deliberately
+# not calling functions from logbook_common.ps1 here (e.g.
+# Test-LogbookPopupRunning) — only built-in cmdlets — so this doesn't
+# depend on cross-scope function resolution that's awkward to verify for a
+# background-thread-raised .NET event. A silent failure here would mean
+# the sign-in prompt never appears at all on unlock, which is worse than
+# the bug this guard exists to fix.
 $action = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
@@ -42,7 +50,22 @@ $action = {
     if ($reason -in @('SessionLock','ConsoleDisconnect','RemoteDisconnect','SessionLogoff')) {
         Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','END') | Out-Null
     } elseif ($reason -in @('SessionUnlock','ConsoleConnect','RemoteConnect','SessionLogon')) {
-        Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+        # Don't stack a second popup on top of one the user already left
+        # open unanswered (e.g. opened it, then locked the screen with
+        # Win+L without filling the form). The existing window is Topmost,
+        # so it simply reappears once the desktop is visible again.
+        $alreadyShowing = $false
+        try {
+            $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+                $_.CommandLine -and $_.CommandLine -match 'logbook_popup\.ps1'
+            }
+            $alreadyShowing = (($procs | Measure-Object).Count -gt 0)
+        } catch {}
+        if (-not $alreadyShowing) {
+            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+        } else {
+            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+        }
     }
 }
 
