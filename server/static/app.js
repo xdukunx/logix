@@ -157,8 +157,8 @@ document.addEventListener("DOMContentLoaded", () => {
             broadcastTarget.innerHTML = '<option value="ALL">Semua Workstation</option>';
             pcs.forEach(pc => {
                 const option = document.createElement("option");
-                option.value = pc.hostname;
-                option.textContent = pc.hostname;
+                option.value = pc.hostname; // control commands are addressed by hostname, not the display name
+                option.textContent = pc.device_name || pc.hostname;
                 broadcastTarget.appendChild(option);
             });
             broadcastTarget.value = currentSelected;
@@ -180,11 +180,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 const statusLabel = pc.status === "ACTIVE" ? "Dalam Penggunaan" : "Terkunci";
                 const isUserActive = pc.status === "ACTIVE";
                 const hostname = escapeHtml(pc.hostname);
+                const deviceName = escapeHtml(pc.device_name) || hostname;
+                const showHostnameMeta = pc.device_name && pc.device_name !== pc.hostname;
 
                 return `
                     <div class="workstation-card">
                         <div class="ws-status-light ${statusClass}"></div>
-                        <div class="ws-host">${hostname}</div>
+                        <div class="ws-host">${deviceName}</div>
+                        ${showHostnameMeta ? `<div class="ws-meta">Hostname: ${hostname}</div>` : ""}
                         <div class="ws-meta">Status: ${statusLabel}</div>
                         <div class="ws-meta"><i class="fa-regular fa-clock"></i> Aktif: ${timeStr}</div>
                         ${pc.username ? `

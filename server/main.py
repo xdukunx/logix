@@ -99,6 +99,7 @@ class HeartbeatPayload(BaseModel):
     status: str
     username: Optional[str] = ""
     anydesk_id: Optional[str] = ""
+    device_name: Optional[str] = ""
 
 class ControlRequest(BaseModel):
     hostname: str
@@ -357,6 +358,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
         "status": payload.status.upper(),
         "username": payload.username,
         "anydesk_id": ad_id,
+        "device_name": payload.device_name or payload.hostname,
         "last_seen": datetime.now()
     }
     
@@ -376,6 +378,7 @@ def get_active_workstations(email: str = Depends(verify_token)):
         if now - info["last_seen"] < timedelta(minutes=5):
             active_pcs.append({
                 "hostname": host,
+                "device_name": info["device_name"],
                 "status": info["status"],
                 "username": info["username"],
                 "anydesk_id": info["anydesk_id"],

@@ -396,12 +396,15 @@ function Send-LogbookHeartbeat {
         }
         
         $anydeskId = Get-AnyDeskId
-        
+        $deviceName = Get-LogbookConfigEnv -Key 'LOGIX_DEVICE_NAME'
+        if ([string]::IsNullOrWhiteSpace($deviceName)) { $deviceName = $env:COMPUTERNAME }
+
         $payload = @{
-            hostname   = $env:COMPUTERNAME
-            status     = $Status
-            username   = $username
-            anydesk_id = $anydeskId
+            hostname    = $env:COMPUTERNAME
+            device_name = $deviceName
+            status      = $Status
+            username    = $username
+            anydesk_id  = $anydeskId
         }
         
         $headers = @{

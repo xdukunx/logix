@@ -19,13 +19,15 @@ try {
 }
 
 # Fetch existing config options to prefill the textboxes
+$deviceName = Get-LogbookConfigEnv -Key 'LOGIX_DEVICE_NAME'
+if ([string]::IsNullOrWhiteSpace($deviceName)) { $deviceName = $env:COMPUTERNAME }
 $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
 $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
 
 $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Logix Workstation Setup" Height="420" Width="480"
+        Title="Logix Workstation Setup" Height="500" Width="480"
         WindowStartupLocation="CenterScreen" Background="#0b0f19" ResizeMode="NoResize"
         FontFamily="Segoe UI, Tahoma, Geneva, Verdana, sans-serif">
   <Grid Margin="24">
@@ -44,9 +46,12 @@ $xaml = @"
 
     <!-- Inputs -->
     <StackPanel Grid.Row="1" Margin="0,0,0,16">
-      <TextBlock Text="URL SERVER ADMINISTRASI" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,0,0,6"/>
+      <TextBlock Text="NAMA DEVICE (TAMPIL DI DASHBOARD ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,0,0,6"/>
+      <TextBox Name="DeviceNameBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+
+      <TextBlock Text="URL SERVER ADMINISTRASI" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,16,0,6"/>
       <TextBox Name="ServerUrlBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
-      
+
       <TextBlock Text="API KEY SERVER (OPSIONAL)" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,16,0,6"/>
       <TextBox Name="ApiKeyBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
     </StackPanel>
@@ -79,6 +84,7 @@ $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
 # Resolve Control Handles
+$nameBox = $window.FindName('DeviceNameBox')
 $urlBox = $window.FindName('ServerUrlBox')
 $keyBox = $window.FindName('ApiKeyBox')
 $statusText = $window.FindName('StatusText')
@@ -87,6 +93,7 @@ $saveBtn = $window.FindName('SaveBtn')
 $cancelBtn = $window.FindName('CancelBtn')
 
 # Prefill Values
+$nameBox.Text = $deviceName
 $urlBox.Text = $serverUrl
 $keyBox.Text = $serverKey
 
@@ -126,26 +133,34 @@ $testBtn.Add_Click({
 
 # Link Save Button Click
 $saveBtn.Add_Click({
+    $name = $nameBox.Text.Trim()
     $url = $urlBox.Text.Trim()
     $key = $keyBox.Text.Trim()
-    
-    if (-not $url) {
-        $statusText.Text = "Error: URL Server tidak boleh kosong."
+
+    # Device name is required (defaults to the hostname, so this only fires
+    # if the user deliberately clears it) — it's how this workstation shows
+    # up on the admin dashboard, with or without a server configured yet.
+    if (-not $name) {
+        $statusText.Text = "Error: Nama Device tidak boleh kosong."
         $statusText.Foreground = [System.Windows.Media.Brushes]::Red
         return
     }
-    
+
     try {
         $cfgPath = 'C:\ProgramData\Logix\config.env'
         $newLines = @()
+        $hasName = $false
         $hasUrl = $false
         $hasKey = $false
-        
+
         if (Test-Path $cfgPath) {
             $lines = Get-Content $cfgPath
             foreach ($line in $lines) {
                 $trimmed = $line.Trim()
-                if ($trimmed.StartsWith('LOGIX_SERVER_URL=') -or $trimmed.StartsWith('export LOGIX_SERVER_URL=')) {
+                if ($trimmed.StartsWith('LOGIX_DEVICE_NAME=') -or $trimmed.StartsWith('export LOGIX_DEVICE_NAME=')) {
+                    $newLines += "LOGIX_DEVICE_NAME=$name"
+                    $hasName = $true
+                } elseif ($trimmed.StartsWith('LOGIX_SERVER_URL=') -or $trimmed.StartsWith('export LOGIX_SERVER_URL=')) {
                     $newLines += "LOGIX_SERVER_URL=$url"
                     $hasUrl = $true
                 } elseif ($trimmed.StartsWith('LOGIX_SERVER_API_KEY=') -or $trimmed.StartsWith('export LOGIX_SERVER_API_KEY=')) {
@@ -156,15 +171,16 @@ $saveBtn.Add_Click({
                 }
             }
         }
-        
+
+        if (-not $hasName) { $newLines += "LOGIX_DEVICE_NAME=$name" }
         if (-not $hasUrl) { $newLines += "LOGIX_SERVER_URL=$url" }
         if (-not $hasKey) { $newLines += "LOGIX_SERVER_API_KEY=$key" }
-        
+
         $parent = Split-Path $cfgPath
         if (-not (Test-Path $parent)) {
             New-Item -ItemType Directory -Force -Path $parent | Out-Null
         }
-        
+
         $newLines | Out-File -FilePath $cfgPath -Encoding UTF8 -Force
         $window.Close()
     } catch {
