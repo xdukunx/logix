@@ -120,6 +120,7 @@ def test_sync_default_max_attempts_is_one(tmp_path, monkeypatch):
     fire-and-forget attempt -- must never silently start blocking longer."""
     import log_physical
     monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
     monkeypatch.setattr(log_physical.time, "sleep", lambda s: None)
 
     calls = []
@@ -143,6 +144,7 @@ def test_sync_default_max_attempts_is_one(tmp_path, monkeypatch):
 def test_sync_retries_on_network_failure_then_succeeds(tmp_path, monkeypatch):
     import log_physical
     monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
     sleeps = []
     monkeypatch.setattr(log_physical.time, "sleep", lambda s: sleeps.append(s))
 
@@ -176,6 +178,7 @@ def test_sync_does_not_retry_on_http_error(tmp_path, monkeypatch):
     request -- retrying won't fix a 4xx/5xx."""
     import log_physical
     monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
     monkeypatch.setattr(log_physical.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("must not sleep/retry on HTTPError")))
 
     calls = []
@@ -194,3 +197,119 @@ def test_sync_does_not_retry_on_http_error(tmp_path, monkeypatch):
 
     assert result == 0
     assert len(calls) == 1
+
+
+# --- Privacy-mode enforcement at the agent boundary (roadmap item F) -------
+# docs/PRIVACY.md: "default = safest" -- local_only unless explicitly
+# overridden. /api/log only ever carries full-detail rows, so it's gated to
+# admin_full_sync specifically; redacted_sync's real delivery path is
+# logix/gsheet_sync.py's already-tested redact() whitelist, untouched here.
+
+def test_privacy_mode_defaults_to_local_only(monkeypatch):
+    import paths
+    monkeypatch.delenv("LOGIX_PRIVACY_MODE", raising=False)
+    assert paths.privacy_mode() == "local_only"
+
+
+def test_privacy_mode_reads_env_case_insensitively(monkeypatch):
+    import paths
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "Admin_Full_Sync")
+    assert paths.privacy_mode() == "admin_full_sync"
+
+
+def test_privacy_mode_rejects_unrecognized_value(monkeypatch):
+    import paths
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "bogus_mode")
+    try:
+        paths.privacy_mode()
+        assert False, "expected ValueError for an unrecognized privacy mode"
+    except ValueError:
+        pass
+
+
+def test_sync_skipped_under_default_local_only_even_with_server_configured(tmp_path, monkeypatch, capsys):
+    """The core enforcement: today, a configured LOGIX_SERVER_URL alone was
+    enough to sync. Now it must NOT be, unless privacy mode is explicitly
+    admin_full_sync -- and the reason must be loud, not silent."""
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.delenv("LOGIX_PRIVACY_MODE", raising=False)
+
+    def _fail_if_called(*a, **kw):
+        raise AssertionError("must not attempt to sync under local_only")
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _fail_if_called)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        result = log_physical.sync_unsynced_logs(con)
+        err = capsys.readouterr().err
+    finally:
+        con.close()
+
+    assert result == 0
+    assert "local_only" in err
+    assert "admin_full_sync" in err
+
+
+def test_sync_skipped_under_redacted_sync_too(tmp_path, monkeypatch):
+    """redacted_sync does not get a reshaped /api/log payload -- that
+    endpoint is inherently full-detail. gsheet_sync.py is the real
+    redacted_sync delivery path, unaffected by this gate."""
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "redacted_sync")
+
+    def _fail_if_called(*a, **kw):
+        raise AssertionError("must not attempt to sync under redacted_sync")
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _fail_if_called)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        result = log_physical.sync_unsynced_logs(con)
+    finally:
+        con.close()
+
+    assert result == 0
+
+
+def test_sync_proceeds_under_admin_full_sync(tmp_path, monkeypatch):
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+
+    class _FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse())
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        result = log_physical.sync_unsynced_logs(con)
+    finally:
+        con.close()
+
+    assert result == 1
+
+
+def test_preview_reports_skip_reason_under_local_only(tmp_path, monkeypatch, capsys):
+    import log_physical
+    monkeypatch.delenv("LOGIX_PRIVACY_MODE", raising=False)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        log_physical.preview_sync(con)
+        out = capsys.readouterr().out
+    finally:
+        con.close()
+
+    assert "none would actually be sent" in out
+    assert "local_only" in out

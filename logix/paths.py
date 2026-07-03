@@ -117,6 +117,21 @@ def server_api_key() -> str:
     return get("LOGIX_SERVER_API_KEY", "")
 
 
+_VALID_PRIVACY_MODES = {"local_only", "redacted_sync", "admin_full_sync"}
+
+
+def privacy_mode() -> str:
+    """docs/PRIVACY.md's three sync modes -- 'default = safest', so
+    local_only (nothing leaves the device) unless explicitly overridden.
+    Fails fast on an unrecognized value rather than silently coercing it --
+    a config typo shouldn't silently misassign a mode with real privacy
+    consequences (same reasoning as server/main.py's get_admin_roles())."""
+    mode = get("LOGIX_PRIVACY_MODE", "local_only").strip().lower()
+    if mode not in _VALID_PRIVACY_MODES:
+        raise ValueError(f"LOGIX_PRIVACY_MODE: unrecognized value {mode!r}, expected one of {sorted(_VALID_PRIVACY_MODES)}")
+    return mode
+
+
 # --- Device identity (Logix Control enrollment) -----------------------------
 # Per API_CONTRACT.md: local-first, retryable identity, deliberately kept
 # separate from config.env (which is operator-supplied config written once

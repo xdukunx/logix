@@ -422,6 +422,14 @@ def preview_sync(con: sqlite3.Connection) -> int:
     preview command run at a terminal shouldn't itself become a way to
     print nama/nim/keterangan to a screen or log file."""
     rows = unsynced_log_rows(con)
+    mode = paths.privacy_mode()
+    if mode != "admin_full_sync":
+        print(
+            f"{len(rows)} unsynced event(s) exist, but none would actually be sent: "
+            f"LOGIX_PRIVACY_MODE={mode!r} (must be 'admin_full_sync' for /api/log). "
+            "See docs/PRIVACY.md."
+        )
+        return len(rows)
     print(f"{len(rows)} unsynced event(s) would be sent to {paths.server_url() or '(no server configured)'}:")
     for r in rows:
         print(f"  #{r['id']} {r['timestamp']} {r['event']} host={r['hostname']} type={r['session_type']}")
@@ -441,6 +449,28 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
     url = paths.server_url()
     if not url:
         return 0
+
+    # Privacy-mode enforcement at the agent boundary (docs/PRIVACY.md,
+    # "default = safest"): /api/log carries full-detail rows (nama, nim,
+    # keterangan, client_ip, raw_json -- exactly what redacted_sync
+    # excludes), so it's only ever reachable under admin_full_sync. This is
+    # deliberately not "send a reshaped/redacted version instead" -- that
+    # would invent an undocumented variant of /api/log's contract.
+    # redacted_sync's actual, already-built, already-tested delivery path
+    # is logix/gsheet_sync.py's redact() whitelist gate, unaffected by this
+    # check. A server URL being configured but privacy_mode left at its
+    # local_only default is loud, not silent -- this is a real behavior
+    # change for any install that was syncing before this existed.
+    mode = paths.privacy_mode()
+    if mode != "admin_full_sync":
+        print(
+            f"Sync skipped: LOGIX_PRIVACY_MODE={mode!r} (default local_only). "
+            "No session data leaves this device unless privacy mode is "
+            "explicitly set to admin_full_sync. See docs/PRIVACY.md.",
+            file=sys.stderr,
+        )
+        return 0
+
     # Per-device key takes priority once enrolled; mirrors verify_api_key's
     # fallback order on the server.
     api_key = paths.device_api_key() or paths.server_api_key()
