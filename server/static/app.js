@@ -5,6 +5,8 @@ import { getToken, setToken, clearToken, fetchWithAuth, setOnSessionExpired, sho
 import { fetchActiveWorkstations } from "./js/monitoring.js";
 import { fetchAnalytics, fetchSessionLogs, fetchAuditLog } from "./js/analytics.js";
 import { loadConfiguration } from "./js/settings.js";
+import { fetchDevices, fetchBacklogCount } from "./js/devices.js";
+import { fetchAlerts } from "./js/alerts.js";
 import "./js/report-modal.js"; // self-wires its own listeners on import
 
 const loginOverlay = document.getElementById("login-overlay");
@@ -13,9 +15,14 @@ const btnLogout = document.getElementById("btn-logout");
 const pageTitle = document.getElementById("page-title");
 const navButtons = document.querySelectorAll(".sidebar-nav-item[data-tab]");
 
+const serverStatusEl = document.getElementById("server-status");
+const serverStatusDot = document.getElementById("server-status-dot");
+const serverStatusText = document.getElementById("server-status-text");
+
 const TABS = {
     monitoring: { title: "Monitoring", onShow: () => fetchActiveWorkstations() },
     analytics: { title: "Analytics", onShow: () => { fetchAnalytics(); fetchSessionLogs(); fetchAuditLog(); } },
+    devices: { title: "Devices", onShow: () => { fetchDevices(); fetchBacklogCount(); } },
     settings: { title: "Settings", onShow: () => loadConfiguration() },
 };
 
@@ -47,9 +54,58 @@ const showAppScreen = () => {
     loginOverlay.classList.add("hidden");
     appWrapper.classList.remove("hidden");
     switchTab(window.location.hash.slice(1) || "monitoring");
+    fetchAlerts();
 };
 
 setOnSessionExpired(showLoginScreen);
+
+// Real sidebar connectivity indicator (roadmap item H) -- replaces the old
+// static "Server Terhubung" dot, which stayed green even while the offline
+// banner (js/api.js) was red. Reuses the same browser online/offline signal
+// as that banner, plus a lightweight GET /api/health poll so "the network
+// adapter is up" and "the server process is actually answering" are both
+// covered -- either one failing should read as disconnected.
+const STATUS_LABELS = {
+    connected: "Server Terhubung",
+    disconnected: "Terputus dari Server",
+    checking: "Memeriksa Koneksi...",
+};
+
+const setConnectivityState = (state) => {
+    serverStatusEl.classList.remove("connected", "disconnected", "checking");
+    serverStatusEl.classList.add(state);
+    serverStatusDot.classList.remove("online", "offline", "checking");
+    serverStatusDot.classList.add(state === "connected" ? "online" : state === "disconnected" ? "offline" : "checking");
+    serverStatusText.textContent = STATUS_LABELS[state];
+};
+
+let serverReachable = null; // unknown until the first check resolves
+
+const checkServerHealth = async () => {
+    if (!navigator.onLine) {
+        serverReachable = false;
+        setConnectivityState("disconnected");
+        return;
+    }
+    if (serverReachable !== true) setConnectivityState("checking");
+    try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        serverReachable = res.ok;
+        setConnectivityState(res.ok ? "connected" : "disconnected");
+    } catch (err) {
+        serverReachable = false;
+        setConnectivityState("disconnected");
+    }
+};
+
+window.addEventListener("online", checkServerHealth);
+window.addEventListener("offline", () => {
+    serverReachable = false;
+    setConnectivityState("disconnected");
+});
+
+checkServerHealth();
+setInterval(checkServerHealth, 20000);
 
 // Logout Handler
 btnLogout.addEventListener("click", async () => {
@@ -81,6 +137,7 @@ setInterval(() => {
     if (!getToken()) return;
     if (currentTab === "monitoring") fetchActiveWorkstations();
     if (currentTab === "analytics") fetchAnalytics();
+    if (currentTab === "devices") { fetchDevices(); fetchBacklogCount(); }
 }, 10000);
 
 setInterval(() => {
@@ -89,4 +146,13 @@ setInterval(() => {
         fetchSessionLogs();
         fetchAuditLog();
     }
+}, 30000);
+
+// Alerts are global chrome (the header bell), not tied to any one tab, so
+// this poll runs regardless of currentTab -- same footing as the sidebar
+// connectivity check. 30s matches the other "not urgent, not slow" polls
+// above rather than the 10s tab-refresh cadence, per "no heavy polling".
+setInterval(() => {
+    if (!getToken()) return;
+    fetchAlerts();
 }, 30000);

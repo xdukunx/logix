@@ -1,6 +1,6 @@
 // Analytics tab: the 3 charts, the session-logs table, and the Control
 // audit-log table. Logic moved as-is from the pre-redesign app.js.
-import { fetchWithAuth, escapeHtml } from "./api.js";
+import { fetchWithAuth, escapeHtml, renderError } from "./api.js";
 
 const logsTbody = document.getElementById("logs-tbody");
 const auditLogTbody = document.getElementById("audit-log-tbody");
@@ -116,6 +116,10 @@ export const fetchAnalytics = async () => {
 
     } catch (err) {
         console.error(err);
+        ["chart-utilization", "chart-purposes", "chart-hourly"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) renderError(el, "Gagal memuat grafik.");
+        });
     }
 };
 

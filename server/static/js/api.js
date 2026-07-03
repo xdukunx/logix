@@ -55,3 +55,52 @@ export const showToast = (message, isError = false) => {
         toastEl.classList.add("hidden");
     }, 3000);
 };
+
+// Shared loading/empty/error state markup (roadmap item G) -- factors out
+// what monitoring.js and analytics.js each used to hand-roll slightly
+// differently, and gives new views (Devices) one consistent look from the
+// start. Callers pass the container they want the state rendered into.
+export const renderLoading = (container, message = "Memuat data...") => {
+    container.innerHTML = `
+        <div class="loading-placeholder">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>${escapeHtml(message)}</p>
+        </div>`;
+};
+
+export const renderError = (container, message = "Gagal memuat data dari server.") => {
+    container.innerHTML = `
+        <div class="empty-state">
+            <i class="fa-solid fa-triangle-exclamation" style="color: var(--danger-color)"></i>
+            <p class="empty-title">Terjadi Kesalahan</p>
+            <p class="empty-helper">${escapeHtml(message)}</p>
+        </div>`;
+};
+
+export const renderEmpty = (container, { icon = "fa-inbox", title = "Tidak ada data", helper = "" } = {}) => {
+    container.innerHTML = `
+        <div class="empty-state">
+            <i class="fa-solid ${icon}"></i>
+            <p class="empty-title">${escapeHtml(title)}</p>
+            ${helper ? `<p class="empty-helper">${escapeHtml(helper)}</p>` : ""}
+        </div>`;
+};
+
+// Offline banner -- wired once here so every module gets it for free rather
+// than each tab reinventing connectivity detection. Pure network-adapter
+// state (navigator.onLine / online/offline events), not a fetch failure --
+// a fetch can still fail while the browser reports itself online, which is
+// what renderError above is for.
+let offlineBannerEl = null;
+const ensureOfflineBanner = () => {
+    if (offlineBannerEl) return offlineBannerEl;
+    offlineBannerEl = document.createElement("div");
+    offlineBannerEl.id = "offline-banner";
+    offlineBannerEl.className = "offline-banner hidden";
+    offlineBannerEl.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Koneksi terputus — data mungkin tidak terbaru.`;
+    document.body.prepend(offlineBannerEl);
+    return offlineBannerEl;
+};
+window.addEventListener("online", () => ensureOfflineBanner().classList.add("hidden"));
+window.addEventListener("offline", () => ensureOfflineBanner().classList.remove("hidden"));
+if (!navigator.onLine) ensureOfflineBanner().classList.remove("hidden");

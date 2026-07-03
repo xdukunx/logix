@@ -1,7 +1,7 @@
 // Monitoring tab: active-device summary, workstation cards, empty state,
 // lock command, the right-click context menu (active sessions only), and
 // the inline message/broadcast card.
-import { fetchWithAuth, escapeHtml, showToast } from "./api.js";
+import { fetchWithAuth, escapeHtml, showToast, renderError } from "./api.js";
 
 const pcsGrid = document.getElementById("pcs-grid");
 const valActivePcs = document.getElementById("val-active-pcs");
@@ -214,6 +214,7 @@ export const fetchActiveWorkstations = async () => {
 
     } catch (err) {
         console.error(err);
+        renderError(pcsGrid, "Gagal memuat status workstation.");
     }
 };
 

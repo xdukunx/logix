@@ -138,9 +138,18 @@ def test_expired_command_never_delivered_and_marked_expired(monkeypatch, tmp_pat
         client.post("/api/control/lock", json={"hostname": "LAB-PC-07"}, headers=headers)
         command_id = module.PENDING_COMMANDS["LAB-PC-07"][0]["command_id"]
 
-        # Simulate the command having sat in the queue past the TTL.
+        # Simulate the command having sat in the queue past the TTL. Roadmap
+        # item J moved expiry to reconcile_expired_actions(), which checks
+        # remote_actions.timestamp (the DB row) rather than the in-memory
+        # PENDING_COMMANDS queued_at -- backdate both so this stays a
+        # faithful simulation of real elapsed time (in production the two
+        # are always set together, at queue time).
         stale = (datetime.now() - timedelta(minutes=module.COMMAND_TTL_MINUTES + 1)).isoformat()
         module.PENDING_COMMANDS["LAB-PC-07"][0]["queued_at"] = stale
+        conn = module.get_db()
+        conn.execute("UPDATE remote_actions SET timestamp = ? WHERE command_id = ?", (stale, command_id))
+        conn.commit()
+        conn.close()
 
         res = _heartbeat(client, "LAB-PC-07")
         actions = client.get("/api/audit-log", headers=headers).json()["actions"]

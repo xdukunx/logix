@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Query, Body, Cookie, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -153,6 +153,30 @@ CATEGORY_PROFILES = {
     "custom": {"heartbeat_interval_seconds": 60, "popup_frequency": "every_unlock"},
 }
 
+
+def compute_sync_status(category: Optional[str], last_seen, now: Optional[datetime] = None) -> str:
+    """Bucket a device's freshness against its category's expected heartbeat
+    cadence (CATEGORY_PROFILES) instead of one flat cutoff -- replaces the
+    flat 5-minute check that used to be duplicated in
+    get_active_workstations() and get_devices(). Thresholds are multiples of
+    heartbeat_interval_seconds: online <= 2x (tolerates one missed beat +
+    jitter), stale <= 6x (several missed beats, plausibly reachable), else
+    offline. last_seen may be a datetime, an ISO string, or None/falsy.
+    """
+    if not last_seen:
+        return "never_seen"
+    last_seen_dt = last_seen if isinstance(last_seen, datetime) else datetime.fromisoformat(last_seen)
+    now = now or datetime.now()
+    profile = CATEGORY_PROFILES.get(category or "custom", CATEGORY_PROFILES["custom"])
+    interval = profile["heartbeat_interval_seconds"]
+    age = (now - last_seen_dt).total_seconds()
+    if age <= interval * 2:
+        return "online"
+    if age <= interval * 6:
+        return "stale"
+    return "offline"
+
+
 # Policy profiles: named bundles a device can be assigned to. Seeded with the
 # 7 profiles from docs/LOGIX_CONTROL.md §5 -- data only, nothing reads or
 # enforces allowed_capabilities yet (there's only "lock" and "broadcast" to
@@ -213,13 +237,52 @@ REMOTE_ACTION_COLUMNS = {
     # Set only by an ack or a TTL expiry -- distinguishes "queued" from
     # "we know what actually happened and when."
     "executed_at": "TEXT",
+    # Roadmap item J: minimal retry lifecycle. A retry is a new child row
+    # (retry_of_action_id points at the original), not an in-place mutation
+    # -- preserves full history the same way alerts are resolved rather than
+    # deleted. retry_count is *this row's* attempt number (0 for an original
+    # action); max_retries caps how many times it may still be retried.
+    "retry_count": "INTEGER DEFAULT 0",
+    "max_retries": "INTEGER DEFAULT 1",
+    "retry_of_action_id": "INTEGER",
 }
 
 # How long a queued command waits for its device to check in before it's
 # considered stale and withheld rather than delivered. Without this, a
 # device offline for hours would fire an old LOCK/BROADCAST the moment it
-# reconnects, with no indication to the admin that context is stale.
+# reconnects, with no indication to the admin that context is stale. Also
+# the single TTL used by reconcile_expired_actions() for DB-level expiry,
+# so a command expires consistently whether or not its device ever
+# heartbeats again (see that function's docstring).
 COMMAND_TTL_MINUTES = 5
+
+# Only these action types are ever queued/delivered to a device and can
+# genuinely fail due to connectivity -- safe to retry. RENAME and
+# REVOKE_API_KEY are synchronous server-side edits (never queued, always
+# logged 'done' immediately), and REVOKE_API_KEY is explicitly
+# security-sensitive -- neither is offered a Retry action, automatic or
+# manual, per roadmap item J §C.
+RETRYABLE_ACTION_TYPES = {"LOCK", "BROADCAST"}
+DEFAULT_MAX_RETRIES = 1
+
+# System Alerts (roadmap item I). Rows are never deleted -- a cleared
+# condition is marked 'resolved' (status: active|acknowledged|resolved) so
+# history survives and a later recurrence can create a fresh row. device_id
+# is nullable for future non-device-scoped alerts, though every category
+# generated today is device-scoped. See reconcile_alerts() below.
+ALERT_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "severity": "TEXT NOT NULL",
+    "category": "TEXT NOT NULL",
+    "title": "TEXT NOT NULL",
+    "message": "TEXT NOT NULL",
+    "device_id": "TEXT",
+    "device_name": "TEXT",
+    "status": "TEXT NOT NULL DEFAULT 'active'",
+    "created_at": "TEXT NOT NULL",
+    "acknowledged_at": "TEXT",
+    "resolved_at": "TEXT",
+}
 
 class LogPayload(BaseModel):
     timestamp: str
@@ -371,6 +434,11 @@ def init_control_tables():
         conn.execute(f"CREATE TABLE IF NOT EXISTS remote_actions (\n        {action_defs}\n    )")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_remote_actions_timestamp ON remote_actions(timestamp)")
 
+        alert_defs = ",\n        ".join(f"{k} {v}" for k, v in ALERT_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS alerts (\n        {alert_defs}\n    )")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_category_device ON alerts(category, device_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status)")
+
         # Additive migration: a remote_actions table created before command
         # acks shipped won't have these yet.
         existing_action_cols = {row["name"] for row in conn.execute("PRAGMA table_info(remote_actions)").fetchall()}
@@ -378,6 +446,14 @@ def init_control_tables():
             conn.execute("ALTER TABLE remote_actions ADD COLUMN command_id TEXT")
         if "executed_at" not in existing_action_cols:
             conn.execute("ALTER TABLE remote_actions ADD COLUMN executed_at TEXT")
+        # Additive migration: a remote_actions table created before roadmap
+        # item J's retry lifecycle won't have these yet.
+        if "retry_count" not in existing_action_cols:
+            conn.execute("ALTER TABLE remote_actions ADD COLUMN retry_count INTEGER DEFAULT 0")
+        if "max_retries" not in existing_action_cols:
+            conn.execute(f"ALTER TABLE remote_actions ADD COLUMN max_retries INTEGER DEFAULT {DEFAULT_MAX_RETRIES}")
+        if "retry_of_action_id" not in existing_action_cols:
+            conn.execute("ALTER TABLE remote_actions ADD COLUMN retry_of_action_id INTEGER")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_remote_actions_command_id ON remote_actions(command_id)")
 
         now = datetime.now().isoformat()
@@ -485,6 +561,204 @@ def apply_command_acks(conn, acks: List[Dict[str, Any]]):
     conn.commit()
 
 
+# Roadmap item J: command lifecycle reliability. -----------------------------
+
+def reconcile_expired_actions(conn) -> None:
+    """Mark any 'queued' remote_actions row older than COMMAND_TTL_MINUTES as
+    'expired', DB-wide -- not just for whichever hostname happens to be
+    heartbeating right now. post_heartbeat's old inline sweep only expired
+    entries sitting in *that device's* in-memory PENDING_COMMANDS list, so a
+    device that never heartbeats again left its queued row stuck 'queued'
+    forever. This is the real fix: called lazily from GET /api/alerts, device detail,
+    and post_heartbeat, so it's current within one request of anywhere that
+    matters, without a background scheduler.
+
+    Also purges the same command_ids from the in-memory PENDING_COMMANDS
+    queues so an expired command is never handed to a device as work, even
+    if it's still sitting in that dict for some other reason.
+    """
+    cutoff = (datetime.now() - timedelta(minutes=COMMAND_TTL_MINUTES)).isoformat()
+    now = datetime.now().isoformat()
+    newly_expired = conn.execute(
+        "SELECT command_id FROM remote_actions WHERE status = 'queued' AND timestamp < ?",
+        (cutoff,),
+    ).fetchall()
+    if not newly_expired:
+        return
+    conn.execute(
+        "UPDATE remote_actions SET status = 'expired', executed_at = ? "
+        "WHERE status = 'queued' AND timestamp < ?",
+        (now, cutoff),
+    )
+    conn.commit()
+    expired_command_ids = {row["command_id"] for row in newly_expired if row["command_id"]}
+    if not expired_command_ids:
+        return
+    for hostname in list(PENDING_COMMANDS.keys()):
+        PENDING_COMMANDS[hostname] = [
+            c for c in PENDING_COMMANDS[hostname] if c.get("command_id") not in expired_command_ids
+        ]
+
+
+def rehydrate_pending_commands() -> None:
+    """Rebuild the in-memory delivery queue from 'queued' DB rows at startup.
+    PENDING_COMMANDS is memory-only and wiped by a server restart, but the
+    remote_actions rows survive it -- without this, a command queued right
+    before a restart would sit 'queued' in the DB forever, undeliverable,
+    until reconcile_expired_actions() eventually marked it expired, even if
+    its device reconnects well within the TTL. Idempotent (checks
+    command_id membership first) so calling it more than once is harmless.
+    """
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT target_device, command_id, action_type, param, timestamp FROM remote_actions "
+            "WHERE status = 'queued' AND target_device IS NOT NULL"
+        ).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        existing_ids = {c.get("command_id") for c in PENDING_COMMANDS.get(row["target_device"], [])}
+        if row["command_id"] in existing_ids:
+            continue
+        PENDING_COMMANDS.setdefault(row["target_device"], []).append({
+            "command_id": row["command_id"],
+            "command": row["action_type"],
+            "param": row["param"] or "",
+            "queued_at": row["timestamp"],
+        })
+
+
+# --- System Alerts (roadmap item I) ---------------------------------------
+# No background scheduler exists in this codebase (the closest precedent,
+# the command TTL sweep, runs inline inside post_heartbeat), so alerts are
+# reconciled lazily: reconcile_alerts() re-evaluates every device/action
+# condition and upserts the alerts table each time GET /api/alerts is
+# called, rather than on a timer. Cheap for the device counts this project
+# targets (a shared lab, not a datacenter fleet).
+
+def _get_or_create_alert(conn, category: str, device_id: str, device_name: str,
+                          severity: str, title: str, message: str) -> None:
+    """Dedup key: category + device_id + status != 'resolved' (an
+    'unresolved' alert). A persistent condition (e.g. a device that stays
+    offline across many reconcile passes) must not spam a new row every
+    time this runs -- only create one if no unresolved row already covers
+    the same category+device."""
+    existing = conn.execute(
+        "SELECT id FROM alerts WHERE category = ? AND device_id = ? AND status != 'resolved'",
+        (category, device_id),
+    ).fetchone()
+    if existing:
+        return
+    conn.execute(
+        "INSERT INTO alerts (severity, category, title, message, device_id, device_name, status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
+        (severity, category, title, message, device_id, device_name, datetime.now().isoformat()),
+    )
+
+
+def _resolve_alert_if_unresolved(conn, category: str, device_id: str) -> None:
+    """The underlying condition cleared -- mark resolved rather than delete,
+    so history survives and a later recurrence is free to create a fresh
+    row (a resolved row is no longer 'unresolved', so the dedup check in
+    _get_or_create_alert won't be blocked by it)."""
+    conn.execute(
+        "UPDATE alerts SET status = 'resolved', resolved_at = ? "
+        "WHERE category = ? AND device_id = ? AND status != 'resolved'",
+        (datetime.now().isoformat(), category, device_id),
+    )
+
+
+def _reconcile_event_alerts(conn, category: str, action_status: str, severity: str,
+                             device_names: dict, title_fn, message_fn) -> None:
+    """Shared dedup logic for discrete, already-happened event alerts
+    (failed commands, expired commands) that have no ongoing condition to
+    clear -- see action_failed's original comment. A matching
+    remote_actions row never disappears on its own, so the plain
+    unresolved-only dedup in _get_or_create_alert isn't enough by itself:
+    once an alert is resolved, only alert again on a failure/expiry newer
+    than the most recent existing alert (any status) for that
+    category+device -- a genuine new occurrence is always newer than the
+    alert its predecessor produced, so this lets a fresh recurrence through
+    without resurrecting an already-closed one.
+    """
+    rows = conn.execute(
+        "SELECT target_device_id, target_device, MAX(timestamp) AS latest FROM remote_actions "
+        "WHERE status = ? AND target_device_id IS NOT NULL GROUP BY target_device_id, target_device",
+        (action_status,),
+    ).fetchall()
+    for row in rows:
+        device_id = row["target_device_id"]
+        last_alert = conn.execute(
+            "SELECT created_at FROM alerts WHERE category = ? AND device_id = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (category, device_id),
+        ).fetchone()
+        if last_alert and last_alert["created_at"] >= row["latest"]:
+            continue  # this occurrence (or a later one) was already alerted on
+        device_name, hostname = device_names.get(device_id, (row["target_device"], row["target_device"]))
+        _get_or_create_alert(
+            conn, category, device_id, device_name, severity,
+            title_fn(device_name), message_fn(device_name, hostname),
+        )
+
+
+def reconcile_alerts(conn) -> None:
+    # Close the loop roadmap item I left open: a command stuck 'queued'
+    # past its TTL is now actually marked 'expired' here, before
+    # command_expired alerts are evaluated further down.
+    reconcile_expired_actions(conn)
+
+    now = datetime.now()
+    devices = conn.execute(
+        "SELECT device_id, hostname, display_name, category, last_seen FROM devices"
+    ).fetchall()
+    device_names = {d["device_id"]: (d["display_name"] or d["hostname"], d["hostname"]) for d in devices}
+
+    for d in devices:
+        device_id = d["device_id"]
+        device_name = d["display_name"] or d["hostname"]
+        live = HEARTBEATS.get(d["hostname"])
+        live_last_seen = live["last_seen"] if live else None
+        status = compute_sync_status(d["category"], live_last_seen or d["last_seen"], now)
+
+        if status == "stale":
+            _get_or_create_alert(
+                conn, "device_stale", device_id, device_name, "warning",
+                f"Device stale: {device_name}",
+                f"{device_name} ({d['hostname']}) belum mengirim heartbeat sesuai jadwal.",
+            )
+        else:
+            _resolve_alert_if_unresolved(conn, "device_stale", device_id)
+
+        if status == "offline":
+            _get_or_create_alert(
+                conn, "device_offline", device_id, device_name, "critical",
+                f"Device offline: {device_name}",
+                f"{device_name} ({d['hostname']}) tidak terhubung dalam waktu yang cukup lama.",
+            )
+        else:
+            _resolve_alert_if_unresolved(conn, "device_offline", device_id)
+
+    # Failed and expired remote actions are both discrete, already-happened
+    # events (not ongoing conditions) -- see _reconcile_event_alerts's
+    # docstring for the dedup rationale. Failed commands are closed manually
+    # via POST /api/alerts/{id}/resolve (no "cleared" state exists to
+    # auto-resolve on); expired ones the same way.
+    _reconcile_event_alerts(
+        conn, "action_failed", "failed", "critical", device_names,
+        title_fn=lambda name: f"Perintah gagal: {name}",
+        message_fn=lambda name, host: f"Salah satu perintah untuk {name} ({host}) gagal dijalankan.",
+    )
+    _reconcile_event_alerts(
+        conn, "command_expired", "expired", "warning", device_names,
+        title_fn=lambda name: f"Perintah kedaluwarsa: {name}",
+        message_fn=lambda name, host: f"Salah satu perintah untuk {name} ({host}) kedaluwarsa sebelum sempat dikirim.",
+    )
+
+    conn.commit()
+
+
 # --- RBAC (Logix Control Milestone 3, docs/LOGIX_CONTROL.md §4) -----------
 # Permissions-only: which role can call which endpoint. Deliberately does
 # NOT restrict by faculty/lab/room scope -- no backing entity for "their
@@ -500,13 +774,15 @@ ROLE_PERMISSIONS: Dict[str, set] = {
     "faculty_admin": {
         "lock", "broadcast", "devices_read", "devices_write", "sessions_read", "analytics_read",
         "audit_log_read", "reports_read", "invite_create", "devices_revoke",
+        "alerts_read", "alerts_write",
     },
     "lab_admin": {
         "lock", "broadcast", "devices_read", "devices_write", "sessions_read", "analytics_read",
         "audit_log_read", "reports_read", "invite_create", "devices_revoke",
+        "alerts_read", "alerts_write",
     },
     "instructor": {"lock", "broadcast"},
-    "viewer": {"devices_read", "sessions_read", "analytics_read", "audit_log_read", "reports_read"},
+    "viewer": {"devices_read", "sessions_read", "analytics_read", "audit_log_read", "reports_read", "alerts_read"},
     "auditor": {"audit_log_read", "reports_read"},
 }
 
@@ -612,6 +888,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
 def startup_event():
     init_db()
     init_control_tables()
+    rehydrate_pending_commands()
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -809,43 +1086,26 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
         except Exception:
             pass
 
-    # Retrieve pending commands for this workstation, withholding any that
-    # have sat in the queue past COMMAND_TTL_MINUTES -- a device offline for
-    # hours shouldn't fire a stale LOCK/BROADCAST the instant it reconnects.
-    all_cmds = PENDING_COMMANDS.get(payload.hostname, [])
-    if all_cmds:
+    # Housekeeping: expire anything (this device's queue or any other's)
+    # that has sat 'queued' past COMMAND_TTL_MINUTES -- see
+    # reconcile_expired_actions()'s docstring for why this replaced the old
+    # inline, this-hostname-only sweep. Best-effort, same as the ack/upsert
+    # calls above: must never block the heartbeat response.
+    try:
+        conn = get_db()
+        try:
+            reconcile_expired_actions(conn)
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    # Retrieve pending commands for this workstation -- anything past its
+    # TTL was already purged from PENDING_COMMANDS above, so everything
+    # remaining here is still within window and safe to deliver.
+    cmds = PENDING_COMMANDS.get(payload.hostname, [])
+    if cmds:
         PENDING_COMMANDS[payload.hostname] = []  # clear queue either way
-
-    now = datetime.now()
-    cmds = []
-    expired_ids = []
-    for cmd in all_cmds:
-        queued_at = cmd.get("queued_at")
-        try:
-            is_expired = queued_at and (now - datetime.fromisoformat(queued_at)) > timedelta(minutes=COMMAND_TTL_MINUTES)
-        except ValueError:
-            is_expired = False
-        if is_expired:
-            expired_ids.append(cmd.get("command_id"))
-        else:
-            cmds.append(cmd)
-
-    if expired_ids:
-        try:
-            conn = get_db()
-            try:
-                for command_id in expired_ids:
-                    if command_id:
-                        conn.execute(
-                            "UPDATE remote_actions SET status = 'expired', executed_at = ? "
-                            "WHERE command_id = ? AND status = 'queued'",
-                            (now.isoformat(), command_id),
-                        )
-                conn.commit()
-            finally:
-                conn.close()
-        except Exception:
-            pass
 
     return {"status": "ok", "commands": cmds}
 
@@ -853,9 +1113,14 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
 @app.get("/api/active")
 def get_active_workstations(email: str = Depends(verify_token)):
     now = datetime.now()
+    conn = get_db()
+    try:
+        categories = {r["hostname"]: r["category"] for r in conn.execute("SELECT hostname, category FROM devices")}
+    finally:
+        conn.close()
     active_pcs = []
     for host, info in HEARTBEATS.items():
-        if now - info["last_seen"] < timedelta(minutes=5):
+        if compute_sync_status(categories.get(host), info["last_seen"], now) == "online":
             active_pcs.append({
                 "hostname": host,
                 "device_name": info["device_name"],
@@ -882,9 +1147,218 @@ def get_devices(email: str = Depends(require_permission("devices_read"))):
             d = dict(r)
             d.pop("api_key", None)  # never expose the ingest credential, even to admins
             live = HEARTBEATS.get(d["hostname"])
-            d["currently_online"] = bool(live and now - live["last_seen"] < timedelta(minutes=5))
+            live_last_seen = live["last_seen"] if live else None
+            status = compute_sync_status(d["category"], live_last_seen or d["last_seen"], now)
+            d["sync_status"] = status
+            d["currently_online"] = status == "online"
             devices.append(d)
         return devices
+    finally:
+        conn.close()
+
+
+# Device Detail (Dashboard roadmap item G). Joins the registry row with its
+# assigned policy and its remote_actions history, and rolls the latter up
+# into per-status counts -- the "Sync Health" the Devices tab shows per
+# device. Reuses devices_read, same as the list endpoint above: anyone who
+# can see the registry can see one device's detail.
+@app.get("/api/devices/{device_id}")
+def get_device_detail(device_id: str, email: str = Depends(require_permission("devices_read"))):
+    conn = get_db()
+    try:
+        reconcile_expired_actions(conn)
+
+        row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Device not found")
+        device = dict(row)
+        device.pop("api_key", None)
+
+        now = datetime.now()
+        live = HEARTBEATS.get(device["hostname"])
+        live_last_seen = live["last_seen"] if live else None
+        status = compute_sync_status(device["category"], live_last_seen or device["last_seen"], now)
+        device["sync_status"] = status
+        device["currently_online"] = status == "online"
+
+        policy_row = conn.execute(
+            "SELECT policy_name, description, allowed_capabilities, privacy_mode_default, is_system_default "
+            "FROM device_policies WHERE policy_name = ?",
+            (device["policy_profile"],),
+        ).fetchone()
+        policy = dict(policy_row) if policy_row else None
+
+        action_rows = conn.execute(
+            "SELECT * FROM remote_actions WHERE target_device_id = ? ORDER BY timestamp DESC LIMIT 20",
+            (device_id,),
+        ).fetchall()
+        recent_actions = [dict(r) for r in action_rows]
+        # Roadmap item J: the Retry button in the Device Detail modal should
+        # mirror the server's actual policy, not a client-side guess -- see
+        # RETRYABLE_ACTION_TYPES's comment on why RENAME/REVOKE_API_KEY are
+        # excluded, and the retry endpoint below for the same three checks
+        # enforced authoritatively.
+        for a in recent_actions:
+            max_retries = a["max_retries"] if a["max_retries"] is not None else DEFAULT_MAX_RETRIES
+            a["retryable"] = (
+                a["action_type"] in RETRYABLE_ACTION_TYPES
+                and a["status"] in ("failed", "expired")
+                and (a["retry_count"] or 0) < max_retries
+            )
+
+        sync_health = {"queued": 0, "done": 0, "failed": 0, "expired": 0, "total": 0}
+        for status_row in conn.execute(
+            "SELECT status, COUNT(*) as count FROM remote_actions WHERE target_device_id = ? GROUP BY status",
+            (device_id,),
+        ):
+            sync_health[status_row["status"]] = status_row["count"]
+            sync_health["total"] += status_row["count"]
+
+        return {"device": device, "policy": policy, "recent_actions": recent_actions, "sync_health": sync_health}
+    finally:
+        conn.close()
+
+
+# Manual retry (roadmap item J §D). Creates a new queued child row rather
+# than mutating the original -- see REMOTE_ACTION_COLUMNS' comment on
+# retry_of_action_id -- so the original failed/expired row's history is
+# preserved exactly like alerts are resolved rather than deleted. Reuses
+# devices_write, the same permission rename_device already requires, since
+# this is fundamentally a device-command action, not an alert action.
+@app.post("/api/devices/{device_id}/actions/{action_id}/retry")
+def retry_action(device_id: str, action_id: int, email: str = Depends(require_permission("devices_write"))):
+    conn = get_db()
+    try:
+        action = conn.execute(
+            "SELECT * FROM remote_actions WHERE action_id = ? AND target_device_id = ?",
+            (action_id, device_id),
+        ).fetchone()
+        if not action:
+            raise HTTPException(status_code=404, detail="Action not found")
+        if action["action_type"] not in RETRYABLE_ACTION_TYPES:
+            raise HTTPException(status_code=400, detail=f"{action['action_type']} is not retryable")
+        if action["status"] not in ("failed", "expired"):
+            raise HTTPException(status_code=400, detail="Only failed or expired actions can be retried")
+
+        retry_count = action["retry_count"] or 0
+        max_retries = action["max_retries"] if action["max_retries"] is not None else DEFAULT_MAX_RETRIES
+        if retry_count >= max_retries:
+            raise HTTPException(status_code=400, detail="Max retry attempts reached")
+
+        device = conn.execute("SELECT hostname FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        hostname = device["hostname"]
+
+        new_command_id = str(uuid.uuid4())
+        PENDING_COMMANDS.setdefault(hostname, []).append({
+            "command_id": new_command_id,
+            "command": action["action_type"],
+            "param": action["param"] or "",
+            "queued_at": datetime.now().isoformat(),
+        })
+        conn.execute(
+            "INSERT INTO remote_actions "
+            "(actor_email, target_device, target_device_id, action_type, status, reason, param, "
+            "timestamp, command_id, retry_count, max_retries, retry_of_action_id) "
+            "VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)",
+            (email, hostname, device_id, action["action_type"], action["reason"] or "", action["param"] or "",
+             datetime.now().isoformat(), new_command_id, retry_count + 1, max_retries, action_id),
+        )
+        conn.commit()
+        return {"status": "success", "command_id": new_command_id, "retry_count": retry_count + 1}
+    finally:
+        conn.close()
+
+
+# System Alerts (roadmap item I): dashboard-facing read + acknowledge/resolve.
+# reconcile_alerts() runs at the top of the GET so the list is never stale by
+# more than one request -- see that function's docstring for why there's no
+# background scheduler instead.
+@app.get("/api/alerts")
+def get_alerts(
+    active: Optional[bool] = None,
+    severity: Optional[str] = None,
+    category: Optional[str] = None,
+    device_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    email: str = Depends(require_permission("alerts_read")),
+):
+    conn = get_db()
+    try:
+        reconcile_alerts(conn)
+
+        query = "SELECT * FROM alerts WHERE 1=1"
+        count_query = "SELECT COUNT(*) FROM alerts WHERE 1=1"
+        args = []
+
+        if active is not None:
+            clause = " AND status != 'resolved'" if active else " AND status = 'resolved'"
+            query += clause
+            count_query += clause
+        if severity:
+            query += " AND severity = ?"
+            count_query += " AND severity = ?"
+            args.append(severity)
+        if category:
+            query += " AND category = ?"
+            count_query += " AND category = ?"
+            args.append(category)
+        if device_id:
+            query += " AND device_id = ?"
+            count_query += " AND device_id = ?"
+            args.append(device_id)
+
+        total = conn.execute(count_query, args).fetchone()[0]
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        args.extend([limit, offset])
+
+        rows = conn.execute(query, args).fetchall()
+        alerts = [dict(r) for r in rows]
+        return {"total": total, "alerts": alerts}
+    finally:
+        conn.close()
+
+
+@app.post("/api/alerts/{alert_id}/acknowledge")
+def acknowledge_alert(alert_id: int, email: str = Depends(require_permission("alerts_write"))):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT id, status FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        if existing["status"] == "active":
+            conn.execute(
+                "UPDATE alerts SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), alert_id),
+            )
+            conn.commit()
+        return {"status": "success", "alert_id": alert_id}
+    finally:
+        conn.close()
+
+
+
+# Manually closes an alert. Meaningful mainly for action_failed (a discrete
+# event with no auto-clear condition) -- resolving a still-true condition
+# alert like device_stale/device_offline just gets recreated by the next
+# reconcile_alerts() pass in GET /api/alerts, since it reflects live state
+# rather than an admin's dismissal. Use acknowledge for those instead.
+@app.post("/api/alerts/{alert_id}/resolve")
+def resolve_alert(alert_id: int, email: str = Depends(require_permission("alerts_write"))):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT id, status FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        if existing["status"] != "resolved":
+            conn.execute(
+                "UPDATE alerts SET status = 'resolved', resolved_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), alert_id),
+            )
+            conn.commit()
+        return {"status": "success", "alert_id": alert_id}
     finally:
         conn.close()
 
@@ -1016,7 +1490,7 @@ def redeem_enroll_invite(payload: EnrollRequest, request: Request):
 def revoke_device(device_id: str, email: str = Depends(require_permission("devices_revoke"))):
     conn = get_db()
     try:
-        existing = conn.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        existing = conn.execute("SELECT device_id, hostname FROM devices WHERE device_id = ?", (device_id,)).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Device not found")
         conn.execute(
@@ -1024,6 +1498,10 @@ def revoke_device(device_id: str, email: str = Depends(require_permission("devic
             (datetime.now().isoformat(), device_id),
         )
         conn.commit()
+        # Mirrors rename_device's audit trail below -- revoking a device's
+        # ingest credential is exactly as auditable as renaming it, and the
+        # Device Detail modal's Recent Commands list should show it.
+        log_remote_action(conn, email, existing["hostname"], "REVOKE_API_KEY", "done", result_summary="API key revoked")
     finally:
         conn.close()
     return {"status": "success", "detail": f"Revoked API key for device {device_id}"}
@@ -1256,6 +1734,7 @@ def get_audit_log(
     limit: int = 100,
     offset: int = 0,
     target_device: Optional[str] = None,
+    status: Optional[str] = None,
     email: str = Depends(require_permission("audit_log_read"))
 ):
     conn = get_db()
@@ -1268,6 +1747,11 @@ def get_audit_log(
             query += " AND target_device LIKE ?"
             count_query += " AND target_device LIKE ?"
             args.append(f"%{target_device}%")
+
+        if status:
+            query += " AND status = ?"
+            count_query += " AND status = ?"
+            args.append(status)
 
         total = conn.execute(count_query, args).fetchone()[0]
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
@@ -1400,6 +1884,24 @@ def download_report(
             raise HTTPException(status_code=500, detail=f"Report file not generated. Output: {res.stdout}")
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Report failed: {e.stderr or e.stdout}")
+
+
+# Liveness probe for the dashboard's sidebar connectivity indicator (roadmap
+# item H). Deliberately unauthenticated -- "is the server reachable at all"
+# is a different question from "is my session token still valid" (that's
+# already handled by fetchWithAuth's 401 -> onSessionExpired path), and a
+# health check shouldn't paint the sidebar red just because a token expired.
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok", "server_time": datetime.now().isoformat()}
+
+
+# Browsers request this automatically regardless of any <link rel="icon">;
+# without a route it 404s on every page load. No icon asset is worth adding
+# for this -- a silent 204 is enough to stop the console noise.
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 
 # Mount frontend static directory

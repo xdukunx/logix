@@ -103,6 +103,28 @@ def test_devices_persists_beyond_5_minute_live_window(monkeypatch, tmp_path):
     assert devices[0]["currently_online"] is False
 
 
+def test_sync_status_buckets_by_category_heartbeat_interval(monkeypatch, tmp_path):
+    """Staleness is category-aware (roadmap item G), not a flat 5-minute cutoff.
+    lab_workstation's heartbeat_interval_seconds is 30, so online <= 60s,
+    stale <= 180s, else offline -- a 90s-old heartbeat should read "stale",
+    not "online" (a flat 5-minute check would still call this online)."""
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "LAB-PC-05", "status": "ACTIVE"})
+
+        conn = module.get_db()
+        conn.execute("UPDATE devices SET category = 'lab_workstation' WHERE hostname = ?", ("LAB-PC-05",))
+        conn.commit()
+        conn.close()
+        module.HEARTBEATS["LAB-PC-05"]["last_seen"] = datetime.now() - timedelta(seconds=90)
+
+        devices = client.get("/api/devices", headers=headers).json()
+
+    assert devices[0]["sync_status"] == "stale"
+    assert devices[0]["currently_online"] is False
+
+
 def test_heartbeat_db_failure_does_not_break_response(monkeypatch, tmp_path):
     """upsert_device failures must never block the heartbeat response the
     agent is waiting on."""

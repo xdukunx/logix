@@ -211,8 +211,14 @@ body {
     gap: 8px;
     padding: 8px 10px;
     font-size: 12px;
-    color: var(--success-color);
 }
+
+/* Real connectivity state (roadmap item H) -- online/offline mirror the
+   browser signal driving the offline banner in js/api.js; checking is the
+   transient state while a health check is in flight. */
+.sidebar-status.connected { color: var(--success-color); }
+.sidebar-status.disconnected { color: var(--danger-color); }
+.sidebar-status.checking { color: var(--warning-color); }
 
 .status-indicator {
     width: 8px;
@@ -224,6 +230,16 @@ body {
 .status-indicator.online {
     background-color: var(--success-color);
     box-shadow: 0 0 10px var(--success-color);
+}
+
+.status-indicator.offline {
+    background-color: var(--danger-color);
+    box-shadow: 0 0 10px var(--danger-color);
+}
+
+.status-indicator.checking {
+    background-color: var(--warning-color);
+    box-shadow: 0 0 10px var(--warning-color);
 }
 
 .btn-logout {
@@ -445,6 +461,122 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+/* System Alerts (roadmap item I): header bell + dropdown panel. */
+.alerts-bell-wrapper {
+    position: relative;
+}
+
+.btn-icon-bell {
+    position: relative;
+    padding: 10px 14px;
+}
+
+.alerts-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9999px;
+    background: var(--danger-color);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+
+.alerts-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 360px;
+    max-height: 420px;
+    overflow-y: auto;
+    background: #0f172a;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    z-index: 500;
+}
+
+.alerts-panel.hidden {
+    display: none;
+}
+
+.alerts-panel-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background: #0f172a;
+}
+
+.alerts-panel-header h3 {
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.alerts-panel-body .empty-state,
+.alerts-panel-body .loading-placeholder {
+    padding: 32px 16px;
+}
+
+.alert-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.alert-item:last-child {
+    border-bottom: none;
+}
+
+.alert-item.acknowledged {
+    opacity: 0.55;
+}
+
+.alert-item-icon {
+    font-size: 16px;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.alert-item-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.alert-item-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.alert-item-message {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.alert-item-meta {
+    font-size: 11px;
+    color: var(--muted-color);
+    margin-top: 4px;
+}
+
+.btn-ack-alert {
+    flex-shrink: 0;
+    font-size: 11px;
+    padding: 4px 10px;
+    white-space: nowrap;
 }
 
 .badge {
@@ -1057,6 +1189,13 @@ input[type="color"]::-webkit-color-swatch {
     transition: transform var(--transition-speed);
 }
 
+/* Device Detail modal needs more room than the report modal's fields. */
+.modal-content.modal-lg {
+    max-width: 720px;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
 .modal.hidden .modal-content {
     transform: translateY(20px);
 }
@@ -1250,4 +1389,36 @@ input[type="color"]::-webkit-color-swatch {
     opacity: 0;
     transform: translateY(20px);
     pointer-events: none;
+}
+
+/* Offline banner (roadmap item G) -- reflects navigator.onLine, not a
+   fetch failure (that's .empty-state's error variant, rendered per-view). */
+.offline-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--danger-color);
+    color: #fff;
+    z-index: 10000;
+}
+
+/* Device Detail modal (Devices tab) */
+.device-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px 24px;
+    font-size: 13px;
+}
+
+.sync-health-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
 }

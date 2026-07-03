@@ -191,6 +191,27 @@ def test_revoke_unknown_device_404(monkeypatch, tmp_path):
     assert res.status_code == 404
 
 
+def test_revoke_creates_audit_row(monkeypatch, tmp_path):
+    """Mirrors rename_device's existing audit trail (roadmap item H) --
+    revoking a device's ingest credential is exactly as auditable as
+    renaming it, and should show up in that device's Recent Commands."""
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "LAB-PC-14", "status": "ACTIVE"},
+                    headers={"X-API-Key": "shared-dev-key"})
+        device_id = client.get("/api/devices", headers=headers).json()[0]["device_id"]
+
+        res = client.post(f"/api/devices/{device_id}/revoke", headers=headers)
+        assert res.status_code == 200
+
+        actions = client.get("/api/audit-log", headers=headers).json()["actions"]
+    assert len(actions) == 1
+    assert actions[0]["target_device"] == "LAB-PC-14"
+    assert actions[0]["action_type"] == "REVOKE_API_KEY"
+    assert actions[0]["status"] == "done"
+
+
 def test_revoke_actually_breaks_the_old_key(monkeypatch, tmp_path):
     """The load-bearing behavioral test: revoke must make the OLD key
     actually fail on the next real request, not just look revoked in the DB."""
