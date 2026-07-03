@@ -721,16 +721,42 @@ $purposeItems
 "@
 }
 
+# Chamfered-rounded shape path data (three rounded corners, a diagonal
+# chamfer replacing the top-right one), parameterized by content height so
+# it can be recomputed at runtime as the timer widget grows/shrinks
+# (collapsed timer-only <-> expanded info <-> message extension). W/r/c are
+# fixed; only height varies. See logbook_timer.ps1's Sync-LogbookTimerShape.
+function Get-LogbookTimerShapeData([double]$ContentHeight) {
+    $w = 320; $r = 20; $c = 44
+    # Clamped to a sane range -- defense in depth against any future bug
+    # feeding this a wildly wrong height (a prior version of the
+    # message-extend animation had exactly that bug, filling the screen).
+    $h = [Math]::Round([Math]::Min([Math]::Max($ContentHeight, 90), 500))
+    return "M $r,0 L $($w-$c),0 L $w,$c L $w,$($h-$r) A $r,$r 0 0 1 $($w-$r),$h L $r,$h A $r,$r 0 0 1 0,$($h-$r) L 0,$r A $r,$r 0 0 1 $r,0 Z"
+}
+
 # Session timer widget (Logix Control dashboard follow-up). Same
 # pure-string-building pattern as Build-LogbookPopupXaml above -- config-
 # driven colors, XML-escaped free-text inputs. The shape is a single Path
-# geometry (rounded on three corners, a diagonal chamfer replacing the
-# top-right corner) used both as the border/fill layer and, via Grid.Clip,
-# to clip the content layer so nothing renders past the cut corner.
+# geometry used both as the border/fill layer and, via Grid.Clip, to clip
+# the content layer so nothing renders past the cut corner.
 # Base fill is a fixed near-black -- "dominated by black" is a deliberate
 # constant, not config-driven; only the primary/accent accents come from
-# branding.colors. MessageStrip starts Collapsed with reserved row space,
-# so showing/hiding an incoming message never resizes the window on screen.
+# branding.colors.
+#
+# Height is NOT fixed: the window uses SizeToContent="Height" and two
+# independently toggleable sections --
+#   InfoSection    (nama/tujuan/device + accent bar): visible for the
+#                  first 10s of a session or while the user hovers the
+#                  widget, collapsed otherwise so the user can focus on
+#                  the time, not the data.
+#   MessageSection (an incoming admin message): collapsed by default,
+#                  animated open/closed by logbook_timer.ps1, extending
+#                  the shape downward from wherever it currently ends --
+#                  below the timer if InfoSection is collapsed, below the
+#                  full info block if it's expanded.
+# Both are Grid rows sized "Auto", so a Collapsed section takes zero space
+# -- no reserved blank area, unlike an earlier "*" -row design.
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $primary = [string]$cfg.branding.colors.primary
     $accent  = [string]$cfg.branding.colors.accent
@@ -742,77 +768,89 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $tujuan      = ConvertTo-LogbookXmlText ([string]$session.tujuan)
     $device      = ConvertTo-LogbookXmlText ([string]$deviceName)
 
-    # W=320,H=230 shape inset 10px inside a 340x250 window (room for the
-    # drop-shadow glow); r=20 corner radius; c=44 top-right chamfer.
-    $shapeData = 'M 20,0 L 276,0 L 320,44 L 320,210 A 20,20 0 0 1 300,230 L 20,230 A 20,20 0 0 1 0,210 L 0,20 A 20,20 0 0 1 20,0 Z'
+    # Fixed initial height (matches HEIGHT_EXPANDED in logbook_timer.ps1 --
+    # InfoSection defaults to Visible). Deliberately NOT SizeToContent --
+    # two earlier attempts at having WPF auto-size the window (first via
+    # SizeToContent toggling, then via Measure()/DesiredSize) both produced
+    # wrong/huge heights that only surfaced on a live Windows run, not in
+    # XML-structural tests. logbook_timer.ps1 owns height transitions
+    # entirely via a small set of fixed target heights instead.
+    $seedShapeData = Get-LogbookTimerShapeData 190
 
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="340" Height="250" WindowStyle="None" ResizeMode="NoResize"
+        Width="340" Height="210" WindowStyle="None" ResizeMode="NoResize"
         Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
   <Grid>
-    <Path Margin="10" Fill="#0B0F19" Stroke="$primary" StrokeThickness="1.3" Data="$shapeData">
+    <Path Name="ShapePath" Margin="10" Fill="#0B0F19" Stroke="$primary" StrokeThickness="1.3" Data="$seedShapeData">
       <Path.Effect>
         <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.45" Color="$primary" />
       </Path.Effect>
     </Path>
 
-    <Grid Margin="10" Clip="$shapeData">
+    <Grid Name="ContentGrid" Margin="10" Clip="$seedShapeData">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
         <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="*"/>
       </Grid.RowDefinitions>
 
       <Grid Grid.Row="0" Margin="18,14,18,0">
         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <TextBlock Name="Pulse" Text="&#9679;" FontFamily="Segoe UI" FontSize="11" Foreground="$accent" Margin="0,1,7,0" />
+        <Ellipse Name="Pulse" Width="8" Height="8" Fill="$accent" Margin="0,3,8,0" VerticalAlignment="Center" />
         <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" />
       </Grid>
 
-      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,0" VerticalAlignment="Bottom">
+      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,10" VerticalAlignment="Bottom">
         <TextBlock Name="ClockMain" Text="00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text"/>
         <TextBlock Name="ClockSeconds" Text="00" FontFamily="Consolas" FontSize="16" FontWeight="Bold" Foreground="$primary" Margin="4,0,0,6" VerticalAlignment="Bottom"/>
       </StackPanel>
 
-      <Border Grid.Row="2" Height="1" Background="#22FFFFFF" Margin="18,10,18,8"/>
+      <StackPanel Grid.Row="2" Name="InfoSection" Visibility="Visible">
+        <Border Height="1" Background="#22FFFFFF" Margin="18,0,18,8"/>
 
-      <Grid Grid.Row="3" Margin="18,0,18,4">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <TextBlock Text="Nama" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-        <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-      </Grid>
+        <Grid Margin="18,0,18,4">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Nama" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
+          <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
+        </Grid>
 
-      <Grid Grid.Row="4" Margin="18,0,18,4">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <TextBlock Text="Tujuan" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-        <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-      </Grid>
+        <Grid Margin="18,0,18,4">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Tujuan" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
+          <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
+        </Grid>
 
-      <Grid Grid.Row="5" Margin="18,0,18,8">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <TextBlock Text="Device" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-        <TextBlock Grid.Column="1" Name="DeviceValue" Text="$device" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-      </Grid>
+        <Grid Margin="18,0,18,8">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Text="Device" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
+          <TextBlock Grid.Column="1" Name="DeviceValue" Text="$device" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
+        </Grid>
 
-      <Border Grid.Row="6" Height="4" Margin="18,0,18,10" CornerRadius="2">
-        <Border.Background>
-          <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-            <GradientStop Color="$primary" Offset="0"/>
-            <GradientStop Color="$accent" Offset="1"/>
-          </LinearGradientBrush>
-        </Border.Background>
-      </Border>
+        <Border Height="4" Margin="18,0,18,14" CornerRadius="2">
+          <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+              <GradientStop Color="$primary" Offset="0"/>
+              <GradientStop Color="$accent" Offset="1"/>
+            </LinearGradientBrush>
+          </Border.Background>
+        </Border>
+      </StackPanel>
 
-      <Border Grid.Row="7" Name="MessageStrip" Visibility="Collapsed" Margin="18,0,18,12" Padding="10,8" CornerRadius="8"
-              Background="#1AFFFFFF" BorderThickness="3,0,0,0" BorderBrush="$accent" VerticalAlignment="Top">
-        <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="10.5" FontWeight="SemiBold" Foreground="$text" TextWrapping="Wrap"/>
+      <Border Grid.Row="3" Name="MessageSection" Visibility="Collapsed" Margin="14,0,14,14" Padding="10,10" CornerRadius="10"
+              Background="#16FFFFFF" BorderThickness="3,1,1,1" BorderBrush="$accent">
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Border Name="MessageIconBadge" Grid.Column="0" Width="24" Height="24" CornerRadius="12" Background="$accent" VerticalAlignment="Top" Margin="0,1,10,0">
+            <TextBlock Name="MessageIcon" Text="!" FontFamily="Segoe UI Semibold" FontSize="12" Foreground="#0B0F19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <StackPanel Grid.Column="1">
+            <TextBlock Name="MessageTitle" Text="Emergency Alert" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$accent"/>
+            <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="10.5" Foreground="$text" TextWrapping="Wrap" Margin="0,2,0,0"/>
+          </StackPanel>
+        </Grid>
       </Border>
     </Grid>
   </Grid>

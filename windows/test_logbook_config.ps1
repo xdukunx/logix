@@ -55,12 +55,29 @@ $deviceValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-O
 Assert ($deviceValue -eq 'LAB-PC-01 <Test>') "device name with angle bracket escaped and round-trips"
 $clockMain = $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'ClockMain' }
 Assert ($clockMain.Text -eq '00:00') "clock starts at 00:00"
-$messageStrip = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MessageStrip' }
-Assert ($messageStrip.Visibility -eq 'Collapsed') "message strip starts collapsed"
+$pulseEllipse = $timerDoc.SelectNodes("//*[local-name()='Ellipse']") | Where-Object { $_.Name -eq 'Pulse' }
+Assert ($null -ne $pulseEllipse) "pulse is an Ellipse (animated via BeginAnimation, not a text swap)"
 $shapePaths = $timerDoc.SelectNodes("//*[local-name()='Path']")
 Assert ($shapePaths.Count -eq 1) "exactly one chamfered-shape Path element"
 $pathData = $shapePaths[0].Data
 Assert ($pathData.StartsWith('M 20,0') -and $pathData.TrimEnd().EndsWith('Z')) "shape path data starts/ends correctly (closed geometry)"
+Assert ($timerDoc.Window.Height -eq '210') "window starts at a fixed 210 height (deterministic, not SizeToContent -- see logbook_timer.ps1's HEIGHT_* constants)"
+$infoSection = $timerDoc.SelectNodes("//*[local-name()='StackPanel']") | Where-Object { $_.Name -eq 'InfoSection' }
+Assert ($infoSection.Visibility -eq 'Visible' -or [string]::IsNullOrEmpty($infoSection.Visibility)) "info section starts visible (first 10s of a session)"
+$messageSection = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MessageSection' }
+Assert ($messageSection.Visibility -eq 'Collapsed') "message section starts collapsed (Auto row -> zero height, no reserved blank space)"
+$messageIconBadge = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MessageIconBadge' }
+Assert ($null -ne $messageIconBadge) "message has a colored icon badge (toast-style, matching the reference)"
+$messageTitle = $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'MessageTitle' }
+Assert ($null -ne $messageTitle) "message has a bold title line separate from the body text"
+
+Write-Host "timer shape geometry at various heights"
+$shape90 = Get-LogbookTimerShapeData 50   # below the floor
+Assert ($shape90 -match 'L 320,70 ') "height floor (90) applied when given a too-small content height"
+$shape300 = Get-LogbookTimerShapeData 300
+Assert ($shape300 -match 'L 320,280 ' -and $shape300.TrimEnd().EndsWith('Z')) "shape geometry recomputes correctly for a taller (message-extended) height"
+$shapeHuge = Get-LogbookTimerShapeData 5000
+Assert ($shapeHuge -match 'L 320,480 ') "height ceiling (500) applied -- guards against ever filling the screen again"
 
 if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nAll popup-config checks passed." -ForegroundColor Green
