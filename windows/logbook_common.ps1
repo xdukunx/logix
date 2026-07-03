@@ -424,6 +424,21 @@ function Send-LogbookHeartbeat {
         $anydeskId = Get-AnyDeskId
         $deviceName = Get-LogbookDeviceDisplayName
 
+        # Outcomes for commands delivered on a *previous* heartbeat -- see
+        # apply_command_acks() server-side. Read what's pending, send it,
+        # and only clear the file once the server has actually confirmed
+        # receipt (a dropped response leaves it for the next attempt --
+        # at-least-once delivery, absorbed by the server's idempotent
+        # "AND status = 'queued'" guard on re-application).
+        $acksPath = Join-Path $Global:StateDir 'pending_acks.json'
+        $pendingAcks = @()
+        if (Test-Path $acksPath) {
+            try {
+                $loaded = Get-Content $acksPath -Raw | ConvertFrom-Json
+                if ($loaded) { $pendingAcks = @($loaded) }
+            } catch {}
+        }
+
         $payload = @{
             hostname    = $env:COMPUTERNAME
             device_name = $deviceName
@@ -431,25 +446,38 @@ function Send-LogbookHeartbeat {
             username    = $username
             anydesk_id  = $anydeskId
         }
-        
+        if ($pendingAcks.Count -gt 0) { $payload['acks'] = $pendingAcks }
+
         $headers = @{
             'Content-Type' = 'application/json'
         }
         if ($serverKey) { $headers['X-API-Key'] = $serverKey }
-        $body = $payload | ConvertTo-Json
+        $body = $payload | ConvertTo-Json -Depth 5
         $apiUrl = $serverUrl.TrimEnd('/') + '/api/heartbeat'
-        
+
         $res = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -Headers $headers -TimeoutSec 3 -UseBasicParsing
+        # Reaching here means the POST succeeded -- the acks we just sent
+        # are now the server's problem.
+        if ($pendingAcks.Count -gt 0) {
+            Remove-Item $acksPath -Force -ErrorAction SilentlyContinue
+        }
+
+        $newAcks = @()
         if ($res -and $res.commands) {
             foreach ($cmd in $res.commands) {
                 $name = $cmd.command.ToUpper()
                 $param = $cmd.param
                 Write-LogbookInfo "Received remote command: $name (param: $param)"
-                
+
                 if ($name -eq 'LOCK') {
                     Write-LogbookInfo "Remote LOCK trigger execution."
-                    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','LOCK') | Out-Null
-                    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+                    try {
+                        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','LOCK') | Out-Null
+                        Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+                        $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                    } catch {
+                        $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
+                    }
                 }
                 elseif ($name -eq 'BROADCAST') {
                     # Drop for the timer widget to pick up on its next tick
@@ -458,14 +486,37 @@ function Send-LogbookHeartbeat {
                     # session.json/popup.lock/timer.pid; there's no other
                     # IPC channel between this process (the monitor loop)
                     # and the timer's own separate powershell.exe process.
+                    # "done" here means the file was written for the timer
+                    # to pick up, not that the user has seen/dismissed it.
                     Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
-                    Ensure-LogbookDirs
-                    $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
-                    $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
-                    @{ text = $param; reason = $reason; received_at = (Get-Date).ToString('o') } |
-                        ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
+                    try {
+                        Ensure-LogbookDirs
+                        $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
+                        $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
+                        @{ text = $param; reason = $reason; received_at = (Get-Date).ToString('o') } |
+                            ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
+                        $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                    } catch {
+                        $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
+                    }
                 }
             }
+        }
+
+        # Persist immediately after executing, before this function's own
+        # outer try/catch has any chance to swallow a later error -- this is
+        # what guarantees an outcome is never silently lost. If the file
+        # already has unsent acks from an earlier failed delivery attempt,
+        # append rather than overwrite.
+        if ($newAcks.Count -gt 0) {
+            $existing = @()
+            if (Test-Path $acksPath) {
+                try {
+                    $loaded = Get-Content $acksPath -Raw | ConvertFrom-Json
+                    if ($loaded) { $existing = @($loaded) }
+                } catch {}
+            }
+            ($existing + $newAcks) | ConvertTo-Json -Depth 5 | Out-File -FilePath $acksPath -Encoding UTF8 -Force
         }
     } catch {
         # Fail silently
