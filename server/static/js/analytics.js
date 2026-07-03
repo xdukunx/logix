@@ -185,9 +185,18 @@ export const fetchSessionLogs = async () => {
     }
 };
 
-// Fetch and Render Control Audit Log (Logix Control, Milestone 2).
-// "Terkirim" (queued) is not proof the device executed the command --
-// see docs/LOGIX_CONTROL.md §6.
+// status -> badge label/color. "queued" only means an admin queued the
+// command; "done"/"failed" are agent-reported outcomes on a later
+// heartbeat; "expired" means it sat past the TTL and was withheld,
+// never delivered. See docs/LOGIX_CONTROL.md §6.
+const AUDIT_STATUS_BADGES = {
+    queued:  { label: "Menunggu",    color: "var(--warning-color)", border: "rgba(245,158,11,0.3)" },
+    done:    { label: "Selesai",     color: "var(--success-color)", border: "rgba(16,185,129,0.3)" },
+    failed:  { label: "Gagal",       color: "var(--danger-color)",  border: "rgba(239,68,68,0.3)" },
+    expired: { label: "Kedaluwarsa", color: "var(--text-secondary)", border: "rgba(148,163,184,0.3)" },
+};
+
+// Fetch and Render Control Audit Log (Logix Control, Milestone 3).
 export const fetchAuditLog = async () => {
     try {
         const res = await fetchWithAuth("/api/audit-log?limit=20");
@@ -205,9 +214,8 @@ export const fetchAuditLog = async () => {
 
         auditLogTbody.innerHTML = data.actions.map(a => {
             const dateStr = new Date(a.timestamp).toLocaleString("id-ID");
-            const statusBadge = a.status === "queued"
-                ? `<span class="badge" style="border-color: rgba(16,185,129,0.3); color: var(--success-color)">Terkirim</span>`
-                : `<span class="badge" style="border-color: rgba(239,68,68,0.3); color: var(--danger-color)">${escapeHtml(a.status)}</span>`;
+            const badgeInfo = AUDIT_STATUS_BADGES[a.status] || { label: a.status, color: "var(--text-secondary)", border: "rgba(148,163,184,0.3)" };
+            const statusBadge = `<span class="badge" style="border-color: ${badgeInfo.border}; color: ${badgeInfo.color}">${escapeHtml(badgeInfo.label)}</span>`;
 
             return `
                 <tr>
