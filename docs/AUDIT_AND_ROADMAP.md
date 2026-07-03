@@ -92,7 +92,7 @@ user notice. See `docs/PRIVACY.md`.
 
 - [x] **A. Public-repo docs & schema** — High / Low / None. *(batch 1, done)*
 - [ ] **B. Decide + commit/exclude `server/`; drop working DB** — High / Low / Low.
-- [ ] **C. Server security fixes** — Critical / Med / Med *(behavior change; gate mock auth behind `LOGIX_DEV_MODE`, validate ingest API key, origin-scoped CORS, escape dashboard output, fix report path)*.
+- [x] **C. Server security fixes** — Critical / Med / Med. *(done — all 5 sub-items verified against current code: mock auth gated behind `LOGIX_DEV_MODE` (`server/main.py` ~609), ingest key validated via `secrets.compare_digest` (~563-589), CORS never combines `["*"]` with credentials (~21-41), dashboard escapes agent-supplied fields via `escapeHtml()`, report path resolves correctly; covered by `tests/test_server_security.py`)*
 - [ ] **D. `event_uid` idempotency + retry/backoff + `--sync-preview`** — High / Med / Low (additive migration).
 - [x] **E. Device registry (`devices` table + `/api/enroll` + `device.json`)** — High / Med / Low. *(implemented; see `API_CONTRACT.md`)*
 - [ ] **F. Privacy-mode enforcement at agent boundary** — High / Med / Low.
