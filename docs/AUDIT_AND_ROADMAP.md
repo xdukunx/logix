@@ -91,7 +91,7 @@ user notice. See `docs/PRIVACY.md`.
 ## 5. Staged roadmap (impact / effort / risk)
 
 - [x] **A. Public-repo docs & schema** — High / Low / None. *(batch 1, done)*
-- [ ] **B. Decide + commit/exclude `server/`; drop working DB** — High / Low / Low.
+- [x] **B. Decide + commit/exclude `server/`; drop working DB** — High / Low / Low. *(done — `server/` has been intentionally committed since the Batch 2 hardening pass; `server/central_logix.db` exists locally from testing but is gitignored and confirmed untracked via `git ls-files`)*
 - [x] **C. Server security fixes** — Critical / Med / Med. *(done — all 5 sub-items verified against current code: mock auth gated behind `LOGIX_DEV_MODE` (`server/main.py` ~609), ingest key validated via `secrets.compare_digest` (~563-589), CORS never combines `["*"]` with credentials (~21-41), dashboard escapes agent-supplied fields via `escapeHtml()`, report path resolves correctly; covered by `tests/test_server_security.py`)*
 - [x] **D. `event_uid` idempotency + retry/backoff + `--sync-preview`** — High / Med / Low. *(done — `event_uid` on `physical_log` (agent + server, additive migration), `/api/log` dedups by it with fallback to the old tuple match for legacy payloads; `sync_unsynced_logs()` gains `max_attempts` with exponential backoff, scoped to the explicit `--sync-to-server` CLI path only, not the non-blocking inline call; `--sync-preview` mirrors `gsheet_sync.py --dry-run`)*
 - [x] **E. Device registry (`devices` table + `/api/enroll` + `device.json`)** — High / Med / Low. *(implemented; see `API_CONTRACT.md`)*
