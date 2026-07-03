@@ -55,7 +55,7 @@ try {
 
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\lab\logbook_monitor.ps1"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
-$principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType InteractiveToken -RunLevel Highest
+$principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 30)
 try { Unregister-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
 Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
