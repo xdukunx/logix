@@ -93,9 +93,9 @@ user notice. See `docs/PRIVACY.md`.
 - [x] **A. Public-repo docs & schema** — High / Low / None. *(batch 1, done)*
 - [ ] **B. Decide + commit/exclude `server/`; drop working DB** — High / Low / Low.
 - [x] **C. Server security fixes** — Critical / Med / Med. *(done — all 5 sub-items verified against current code: mock auth gated behind `LOGIX_DEV_MODE` (`server/main.py` ~609), ingest key validated via `secrets.compare_digest` (~563-589), CORS never combines `["*"]` with credentials (~21-41), dashboard escapes agent-supplied fields via `escapeHtml()`, report path resolves correctly; covered by `tests/test_server_security.py`)*
-- [ ] **D. `event_uid` idempotency + retry/backoff + `--sync-preview`** — High / Med / Low (additive migration).
+- [x] **D. `event_uid` idempotency + retry/backoff + `--sync-preview`** — High / Med / Low. *(done — `event_uid` on `physical_log` (agent + server, additive migration), `/api/log` dedups by it with fallback to the old tuple match for legacy payloads; `sync_unsynced_logs()` gains `max_attempts` with exponential backoff, scoped to the explicit `--sync-to-server` CLI path only, not the non-blocking inline call; `--sync-preview` mirrors `gsheet_sync.py --dry-run`)*
 - [x] **E. Device registry (`devices` table + `/api/enroll` + `device.json`)** — High / Med / Low. *(implemented; see `API_CONTRACT.md`)*
-- [ ] **F. Privacy-mode enforcement at agent boundary** — High / Med / Low.
+- [x] **F. Privacy-mode enforcement at agent boundary** — High / Med / Low. *(done — `paths.privacy_mode()` defaults to `local_only` per `docs/PRIVACY.md`; `/api/log` sync now gated to `admin_full_sync` only, since that endpoint is inherently full-detail; `redacted_sync`'s real delivery path remains `gsheet_sync.py`'s existing `redact()` gate. Real behavior change for any install with a server URL configured but no `LOGIX_PRIVACY_MODE` set — surfaced via a loud stderr warning, not silent)*
 - [ ] **G. Dashboard: modularize, add Device Registry / Detail / Sync Health, add loading/empty/error/offline/stale states** — Med / High / Low.
 - [ ] **H. First-run wizard (interactive + `--non-interactive`)** — Med / Med / Low.
 - [ ] **I. Rebrand hardcoded strings → config schema** — Med / Med / Low. *(partial: default values rebranded FTMM/MindLab→Logix; full config-schema abstraction not done)*

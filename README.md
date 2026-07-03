@@ -306,12 +306,23 @@ LOGIX_SERVER_URL=https://logix.example.org
 LOGIX_SERVER_API_KEY=<same value as LOGIX_INGEST_API_KEY>
 ```
 
+Per-invite-code device enrollment (so each device gets its own revocable
+key instead of sharing one, and can be individually renamed/revoked from
+the dashboard) is implemented — see [API_CONTRACT.md](API_CONTRACT.md).
+
 Devices appear on the dashboard, by whatever name was set during their
 install, as soon as their next heartbeat arrives.
 
-Per-invite-code device enrollment (so each device gets its own revocable
-key instead of sharing one) is a locked design, not yet implemented — see
-[API_CONTRACT.md](API_CONTRACT.md).
+**A configured server URL alone does not sync session data.** Per
+[docs/PRIVACY.md](docs/PRIVACY.md)'s "default = safest" policy, nothing
+leaves the device unless `LOGIX_PRIVACY_MODE=admin_full_sync` is also set
+explicitly — the default (`local_only`) keeps everything local even with a
+server configured. Preview what would actually be sent, no server
+round-trip needed:
+
+```bash
+python logix/log_physical.py --sync-preview
+```
 
 ## Customization
 
