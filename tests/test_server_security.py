@@ -14,12 +14,12 @@ from fastapi.testclient import TestClient
 
 
 def _load_main(monkeypatch, tmp_path, *, dev_mode="0", ingest_key="",
-               allowed_origins="", google_client_id=""):
+               allowed_origins="", google_client_id="", google_client_secret=""):
     monkeypatch.setenv("LOGIX_DEV_MODE", dev_mode)
     monkeypatch.setenv("LOGIX_INGEST_API_KEY", ingest_key)
     monkeypatch.setenv("LOGIX_ALLOWED_ORIGINS", allowed_origins)
     monkeypatch.setenv("GOOGLE_CLIENT_ID", google_client_id)
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", google_client_secret)
     monkeypatch.setenv("ADMIN_EMAILS", "admin@example.org")
 
     if "main" in sys.modules:
@@ -60,6 +60,78 @@ def test_google_login_mock_allowed_in_dev_mode(monkeypatch, tmp_path):
     assert res.status_code in (302, 307)
     assert "token=" in res.headers["location"]
     assert len(module.ACTIVE_TOKENS) == 1
+
+
+# --- Google OAuth: real-credential flow --------------------------------------
+# The mock-gating tests above cover the no-credential paths; these cover what
+# happens once real GOOGLE_CLIENT_ID/SECRET are configured: the outbound
+# redirect must carry the right params, and the callback must enforce the
+# ADMIN_EMAILS allowlist (Google's endpoints are mocked -- the decision logic
+# under test is entirely ours).
+
+def _fake_google(monkeypatch, module, email):
+    """Mock urllib so the callback's token exchange + userinfo fetch succeed."""
+    import io
+    import json as _json
+
+    class FakeResponse(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, *a, **k):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "oauth2.googleapis.com/token" in url:
+            return FakeResponse(_json.dumps({"access_token": "fake-access"}).encode())
+        if "userinfo" in url:
+            return FakeResponse(_json.dumps({"email": email}).encode())
+        raise AssertionError(f"unexpected outbound call: {url}")
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+
+
+def test_google_login_redirects_to_google_when_configured(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0",
+                        google_client_id="123-abc.apps.googleusercontent.com",
+                        google_client_secret="s3cret")
+    with TestClient(module.app) as client:
+        res = client.get("/api/auth/google/login", follow_redirects=False)
+    assert res.status_code in (302, 307)
+    loc = res.headers["location"]
+    assert loc.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
+    assert "client_id=123-abc.apps.googleusercontent.com" in loc
+    assert "response_type=code" in loc
+    assert "scope=openid+email+profile" in loc
+    assert "redirect_uri=" in loc
+    assert module.ACTIVE_TOKENS == {}  # no session minted before Google answers
+
+
+def test_callback_accepts_allowlisted_email(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0",
+                        google_client_id="123-abc.apps.googleusercontent.com",
+                        google_client_secret="s3cret")
+    _fake_google(monkeypatch, module, "admin@example.org")
+    with TestClient(module.app) as client:
+        res = client.get("/api/auth/callback?code=fake-code", follow_redirects=False)
+    assert res.status_code in (302, 307)
+    assert "token=" in res.headers["location"]
+    assert len(module.ACTIVE_TOKENS) == 1
+    session = next(iter(module.ACTIVE_TOKENS.values()))
+    assert session["email"] == "admin@example.org"
+    assert session["role"]
+
+
+def test_callback_rejects_non_allowlisted_email(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0",
+                        google_client_id="123-abc.apps.googleusercontent.com",
+                        google_client_secret="s3cret")
+    _fake_google(monkeypatch, module, "attacker@example.net")
+    with TestClient(module.app) as client:
+        res = client.get("/api/auth/callback?code=fake-code", follow_redirects=False)
+    assert res.status_code == 403
+    assert module.ACTIVE_TOKENS == {}  # no session for a non-allowlisted account
 
 
 # --- Fix #2: ingest API key validation --------------------------------------
