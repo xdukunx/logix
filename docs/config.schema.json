@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/your-org/logix/docs/config.schema.json",
   "title": "Logix branding & UI configuration",
-  "description": "Shared configuration consumed by the Windows sign-in popup, the central server, and the admin dashboard. All keys are optional; anything omitted falls back to built-in defaults. Copy windows/logbook_config.example.json or server/server_config.json and edit — never hardcode branding in source.",
+  "description": "Shared configuration consumed by the Windows sign-in popup, the central server, and the admin dashboard. All keys are optional; anything omitted falls back to built-in defaults. Copy windows/logbook_config.example.json or server/server_config.json and edit — never hardcode branding in source. This schema mirrors server/main.py's DEFAULT_CONFIG exactly; tests/test_config_schema.py fails if the two drift apart.",
   "type": "object",
   "properties": {
     "_comment": {
@@ -66,34 +66,46 @@
         "enum": ["nama", "nim", "access", "purpose", "keterangan"]
       }
     },
-
-    "product": {
-      "type": "string",
-      "description": "OPTIONAL (roadmap): product/app name for full rebranding."
-    },
-    "organization": {
-      "type": "string",
-      "description": "OPTIONAL (roadmap): deploying organization name."
-    },
-    "device": {
+    "devices": {
       "type": "object",
-      "description": "OPTIONAL (roadmap): per-device enrollment defaults. See docs/AUDIT_AND_ROADMAP.md.",
+      "description": "Device-naming options surfaced in the admin dashboard's Settings tab.",
       "properties": {
-        "category": {
-          "type": "string",
-          "enum": ["lab_workstation", "office_workstation", "loaned_laptop", "mobile_device", "server", "custom"]
+        "device_types": {
+          "type": "array",
+          "description": "Category options offered when naming/labeling a device.",
+          "items": { "type": "string" }
         },
-        "displayName": { "type": "string" },
-        "location": { "type": "string" },
-        "tags": { "type": "array", "items": { "type": "string" } }
+        "naming_pattern": {
+          "type": "string",
+          "description": "Suggested template for device display names, e.g. \"{type} - {room} - {number}\"."
+        }
       },
       "additionalProperties": false
     },
-    "privacyMode": {
-      "type": "string",
-      "description": "OPTIONAL (roadmap): default privacy posture for this device.",
-      "enum": ["local_only", "redacted_sync", "admin_full_sync"],
-      "default": "local_only"
+    "reports": {
+      "type": "object",
+      "description": "Defaults for the Excel report generator (logix/logbook_report.py) and GET /api/reports.",
+      "properties": {
+        "default_scope": {
+          "type": "string",
+          "description": "Which range the report modal pre-selects.",
+          "enum": ["today", "all", "range"]
+        },
+        "include_branding": { "type": "boolean" },
+        "include_purpose_summary": { "type": "boolean" },
+        "include_device_summary": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "privacy": {
+      "type": "object",
+      "description": "Descriptive text shown to users about what's collected -- NOT the same as LOGIX_PRIVACY_MODE (an agent-local env var controlling whether logix/log_physical.py syncs to the central server at all; see docs/PRIVACY.md). This object never gates behavior, only what's displayed.",
+      "properties": {
+        "notice": { "type": "string" },
+        "collected": { "type": "array", "items": { "type": "string" } },
+        "not_collected": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
