@@ -13,6 +13,7 @@ import os
 import socket
 import sqlite3
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,12 @@ BASE_COLUMNS = {
     "client_ip": "TEXT",
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
+    # Stable per-event identity, generated once in payload_from_args() and
+    # carried through to the server's dedup check -- makes a retried sync
+    # (clock drift or a retry hours later, either of which would defeat the
+    # old session_id+event+timestamp tuple match) a true no-op instead of a
+    # duplicate row.
+    "event_uid": "TEXT",
     "synced": "INTEGER DEFAULT 0",
 }
 
@@ -113,6 +120,7 @@ def migrate(con: sqlite3.Connection) -> None:
             con.execute(f"ALTER TABLE physical_log ADD COLUMN {name} {alter_decl_for_existing_table(name, decl)}")
     con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_timestamp ON physical_log(timestamp)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_session ON physical_log(session_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_event_uid ON physical_log(event_uid)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_type ON physical_log(session_type)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_event ON physical_log(event)")
 
@@ -172,9 +180,15 @@ def payload_from_args(ns: argparse.Namespace) -> dict[str, Any]:
     data = load_json_file(ns.json_file)
     event = norm(data.get("event"), norm(ns.event, "START")).upper()
 
+    # Generated once and reused if already present in the JSON payload --
+    # that file is the unit of retry (a crashed/retried process re-reads
+    # the same --json-file), so preserving an existing event_uid rather
+    # than minting a new one each attempt is what makes a retry actually
+    # idempotent instead of just re-numbering the duplicate.
     payload = {
         "timestamp": norm(data.get("timestamp"), now_iso()),
         "event": event,
+        "event_uid": norm(data.get("event_uid"), uuid.uuid4().hex),
         "username": norm(data.get("username"), norm(ns.username)),
         "nama": norm(data.get("nama"), norm(ns.nama)),
         "nim": norm(data.get("nim"), norm(ns.nim)),

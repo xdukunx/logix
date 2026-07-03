@@ -75,6 +75,11 @@ BASE_COLUMNS = {
     "client_ip": "TEXT",
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
+    # Mirrors logix/log_physical.py's BASE_COLUMNS -- a stable per-event id
+    # generated once agent-side, carried through sync/retry unchanged.
+    # Empty for a legacy agent that hasn't upgraded yet; log_event() falls
+    # back to the old tuple-based dedup in that case.
+    "event_uid": "TEXT",
     "synced": "INTEGER DEFAULT 0",
 }
 
@@ -232,6 +237,7 @@ class LogPayload(BaseModel):
     client_ip: Optional[str] = ""
     anydesk_detected: Optional[int] = 0
     raw_json: Optional[str] = ""
+    event_uid: Optional[str] = ""
 
 class HeartbeatPayload(BaseModel):
     hostname: str
@@ -311,6 +317,20 @@ def init_db():
         conn.execute(f"CREATE TABLE IF NOT EXISTS physical_log (\n        {col_defs}\n    )")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_timestamp ON physical_log(timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_session ON physical_log(session_id)")
+
+        # Additive migration: a physical_log table created before this
+        # shipped won't have event_uid yet. Same idiom as devices.api_key
+        # above. A partial unique index (not a plain UNIQUE column) so rows
+        # from legacy agents -- which all have event_uid = '' -- never
+        # collide with each other; only two genuinely equal non-empty uids
+        # would.
+        existing_log_cols = {row["name"] for row in conn.execute("PRAGMA table_info(physical_log)").fetchall()}
+        if "event_uid" not in existing_log_cols:
+            conn.execute("ALTER TABLE physical_log ADD COLUMN event_uid TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_physical_log_event_uid "
+            "ON physical_log(event_uid) WHERE event_uid IS NOT NULL AND event_uid != ''"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -1144,13 +1164,24 @@ def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
         sql = f"INSERT INTO physical_log ({','.join(cols)}) VALUES ({placeholders})"
         
         for payload in logs:
-            cur = conn.execute(
-                "SELECT 1 FROM physical_log WHERE session_id = ? AND event = ? AND timestamp = ?",
-                (payload.session_id, payload.event, payload.timestamp)
-            )
+            # event_uid is the real identity when present (survives a retry
+            # with a different timestamp, unlike the tuple match below).
+            # Empty means a legacy agent that hasn't upgraded yet -- fall
+            # back to the old match so it keeps deduping the way it always
+            # has, rather than assuming every caller sends the new field.
+            if payload.event_uid:
+                cur = conn.execute(
+                    "SELECT 1 FROM physical_log WHERE event_uid = ?",
+                    (payload.event_uid,)
+                )
+            else:
+                cur = conn.execute(
+                    "SELECT 1 FROM physical_log WHERE session_id = ? AND event = ? AND timestamp = ?",
+                    (payload.session_id, payload.event, payload.timestamp)
+                )
             if cur.fetchone():
                 continue
-            
+
             vals = [
                 payload.timestamp,
                 payload.event,
@@ -1167,6 +1198,7 @@ def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
                 payload.client_ip,
                 payload.anydesk_detected,
                 payload.raw_json,
+                payload.event_uid or None,
                 1  # mark as synced on the server DB
             ]
             conn.execute(sql, vals)
