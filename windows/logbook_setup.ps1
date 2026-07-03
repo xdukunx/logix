@@ -23,11 +23,13 @@ $deviceName = Get-LogbookConfigEnv -Key 'LOGIX_DEVICE_NAME'
 if ([string]::IsNullOrWhiteSpace($deviceName)) { $deviceName = $env:COMPUTERNAME }
 $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
 $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
+$privacyMode = Get-LogbookConfigEnv -Key 'LOGIX_PRIVACY_MODE'
+if ([string]::IsNullOrWhiteSpace($privacyMode)) { $privacyMode = 'local_only' }
 
 $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Logix Workstation Setup" Height="500" Width="480"
+        Title="Logix Workstation Setup" Height="590" Width="480"
         WindowStartupLocation="CenterScreen" Background="#0b0f19" ResizeMode="NoResize"
         FontFamily="Segoe UI, Tahoma, Geneva, Verdana, sans-serif">
   <Grid Margin="24">
@@ -58,6 +60,14 @@ $xaml = @"
       <TextBlock Text="KODE ENROLLMENT (OPSIONAL, DARI ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,16,0,6"/>
       <TextBox Name="EnrollCodeBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
       <TextBlock Text="Jika diisi, device ini akan didaftarkan otomatis dan mendapat API key sendiri (menggantikan API Key Server di atas)." FontSize="10" Foreground="#64748b" Margin="0,4,0,0" TextWrapping="Wrap"/>
+
+      <TextBlock Text="MODE PRIVASI" FontSize="10" FontWeight="SemiBold" Foreground="#64748b" Margin="0,16,0,6"/>
+      <ComboBox Name="PrivacyModeBox" Height="36" Padding="8,4" Background="#161c2d" Foreground="#f1f5f9" BorderBrush="#334155" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13">
+        <ComboBoxItem Content="local_only" Tag="Tidak ada data yang meninggalkan device ini. Paling privat (default)."/>
+        <ComboBoxItem Content="redacted_sync" Tag="Hanya jam terpakai per pengguna (tersamarkan) yang dikirim -- tanpa nama, ID, atau IP. Via GSheet sync."/>
+        <ComboBoxItem Content="admin_full_sync" Tag="Data sesi lengkap dikirim ke server pusat. Pengguna harus diberi tahu."/>
+      </ComboBox>
+      <TextBlock Name="PrivacyModeHint" FontSize="10" Foreground="#64748b" Margin="0,4,0,0" TextWrapping="Wrap"/>
     </StackPanel>
 
     <!-- Status Report Area -->
@@ -92,6 +102,8 @@ $nameBox = $window.FindName('DeviceNameBox')
 $urlBox = $window.FindName('ServerUrlBox')
 $keyBox = $window.FindName('ApiKeyBox')
 $enrollCodeBox = $window.FindName('EnrollCodeBox')
+$privacyModeBox = $window.FindName('PrivacyModeBox')
+$privacyModeHint = $window.FindName('PrivacyModeHint')
 $statusText = $window.FindName('StatusText')
 $testBtn = $window.FindName('TestBtn')
 $saveBtn = $window.FindName('SaveBtn')
@@ -101,6 +113,12 @@ $cancelBtn = $window.FindName('CancelBtn')
 $nameBox.Text = $deviceName
 $urlBox.Text = $serverUrl
 $keyBox.Text = $serverKey
+$selectedPrivacyItem = $privacyModeBox.Items | Where-Object { $_.Content -eq $privacyMode } | Select-Object -First 1
+if ($selectedPrivacyItem) { $privacyModeBox.SelectedItem = $selectedPrivacyItem } else { $privacyModeBox.SelectedIndex = 0 }
+$privacyModeHint.Text = $privacyModeBox.SelectedItem.Tag
+$privacyModeBox.Add_SelectionChanged({
+    if ($privacyModeBox.SelectedItem) { $privacyModeHint.Text = $privacyModeBox.SelectedItem.Tag }
+})
 
 # Link Test Connection Click
 $testBtn.Add_Click({
@@ -142,6 +160,7 @@ $saveBtn.Add_Click({
     $url = $urlBox.Text.Trim()
     $key = $keyBox.Text.Trim()
     $enrollCode = $enrollCodeBox.Text.Trim()
+    $privacy = if ($privacyModeBox.SelectedItem) { [string]$privacyModeBox.SelectedItem.Content } else { 'local_only' }
 
     # Device name is required (defaults to the hostname, so this only fires
     # if the user deliberately clears it) — it's how this workstation shows
@@ -185,6 +204,7 @@ $saveBtn.Add_Click({
         $hasName = $false
         $hasUrl = $false
         $hasKey = $false
+        $hasPrivacy = $false
 
         if (Test-Path $cfgPath) {
             $lines = Get-Content $cfgPath
@@ -199,6 +219,9 @@ $saveBtn.Add_Click({
                 } elseif ($trimmed.StartsWith('LOGIX_SERVER_API_KEY=') -or $trimmed.StartsWith('export LOGIX_SERVER_API_KEY=')) {
                     $newLines += "LOGIX_SERVER_API_KEY=$key"
                     $hasKey = $true
+                } elseif ($trimmed.StartsWith('LOGIX_PRIVACY_MODE=') -or $trimmed.StartsWith('export LOGIX_PRIVACY_MODE=')) {
+                    $newLines += "LOGIX_PRIVACY_MODE=$privacy"
+                    $hasPrivacy = $true
                 } else {
                     $newLines += $line
                 }
@@ -208,6 +231,7 @@ $saveBtn.Add_Click({
         if (-not $hasName) { $newLines += "LOGIX_DEVICE_NAME=$name" }
         if (-not $hasUrl) { $newLines += "LOGIX_SERVER_URL=$url" }
         if (-not $hasKey) { $newLines += "LOGIX_SERVER_API_KEY=$key" }
+        if (-not $hasPrivacy) { $newLines += "LOGIX_PRIVACY_MODE=$privacy" }
 
         $parent = Split-Path $cfgPath
         if (-not (Test-Path $parent)) {
