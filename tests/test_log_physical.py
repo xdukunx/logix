@@ -84,3 +84,113 @@ def test_insert_event_stores_event_uid(tmp_path):
         assert row["event_uid"] == payload["event_uid"]
     finally:
         con.close()
+
+
+def _seed_one_unsynced_row(log_physical, con):
+    ns = log_physical.parse_args(["--event", "START", "--hostname", "PC-1"])
+    payload = log_physical.payload_from_args(ns)
+    log_physical.insert_event(con, payload)
+
+
+def test_sync_preview_makes_no_network_call(tmp_path, monkeypatch, capsys):
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+
+    def _fail_if_called(*a, **kw):
+        raise AssertionError("--sync-preview must never open a network connection")
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _fail_if_called)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        count = log_physical.preview_sync(con)
+        out = capsys.readouterr().out
+    finally:
+        con.close()
+
+    assert count == 1
+    assert "1 unsynced event" in out
+    # The preview must not leak PII fields into terminal output.
+    assert "nama" not in out.lower()
+
+
+def test_sync_default_max_attempts_is_one(tmp_path, monkeypatch):
+    """The inline post-insert call relies on this staying a single
+    fire-and-forget attempt -- must never silently start blocking longer."""
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setattr(log_physical.time, "sleep", lambda s: None)
+
+    calls = []
+    def _boom(*a, **kw):
+        calls.append(1)
+        raise TimeoutError("simulated network failure")
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _boom)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        result = log_physical.sync_unsynced_logs(con)  # default max_attempts
+    finally:
+        con.close()
+
+    assert result == 0
+    assert len(calls) == 1
+
+
+def test_sync_retries_on_network_failure_then_succeeds(tmp_path, monkeypatch):
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    sleeps = []
+    monkeypatch.setattr(log_physical.time, "sleep", lambda s: sleeps.append(s))
+
+    calls = []
+    class _FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def _flaky(*a, **kw):
+        calls.append(1)
+        if len(calls) < 3:
+            raise ConnectionRefusedError("simulated transient failure")
+        return _FakeResponse()
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _flaky)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        result = log_physical.sync_unsynced_logs(con, max_attempts=3)
+    finally:
+        con.close()
+
+    assert result == 1  # succeeded on the 3rd attempt
+    assert len(calls) == 3
+    assert sleeps == [1, 2]  # exponential backoff between the 2 failed attempts
+
+
+def test_sync_does_not_retry_on_http_error(tmp_path, monkeypatch):
+    """An HTTP error status means the server actively rejected the
+    request -- retrying won't fix a 4xx/5xx."""
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setattr(log_physical.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("must not sleep/retry on HTTPError")))
+
+    calls = []
+    def _reject(*a, **kw):
+        calls.append(1)
+        raise log_physical.urllib.error.HTTPError("http://example.invalid", 401, "Unauthorized", {}, None)
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _reject)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        result = log_physical.sync_unsynced_logs(con, max_attempts=3)
+    finally:
+        con.close()
+
+    assert result == 0
+    assert len(calls) == 1

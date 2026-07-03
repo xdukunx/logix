@@ -159,6 +159,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--repair-active", action="store_true", help="repair currently active Windows session row from session.json")
     p.add_argument("--close-open", action="store_true", help="close all open workstation sessions using session.json or CLI fields")
     p.add_argument("--sync-to-server", action="store_true", help="sync all unsynced local logs to central API server")
+    p.add_argument("--sync-preview", action="store_true", help="show what --sync-to-server would send, without sending it")
     p.add_argument("--event", default="START", help="START, END, AUTO_FINISH, SSH_LOGIN, SSH_LOGOUT, UNLOCK, LOCK")
     p.add_argument("--username", default=os.environ.get("USER") or os.environ.get("USERNAME") or getpass.getuser())
     p.add_argument("--nama", default="")
@@ -406,21 +407,48 @@ def repair_active_from_session(con: sqlite3.Connection, session_path: Path = DEF
     return int(changed or 0)
 
 
+import time
 import urllib.request
 import urllib.error
 
-def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10) -> int:
+
+def unsynced_log_rows(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    return con.execute("SELECT * FROM physical_log WHERE COALESCE(synced, 0) = 0 ORDER BY id ASC").fetchall()
+
+
+def preview_sync(con: sqlite3.Connection) -> int:
+    """--sync-preview: report what WOULD be sent, without sending it.
+    Deliberately prints only timestamp/event/hostname/session_type -- a
+    preview command run at a terminal shouldn't itself become a way to
+    print nama/nim/keterangan to a screen or log file."""
+    rows = unsynced_log_rows(con)
+    print(f"{len(rows)} unsynced event(s) would be sent to {paths.server_url() or '(no server configured)'}:")
+    for r in rows:
+        print(f"  #{r['id']} {r['timestamp']} {r['event']} host={r['hostname']} type={r['session_type']}")
+    return len(rows)
+
+
+def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts: int = 1) -> int:
+    """POST unsynced rows to /api/log. max_attempts=1 (the default) is a
+    single fire-and-forget attempt -- used for the inline post-insert call,
+    which must stay non-blocking for the interactive lock/popup flow; a
+    failure there just waits for the next sync opportunity. A higher
+    max_attempts (used by the explicit --sync-to-server CLI path, where the
+    operator/scheduled task is already committing to waiting) retries with
+    exponential backoff (1s, 2s, 4s, ...), but only on network-level
+    failures -- an HTTP error status (4xx/5xx) means the server actively
+    rejected the request, which won't fix itself by retrying."""
     url = paths.server_url()
     if not url:
         return 0
     # Per-device key takes priority once enrolled; mirrors verify_api_key's
     # fallback order on the server.
     api_key = paths.device_api_key() or paths.server_api_key()
-    
-    rows = con.execute("SELECT * FROM physical_log WHERE COALESCE(synced, 0) = 0 ORDER BY id ASC").fetchall()
+
+    rows = unsynced_log_rows(con)
     if not rows:
         return 0
-        
+
     payload = []
     for r in rows:
         d = dict(r)
@@ -429,7 +457,7 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10) -> int:
         if d.get("anydesk_detected") is not None:
             d["anydesk_detected"] = int(d["anydesk_detected"])
         payload.append(d)
-        
+
     req = urllib.request.Request(
         f"{url.rstrip('/')}/api/log",
         data=json.dumps(payload).encode("utf-8"),
@@ -439,18 +467,27 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10) -> int:
         },
         method="POST"
     )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            if response.status in (200, 201):
-                row_ids = [r["id"] for r in rows]
-                placeholders = ",".join("?" for _ in row_ids)
-                con.execute(f"UPDATE physical_log SET synced = 1 WHERE id IN ({placeholders})", row_ids)
-                con.commit()
-                return len(row_ids)
-    except Exception as e:
-        print(f"Sync to server failed: {e}", file=sys.stderr)
-        
+
+    backoff = 1
+    for attempt in range(1, max(1, max_attempts) + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                if response.status in (200, 201):
+                    row_ids = [r["id"] for r in rows]
+                    placeholders = ",".join("?" for _ in row_ids)
+                    con.execute(f"UPDATE physical_log SET synced = 1 WHERE id IN ({placeholders})", row_ids)
+                    con.commit()
+                    return len(row_ids)
+            break  # unexpected non-200/201 without an exception -- not retryable
+        except urllib.error.HTTPError as e:
+            print(f"Sync to server failed (HTTP {e.code}, not retrying): {e}", file=sys.stderr)
+            break
+        except Exception as e:
+            print(f"Sync to server failed (attempt {attempt}/{max_attempts}): {e}", file=sys.stderr)
+            if attempt < max_attempts:
+                time.sleep(backoff)
+                backoff *= 2
+
     return 0
 
 
@@ -463,8 +500,11 @@ def main(argv: list[str]) -> int:
         if ns.migrate:
             print(f"OK migrated: {db_path}")
             return 0
+        if ns.sync_preview:
+            preview_sync(con)
+            return 0
         if ns.sync_to_server:
-            n = sync_unsynced_logs(con)
+            n = sync_unsynced_logs(con, max_attempts=3)
             print(f"OK synced logs to server: {n}")
             return 0
         if ns.repair_active:
