@@ -929,9 +929,49 @@ GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:80
 def google_login():
     if not GOOGLE_CLIENT_ID:
         if not LOGIX_DEV_MODE:
-            raise HTTPException(
+            # A browser lands here, not an API client -- render instructions,
+            # not raw JSON. 503 keeps the "misconfigured" semantics for
+            # anything that does check the status code.
+            return HTMLResponse(
                 status_code=503,
-                detail="Server misconfigured: Google OAuth is not set up and LOGIX_DEV_MODE is not enabled",
+                content="""
+                <html>
+                  <head>
+                    <title>Login Belum Dikonfigurasi</title>
+                    <style>
+                      body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #080d16; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                      .card { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); padding: 32px; border-radius: 16px; max-width: 520px; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5); }
+                      h2 { color: #3b82f6; margin-top: 0; }
+                      p, li { color: #94a3b8; font-size: 14px; line-height: 1.6; }
+                      code { background: #111827; padding: 2px 6px; border-radius: 4px; color: #e2e8f0; font-size: 12.5px; }
+                      a { color: #60a5fa; }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="card">
+                      <h2>Login Google belum dikonfigurasi</h2>
+                      <p>Server ini berjalan dalam postur produksi tanpa kredensial
+                      OAuth, jadi login sengaja ditolak (tidak ada celah masuk).
+                      Untuk mengaktifkan tombol "Masuk dengan Google":</p>
+                      <ol>
+                        <li>Buat <b>OAuth Client ID</b> (tipe <i>Web application</i>) di
+                          <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>,
+                          dengan redirect URI persis: <code>&lt;URL-server-ini&gt;/api/auth/callback</code></li>
+                        <li>Di mesin server, jalankan:
+                          <code>python install/setup_server.py</code>
+                          dan isi Client ID/Secret &mdash; atau tulis
+                          <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code>
+                          ke <code>server/.env</code></li>
+                        <li>Restart server ini.</li>
+                      </ol>
+                      <p>Hanya untuk uji coba di laptop sendiri:
+                      <code>LOGIX_DEV_MODE=1</code> mengaktifkan login pengembangan
+                      tanpa Google. Jangan pernah di server yang bisa diakses
+                      orang lain.</p>
+                    </div>
+                  </body>
+                </html>
+                """,
             )
         # Developer Mock Fallback (LOGIX_DEV_MODE=1 only): auto-authenticate as first whitelist admin
         mock_token = secrets.token_hex(24)

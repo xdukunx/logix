@@ -62,22 +62,22 @@ function Sync-LogbookTimerShape {
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
 $script:HEIGHT_COLLAPSED = 120   # status + timer only
-$script:HEIGHT_EXPANDED  = 190   # + nama/tujuan/device + accent bar
-$script:MESSAGE_EXTRA    = 90    # added on top of whichever of the above is current
-$script:WIDTH_COLLAPSED  = 230   # just wide enough for the clock at rest
-$script:WIDTH_EXPANDED   = 340   # full width: info fields / admin message
+$script:HEIGHT_EXPANDED  = 205   # + nama/tujuan/device + accent bar (measured
+                                 # ~85 at the narrow width; 190 clipped the
+                                 # accent bar's bottom margin)
+$script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
+                                 # (see Show-LogbookPendingMessage); this is
+                                 # only the pre-first-message default
 
-# One place decides how big the widget should be. Width is collapsed at
-# rest -- the widget is just a clock -- and expands to full only while
-# something needs the room: the info section (first 10s / hover), a visible
-# admin message, or the hover itself.
+# One place decides how tall the widget should be. Width is FIXED at the
+# narrow clock width -- the widget only ever grows downward (info section
+# on first 10s / hover, admin message), never to the right.
 function Get-LogbookTimerTargetSize {
     $infoShown = $infoSection.Visibility -eq 'Visible'
     $msgShown = $messageSection.Visibility -eq 'Visible'
     $h = if ($infoShown) { $script:HEIGHT_EXPANDED } else { $script:HEIGHT_COLLAPSED }
     if ($msgShown) { $h += $script:MESSAGE_EXTRA }
-    $w = if ($infoShown -or $msgShown -or $script:isHovering) { $script:WIDTH_EXPANDED } else { $script:WIDTH_COLLAPSED }
-    return @{ Width = $w; Height = $h }
+    return @{ Width = $window.Width; Height = $h }
 }
 
 $script:allowClose = $false
@@ -190,6 +190,15 @@ function Show-LogbookPendingMessage {
         Set-LogbookMessageContent $msg
         $messageSection.Opacity = 0
         $messageSection.Visibility = 'Visible'
+        # Text wraps a lot at the fixed narrow width, so a constant height
+        # can't fit every message. Measure just this one section at its
+        # known available width (NOT the whole window -- whole-window
+        # Measure/SizeToContent is what misfired in earlier iterations)
+        # and clamp hard, mirroring Get-LogbookTimerShapeData's guard.
+        $availW = ($window.Width - 20) - 28   # shape width minus section side margins
+        $messageSection.Measure((New-Object System.Windows.Size $availW, ([double]::PositiveInfinity)))
+        $script:MESSAGE_EXTRA = [Math]::Round(
+            [Math]::Min([Math]::Max($messageSection.DesiredSize.Height + 14, 90), 220))
         Update-LogbookTimerSize
         $fadeIn = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds(420))
         $fadeIn.EasingFunction = New-Object System.Windows.Media.Animation.SineEase

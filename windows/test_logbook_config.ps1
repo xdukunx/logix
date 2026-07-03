@@ -48,7 +48,7 @@ Write-Host "session timer -> XAML"
 $session = [pscustomobject]@{ session_type = 'Physical'; nama = 'Nama & "Contoh"'; tujuan = 'Running Data' }
 $timerXaml = Build-LogbookTimerXaml -cfg $cfg -session $session -deviceName 'LAB-PC-01 <Test>'
 $timerDoc = [xml]$timerXaml
-Assert ($timerDoc.Window.Width -eq '340') "timer window width 340"
+Assert ($timerDoc.Window.Width -eq '230') "timer window width fixed at 230 (narrow clock width; widget only ever grows downward)"
 $namaValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'NamaValue' }).Text
 Assert ($namaValue -eq 'Nama & "Contoh"') "nama with ampersand/quote escaped and round-trips"
 $deviceValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'DeviceValue' }).Text
@@ -79,11 +79,13 @@ Assert ($shape300 -match 'L 320,280 ' -and $shape300.TrimEnd().EndsWith('Z')) "s
 $shapeHuge = Get-LogbookTimerShapeData 5000
 Assert ($shapeHuge -match 'L 320,480 ') "height ceiling (500) applied -- guards against ever filling the screen again"
 
-Write-Host "timer shape geometry at various widths (collapsed clock-only <-> expanded)"
+Write-Host "timer shape geometry at various widths"
 $shapeDefaultW = Get-LogbookTimerShapeData 190
 Assert ($shapeDefaultW -match 'L 276,0 L 320,44 ') "width defaults to 320 (backward-compatible single-arg call)"
-$shapeNarrow = Get-LogbookTimerShapeData 100 210   # WIDTH_COLLAPSED (230) - 20 margin
-Assert ($shapeNarrow -match 'L 166,0 L 210,44 ' -and $shapeNarrow -match 'L 210,80 ') "collapsed width recomputes chamfer and right edge"
+$shapeNarrow = Get-LogbookTimerShapeData 100 210   # the widget's actual fixed width (230 window - 20 margin)
+Assert ($shapeNarrow -match 'L 166,0 L 210,44 ' -and $shapeNarrow -match 'L 210,80 ') "narrow width recomputes chamfer and right edge"
+$seedInDoc = $shapePaths[0].Data
+Assert ($seedInDoc -match 'L 166,0 L 210,44 ') "timer XAML seeds the shape at the narrow 210 width, matching the window"
 $shapeTiny = Get-LogbookTimerShapeData 100 10
 Assert ($shapeTiny -match 'L 106,0 L 150,44 ') "width floor (150) applied when given a too-small content width"
 $shapeWide = Get-LogbookTimerShapeData 100 5000

@@ -797,8 +797,10 @@ function Get-LogbookTimerShapeData([double]$ContentHeight, [double]$ContentWidth
 # constant, not config-driven; only the primary/accent accents come from
 # branding.colors.
 #
-# Neither height NOR width is fixed: two independently toggleable sections
-# drive the height --
+# Width is FIXED at the narrow clock width -- the widget must only ever
+# grow DOWNWARD (an explicit product decision; a first iteration that also
+# widened on hover was rejected). Height is driven by two independently
+# toggleable sections --
 #   InfoSection    (nama/tujuan/device + accent bar): visible for the
 #                  first 10s of a session or while the user hovers the
 #                  widget, collapsed otherwise so the user can focus on
@@ -808,12 +810,10 @@ function Get-LogbookTimerShapeData([double]$ContentHeight, [double]$ContentWidth
 #                  the shape downward from wherever it currently ends --
 #                  below the timer if InfoSection is collapsed, below the
 #                  full info block if it's expanded.
-# -- and the width collapses with them: at rest the widget is only as wide
-# as the clock needs (WIDTH_COLLAPSED in logbook_timer.ps1), growing to
-# full width only while the info section or a message is showing, or the
-# user hovers. Both sections are Grid rows sized "Auto", so a Collapsed
-# section takes zero space -- no reserved blank area, unlike an earlier
-# "*"-row design.
+# Both sections are Grid rows sized "Auto", so a Collapsed section takes
+# zero space -- no reserved blank area, unlike an earlier "*"-row design.
+# Everything inside must fit the narrow width: values ellipsize, message
+# text wraps.
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $primary = [string]$cfg.branding.colors.primary
     $accent  = [string]$cfg.branding.colors.accent
@@ -831,13 +831,15 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     # SizeToContent toggling, then via Measure()/DesiredSize) both produced
     # wrong/huge heights that only surfaced on a live Windows run, not in
     # XML-structural tests. logbook_timer.ps1 owns height transitions
-    # entirely via a small set of fixed target heights instead.
-    $seedShapeData = Get-LogbookTimerShapeData 190
+    # entirely via a small set of fixed target heights instead. Width 230
+    # (shape 210) is the permanent width -- sized for the clock, verified
+    # headlessly to fit worst-case digits with slack.
+    $seedShapeData = Get-LogbookTimerShapeData 190 210
 
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="340" Height="210" WindowStyle="None" ResizeMode="NoResize"
+        Width="230" Height="210" WindowStyle="None" ResizeMode="NoResize"
         Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
   <Grid>
     <Path Name="ShapePath" Margin="10" Fill="#0B0F19" Stroke="$primary" StrokeThickness="1.3" Data="$seedShapeData">
@@ -869,19 +871,19 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
         <Border Height="1" Background="#22FFFFFF" Margin="18,0,18,8"/>
 
         <Grid Margin="18,0,18,4">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
           <TextBlock Text="Nama" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
           <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
         </Grid>
 
         <Grid Margin="18,0,18,4">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
           <TextBlock Text="Tujuan" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
           <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
         </Grid>
 
         <Grid Margin="18,0,18,8">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="60"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
           <TextBlock Text="Device" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
           <TextBlock Grid.Column="1" Name="DeviceValue" Text="$device" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
         </Grid>
