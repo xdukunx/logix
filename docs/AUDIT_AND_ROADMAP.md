@@ -128,7 +128,7 @@ exactly those foundations and nothing else.
 |---|---|---|
 | 1 | Public repo/docs/architecture cleanup | in progress |
 | 2 | Device registry + heartbeat persistence | done — safe parts only; streaming/control explicitly deferred |
-| 3 | Command queue hardening + real RBAC + audit log maturity | RBAC done (6 roles, permissions-only, see `docs/LOGIX_CONTROL.md` §4); command queue hardening + audit log maturity not started |
+| 3 | Command queue hardening + real RBAC + audit log maturity | done — RBAC (6 roles, permissions-only) + command TTL/identity + agent execution acks, see `docs/LOGIX_CONTROL.md` §4 and §6 |
 | 4 | Message / open website / approved program | not started |
 | 5 | Lock screen (branded overlay) | not started |
 | 6 | File transfer | not started |

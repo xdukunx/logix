@@ -130,14 +130,28 @@ were retrofitted with exactly one `log_remote_action(...)` call each,
 wrapped so a logging failure can never block the real command from being
 queued.
 
-**Explicit limitation, stated plainly so it is never mistaken for more
-than it is:** this audit log can currently only prove *"an admin queued
-this command,"* not *"the device executed it."* Confirming actual
-execution requires the agent to report outcomes back to the server (e.g.
-echoing completed command IDs on its next heartbeat) — a natural extension
-for Milestone 3, not built here. Anywhere the audit log is surfaced (the
-dashboard panel, this document, `SECURITY.md`), a `status: 'queued'` row
-must not be read as `status: 'done'`.
+**Execution confirmation (Milestone 3 — implemented).** A `status`
+column value now means something specific:
+
+| Status | Meaning |
+|---|---|
+| `queued` | An admin queued it. Nothing more is known yet. |
+| `done` / `failed` | The agent reported the outcome on a *later* heartbeat via `HeartbeatPayload.acks`, matched back to this row by `command_id`. `executed_at` is set. |
+| `expired` | It sat in the queue past `COMMAND_TTL_MINUTES` (5) without the device checking in, and was withheld — never delivered. A device offline for hours no longer fires a stale LOCK/BROADCAST the instant it reconnects. |
+
+Acks ride the *next* heartbeat, not the one that delivered the command:
+the agent executes LOCK/BROADCAST synchronously, after it has already
+consumed the HTTP response that delivered them, so there's no request left
+to attach the outcome to. `apply_command_acks()` applies each ack with an
+`AND status = 'queued'` guard, making it idempotent against a resent ack
+(the agent's own delivery is at-least-once, via
+`windows/logbook_common.ps1`'s `pending_acks.json`) and a silent no-op for
+an unknown or already-terminal `command_id` — an ack is a best-effort
+report, not something the caller depends on succeeding.
+
+**Still true:** a `status: 'queued'` row must not be read as
+`status: 'done'` — it just means "queued" now covers a narrower, more
+honest window than before.
 
 ## 7. What is explicitly NOT built yet
 
