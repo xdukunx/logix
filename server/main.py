@@ -186,10 +186,10 @@ KNOWN_COMMAND_TYPES = ["LOCK", "BROADCAST"]
 
 # Audit log for every Control command, retrofitted onto the two that already
 # existed (lock, broadcast) rather than left as an empty table for a future
-# feature. IMPORTANT LIMITATION, stated here and in docs/LOGIX_CONTROL.md §6:
-# status can only ever be 'queued' or 'failed' -- this proves an admin queued
-# a command, not that the device executed it. True execution confirmation
-# needs the agent to report outcomes back, which does not exist yet.
+# feature. status progresses 'queued' -> 'done'/'failed' (agent-acked on a
+# later heartbeat, see HeartbeatPayload.acks) or -> 'expired' (TTL elapsed
+# before delivery, see COMMAND_TTL_MINUTES). A 'queued' row must still never
+# be read as 'done' -- see docs/LOGIX_CONTROL.md §6.
 REMOTE_ACTION_COLUMNS = {
     "action_id": "INTEGER PRIMARY KEY AUTOINCREMENT",
     "actor_email": "TEXT NOT NULL",
@@ -202,7 +202,19 @@ REMOTE_ACTION_COLUMNS = {
     "timestamp": "TEXT NOT NULL",
     "error_message": "TEXT",
     "result_summary": "TEXT",
+    # Addressable so a later heartbeat's ack (or a TTL sweep) can update
+    # this exact row's status without ambiguity.
+    "command_id": "TEXT",
+    # Set only by an ack or a TTL expiry -- distinguishes "queued" from
+    # "we know what actually happened and when."
+    "executed_at": "TEXT",
 }
+
+# How long a queued command waits for its device to check in before it's
+# considered stale and withheld rather than delivered. Without this, a
+# device offline for hours would fire an old LOCK/BROADCAST the moment it
+# reconnects, with no indication to the admin that context is stale.
+COMMAND_TTL_MINUTES = 5
 
 class LogPayload(BaseModel):
     timestamp: str
@@ -227,6 +239,12 @@ class HeartbeatPayload(BaseModel):
     username: Optional[str] = ""
     anydesk_id: Optional[str] = ""
     device_name: Optional[str] = ""
+    # Outcomes for commands delivered on a *previous* heartbeat -- the agent
+    # executes LOCK/BROADCAST synchronously after already processing that
+    # response, so there's no request left to attach the outcome to; it
+    # rides the next one instead. Each entry: {command_id, status
+    # ("done"|"failed"), detail}.
+    acks: Optional[List[Dict[str, Any]]] = None
 
 class ControlRequest(BaseModel):
     hostname: str
@@ -333,6 +351,15 @@ def init_control_tables():
         conn.execute(f"CREATE TABLE IF NOT EXISTS remote_actions (\n        {action_defs}\n    )")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_remote_actions_timestamp ON remote_actions(timestamp)")
 
+        # Additive migration: a remote_actions table created before command
+        # acks shipped won't have these yet.
+        existing_action_cols = {row["name"] for row in conn.execute("PRAGMA table_info(remote_actions)").fetchall()}
+        if "command_id" not in existing_action_cols:
+            conn.execute("ALTER TABLE remote_actions ADD COLUMN command_id TEXT")
+        if "executed_at" not in existing_action_cols:
+            conn.execute("ALTER TABLE remote_actions ADD COLUMN executed_at TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_remote_actions_command_id ON remote_actions(command_id)")
+
         now = datetime.now().isoformat()
         for policy_name, description, privacy_mode_default in SYSTEM_POLICY_PROFILES:
             # INSERT OR IGNORE: idempotent across restarts, never clobbers an
@@ -395,16 +422,46 @@ def upsert_device(conn, hostname: str, display_name: str) -> str:
 
 def log_remote_action(conn, actor_email: str, target_device: str, action_type: str,
                        status: str, reason: str = "", param: str = "",
-                       error_message: str = "", result_summary: str = ""):
+                       error_message: str = "", result_summary: str = "",
+                       command_id: str = ""):
     device_row = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (target_device,)).fetchone()
     target_device_id = device_row["device_id"] if device_row else None
     conn.execute(
         "INSERT INTO remote_actions "
         "(actor_email, target_device, target_device_id, action_type, status, reason, param, "
-        "timestamp, error_message, result_summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "timestamp, error_message, result_summary, command_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (actor_email, target_device, target_device_id, action_type, status, reason, param,
-         datetime.now().isoformat(), error_message, result_summary),
+         datetime.now().isoformat(), error_message, result_summary, command_id or None),
     )
+    conn.commit()
+
+
+def apply_command_acks(conn, acks: List[Dict[str, Any]]):
+    """Apply agent-reported outcomes to remote_actions. The
+    'AND status = queued' guard makes this idempotent against a resent ack
+    (the agent retries at-least-once, never exactly-once -- see
+    windows/logbook_common.ps1's pending_acks.json) and silently no-ops an
+    ack for an unknown or already-terminal command_id rather than raising --
+    an ack is a best-effort report, not something the caller depends on."""
+    now = datetime.now().isoformat()
+    for ack in acks:
+        command_id = ack.get("command_id")
+        status = ack.get("status")
+        if not command_id or status not in ("done", "failed"):
+            continue
+        detail = str(ack.get("detail", ""))
+        if status == "failed":
+            conn.execute(
+                "UPDATE remote_actions SET status = ?, error_message = ?, executed_at = ? "
+                "WHERE command_id = ? AND status = 'queued'",
+                (status, detail, now, command_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE remote_actions SET status = ?, result_summary = ?, executed_at = ? "
+                "WHERE command_id = ? AND status = 'queued'",
+                (status, detail, now, command_id),
+            )
     conn.commit()
 
 
@@ -719,10 +776,56 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
         "last_seen": datetime.now()
     }
 
-    # Retrieve pending commands for this workstation
-    cmds = PENDING_COMMANDS.get(payload.hostname, [])
-    if cmds:
-        PENDING_COMMANDS[payload.hostname] = [] # clear queue
+    # Apply any outcomes the agent is reporting for commands delivered on a
+    # previous heartbeat. Best-effort: an ack is a report, not something the
+    # agent depends on succeeding, so this must never fail the heartbeat.
+    if payload.acks:
+        try:
+            conn = get_db()
+            try:
+                apply_command_acks(conn, payload.acks)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    # Retrieve pending commands for this workstation, withholding any that
+    # have sat in the queue past COMMAND_TTL_MINUTES -- a device offline for
+    # hours shouldn't fire a stale LOCK/BROADCAST the instant it reconnects.
+    all_cmds = PENDING_COMMANDS.get(payload.hostname, [])
+    if all_cmds:
+        PENDING_COMMANDS[payload.hostname] = []  # clear queue either way
+
+    now = datetime.now()
+    cmds = []
+    expired_ids = []
+    for cmd in all_cmds:
+        queued_at = cmd.get("queued_at")
+        try:
+            is_expired = queued_at and (now - datetime.fromisoformat(queued_at)) > timedelta(minutes=COMMAND_TTL_MINUTES)
+        except ValueError:
+            is_expired = False
+        if is_expired:
+            expired_ids.append(cmd.get("command_id"))
+        else:
+            cmds.append(cmd)
+
+    if expired_ids:
+        try:
+            conn = get_db()
+            try:
+                for command_id in expired_ids:
+                    if command_id:
+                        conn.execute(
+                            "UPDATE remote_actions SET status = 'expired', executed_at = ? "
+                            "WHERE command_id = ? AND status = 'queued'",
+                            (now.isoformat(), command_id),
+                        )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
 
     return {"status": "ok", "commands": cmds}
 
@@ -948,9 +1051,13 @@ def rename_device(payload: RenameDeviceRequest, email: str = Depends(require_per
 @app.post("/api/control/lock")
 def queue_lock_command(payload: ControlRequest, email: str = Depends(require_permission("lock"))):
     host = payload.hostname
+    command_id = str(uuid.uuid4())
     if host not in PENDING_COMMANDS:
         PENDING_COMMANDS[host] = []
-    PENDING_COMMANDS[host].append({"command": "LOCK", "param": ""})
+    PENDING_COMMANDS[host].append({
+        "command_id": command_id, "command": "LOCK", "param": "",
+        "queued_at": datetime.now().isoformat(),
+    })
     detail = f"Lock command queued for {host}"
 
     # Audit logging must never block the real command from being queued --
@@ -958,7 +1065,8 @@ def queue_lock_command(payload: ControlRequest, email: str = Depends(require_per
     try:
         conn = get_db()
         try:
-            log_remote_action(conn, email, host, "LOCK", "queued", reason=payload.reason, result_summary=detail)
+            log_remote_action(conn, email, host, "LOCK", "queued", reason=payload.reason,
+                               result_summary=detail, command_id=command_id)
         finally:
             conn.close()
     except Exception:
@@ -973,11 +1081,20 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
     msg = payload.param or "Perhatian: Alert dari Administrator."
 
     if host == "ALL":
-        # Broadcast to all known heartbeating hosts
+        # Broadcast to all known heartbeating hosts. All fanned-out copies
+        # share one command_id, matching the "one admin action, one audit
+        # row" precedent below -- the first device to ack it transitions
+        # the shared row to done/failed (log_remote_action's UPDATE guard
+        # makes later acks for the same command_id no-ops).
+        command_id = str(uuid.uuid4())
+        queued_at = datetime.now().isoformat()
         for h in HEARTBEATS.keys():
             if h not in PENDING_COMMANDS:
                 PENDING_COMMANDS[h] = []
-            PENDING_COMMANDS[h].append({"command": "BROADCAST", "param": msg, "reason": payload.reason or "Direction Message"})
+            PENDING_COMMANDS[h].append({
+                "command_id": command_id, "command": "BROADCAST", "param": msg,
+                "reason": payload.reason or "Direction Message", "queued_at": queued_at,
+            })
         detail = "Broadcast queued for all hosts"
         # One audit row for this one admin action, not one per fanned-out
         # host -- an admin took a single action; that's what the log reflects.
@@ -985,22 +1102,28 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
             conn = get_db()
             try:
                 log_remote_action(conn, email, "ALL", "BROADCAST", "queued",
-                                   reason=payload.reason, param=msg, result_summary=detail)
+                                   reason=payload.reason, param=msg, result_summary=detail,
+                                   command_id=command_id)
             finally:
                 conn.close()
         except Exception:
             pass
         return {"status": "success", "detail": detail}
 
+    command_id = str(uuid.uuid4())
     if host not in PENDING_COMMANDS:
         PENDING_COMMANDS[host] = []
-    PENDING_COMMANDS[host].append({"command": "BROADCAST", "param": msg, "reason": payload.reason or "Direction Message"})
+    PENDING_COMMANDS[host].append({
+        "command_id": command_id, "command": "BROADCAST", "param": msg,
+        "reason": payload.reason or "Direction Message", "queued_at": datetime.now().isoformat(),
+    })
     detail = f"Broadcast queued for {host}"
     try:
         conn = get_db()
         try:
             log_remote_action(conn, email, host, "BROADCAST", "queued",
-                               reason=payload.reason, param=msg, result_summary=detail)
+                               reason=payload.reason, param=msg, result_summary=detail,
+                               command_id=command_id)
         finally:
             conn.close()
     except Exception:

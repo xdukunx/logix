@@ -120,4 +120,8 @@ def test_audit_log_failure_does_not_block_the_real_command(monkeypatch, tmp_path
     assert res.status_code == 200
     assert res.json()["status"] == "success"
     assert "LAB-PC-05" in module.PENDING_COMMANDS
-    assert module.PENDING_COMMANDS["LAB-PC-05"] == [{"command": "LOCK", "param": ""}]
+    queued = module.PENDING_COMMANDS["LAB-PC-05"]
+    assert len(queued) == 1
+    assert queued[0]["command"] == "LOCK"
+    assert queued[0]["param"] == ""
+    assert queued[0]["command_id"]  # a uuid was assigned
