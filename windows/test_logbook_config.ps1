@@ -79,5 +79,15 @@ Assert ($shape300 -match 'L 320,280 ' -and $shape300.TrimEnd().EndsWith('Z')) "s
 $shapeHuge = Get-LogbookTimerShapeData 5000
 Assert ($shapeHuge -match 'L 320,480 ') "height ceiling (500) applied -- guards against ever filling the screen again"
 
+Write-Host "timer shape geometry at various widths (collapsed clock-only <-> expanded)"
+$shapeDefaultW = Get-LogbookTimerShapeData 190
+Assert ($shapeDefaultW -match 'L 276,0 L 320,44 ') "width defaults to 320 (backward-compatible single-arg call)"
+$shapeNarrow = Get-LogbookTimerShapeData 100 210   # WIDTH_COLLAPSED (230) - 20 margin
+Assert ($shapeNarrow -match 'L 166,0 L 210,44 ' -and $shapeNarrow -match 'L 210,80 ') "collapsed width recomputes chamfer and right edge"
+$shapeTiny = Get-LogbookTimerShapeData 100 10
+Assert ($shapeTiny -match 'L 106,0 L 150,44 ') "width floor (150) applied when given a too-small content width"
+$shapeWide = Get-LogbookTimerShapeData 100 5000
+Assert ($shapeWide -match 'L 456,0 L 500,44 ') "width ceiling (500) applied -- guards against filling the screen"
+
 if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nAll popup-config checks passed." -ForegroundColor Green

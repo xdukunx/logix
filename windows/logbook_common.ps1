@@ -773,16 +773,18 @@ $purposeItems
 }
 
 # Chamfered-rounded shape path data (three rounded corners, a diagonal
-# chamfer replacing the top-right one), parameterized by content height so
-# it can be recomputed at runtime as the timer widget grows/shrinks
-# (collapsed timer-only <-> expanded info <-> message extension). W/r/c are
-# fixed; only height varies. See logbook_timer.ps1's Sync-LogbookTimerShape.
-function Get-LogbookTimerShapeData([double]$ContentHeight) {
-    $w = 320; $r = 20; $c = 44
+# chamfer replacing the top-right one), parameterized by content height and
+# width so it can be recomputed at runtime as the timer widget grows/shrinks
+# (collapsed clock-only <-> expanded info <-> message extension). r/c are
+# fixed; height and width vary. See logbook_timer.ps1's
+# Sync-LogbookTimerShape.
+function Get-LogbookTimerShapeData([double]$ContentHeight, [double]$ContentWidth = 320) {
+    $r = 20; $c = 44
     # Clamped to a sane range -- defense in depth against any future bug
-    # feeding this a wildly wrong height (a prior version of the
+    # feeding this a wildly wrong size (a prior version of the
     # message-extend animation had exactly that bug, filling the screen).
     $h = [Math]::Round([Math]::Min([Math]::Max($ContentHeight, 90), 500))
+    $w = [Math]::Round([Math]::Min([Math]::Max($ContentWidth, 150), 500))
     return "M $r,0 L $($w-$c),0 L $w,$c L $w,$($h-$r) A $r,$r 0 0 1 $($w-$r),$h L $r,$h A $r,$r 0 0 1 0,$($h-$r) L 0,$r A $r,$r 0 0 1 $r,0 Z"
 }
 
@@ -795,8 +797,8 @@ function Get-LogbookTimerShapeData([double]$ContentHeight) {
 # constant, not config-driven; only the primary/accent accents come from
 # branding.colors.
 #
-# Height is NOT fixed: the window uses SizeToContent="Height" and two
-# independently toggleable sections --
+# Neither height NOR width is fixed: two independently toggleable sections
+# drive the height --
 #   InfoSection    (nama/tujuan/device + accent bar): visible for the
 #                  first 10s of a session or while the user hovers the
 #                  widget, collapsed otherwise so the user can focus on
@@ -806,8 +808,12 @@ function Get-LogbookTimerShapeData([double]$ContentHeight) {
 #                  the shape downward from wherever it currently ends --
 #                  below the timer if InfoSection is collapsed, below the
 #                  full info block if it's expanded.
-# Both are Grid rows sized "Auto", so a Collapsed section takes zero space
-# -- no reserved blank area, unlike an earlier "*" -row design.
+# -- and the width collapses with them: at rest the widget is only as wide
+# as the clock needs (WIDTH_COLLAPSED in logbook_timer.ps1), growing to
+# full width only while the info section or a message is showing, or the
+# user hovers. Both sections are Grid rows sized "Auto", so a Collapsed
+# section takes zero space -- no reserved blank area, unlike an earlier
+# "*"-row design.
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $primary = [string]$cfg.branding.colors.primary
     $accent  = [string]$cfg.branding.colors.accent
@@ -851,7 +857,7 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
       <Grid Grid.Row="0" Margin="18,14,18,0">
         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <Ellipse Name="Pulse" Width="8" Height="8" Fill="$accent" Margin="0,3,8,0" VerticalAlignment="Center" />
-        <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" />
+        <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" TextTrimming="CharacterEllipsis" />
       </Grid>
 
       <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,10" VerticalAlignment="Bottom">

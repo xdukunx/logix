@@ -200,12 +200,33 @@ a separate, optional component — the core agent works standalone with zero
 network dependency (`privacyMode: local_only` by default, see
 [docs/PRIVACY.md](docs/PRIVACY.md)).
 
+No Docker, no external database — the server is FastAPI + SQLite on plain
+Python. One script configures everything:
+
+### One-command setup
+
+```bash
+git clone https://github.com/xdukunx/logix.git
+cd logix
+
+# interactive: asks for admin email(s), OAuth (optional), origins; generates
+# a strong device API key; writes server/.env; installs deps; and (with
+# --service, run elevated) starts the server on every boot — systemd on
+# Linux, launchd on macOS, Task Scheduler on Windows.
+python3 install/setup_server.py --install-deps --service
+```
+
+It prints the exact `LOGIX_SERVER_URL` / `LOGIX_SERVER_API_KEY` pair to give
+each device's installer. Every value can also be passed as a flag
+(`--admin-emails`, `--ingest-key`, `--port`, …) for unattended setup — run
+with `--help` for the list.
+
 ### Quick local run (evaluation only)
 
 ```bash
 cd server
 pip install -r requirements.txt
-cp .env.example .env   # fill in and load before starting — see below
+cp .env.example .env   # fill in — main.py auto-loads server/.env on start
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -228,6 +249,11 @@ The server has no built-in TLS and stores tokens/heartbeats in memory (lost
 on restart, by design — see [SECURITY.md](SECURITY.md)) — it's meant to sit
 behind a reverse proxy on a host you control, not exposed directly to the
 internet.
+
+`install/setup_server.py --install-deps --service` automates steps 1–3 below
+(it writes the same systemd unit); the manual walkthrough is kept here so you
+can see — and adjust — exactly what lands on the host. Step 4 (HTTPS reverse
+proxy) is yours either way.
 
 1. **Get the code onto the server** and install dependencies into a venv:
    ```bash

@@ -46,15 +46,15 @@ $pulseAnim.EasingFunction = New-Object System.Windows.Media.Animation.SineEase
 $pulse.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $pulseAnim)
 
 # Keeps the chamfered shape's Path.Data/Grid.Clip matched to the window's
-# current height.
+# current width and height.
 function Sync-LogbookTimerShape {
-    $data = Get-LogbookTimerShapeData ($window.Height - 20)
+    $data = Get-LogbookTimerShapeData ($window.Height - 20) ($window.Width - 20)
     $geom = [System.Windows.Media.Geometry]::Parse($data)
     $shapePath.Data = $geom
     $contentGrid.Clip = $geom
 }
 
-# Fixed, deterministic target heights -- no runtime measurement of WPF
+# Fixed, deterministic target sizes -- no runtime measurement of WPF
 # layout at all. Two earlier approaches (toggling the window's own
 # SizeToContent mode, then WPF's Measure()/DesiredSize) both produced
 # wrong/huge heights that only surfaced on an actual Windows run, never in
@@ -64,10 +64,20 @@ function Sync-LogbookTimerShape {
 $script:HEIGHT_COLLAPSED = 120   # status + timer only
 $script:HEIGHT_EXPANDED  = 190   # + nama/tujuan/device + accent bar
 $script:MESSAGE_EXTRA    = 90    # added on top of whichever of the above is current
+$script:WIDTH_COLLAPSED  = 230   # just wide enough for the clock at rest
+$script:WIDTH_EXPANDED   = 340   # full width: info fields / admin message
 
-function Get-LogbookBaseHeight {
-    if ($infoSection.Visibility -eq 'Visible') { return $script:HEIGHT_EXPANDED }
-    return $script:HEIGHT_COLLAPSED
+# One place decides how big the widget should be. Width is collapsed at
+# rest -- the widget is just a clock -- and expands to full only while
+# something needs the room: the info section (first 10s / hover), a visible
+# admin message, or the hover itself.
+function Get-LogbookTimerTargetSize {
+    $infoShown = $infoSection.Visibility -eq 'Visible'
+    $msgShown = $messageSection.Visibility -eq 'Visible'
+    $h = if ($infoShown) { $script:HEIGHT_EXPANDED } else { $script:HEIGHT_COLLAPSED }
+    if ($msgShown) { $h += $script:MESSAGE_EXTRA }
+    $w = if ($infoShown -or $msgShown -or $script:isHovering) { $script:WIDTH_EXPANDED } else { $script:WIDTH_COLLAPSED }
+    return @{ Width = $w; Height = $h }
 }
 
 $script:allowClose = $false
@@ -78,54 +88,63 @@ $window.Add_Closing({ param($s,$e) if (-not $script:allowClose) { $e.Cancel = $t
 $window.Add_KeyDown({ param($s,$e) if ($e.Key -eq 'Escape' -or $e.SystemKey -eq 'F4') { $e.Handled = $true } })
 $window.Add_MouseLeftButtonDown({ try { $window.DragMove() } catch {} })
 
-# Stepped height transition: window bounds AND shape geometry are kept in
+# Stepped size transition: window bounds AND shape geometry are kept in
 # sync at every step, so the shape genuinely grows/shrinks rather than the
-# window just cropping a static shape. One persistent DispatcherTimer,
-# reconfigured per-call via script-scoped state (matches the single-timer
-# idiom the rest of this file already uses for the clock tick).
+# window just cropping a static shape. Width and height animate together
+# in the same steps. One persistent DispatcherTimer, reconfigured per-call
+# via script-scoped state (matches the single-timer idiom the rest of this
+# file already uses for the clock tick).
 $script:animTimer = New-Object Windows.Threading.DispatcherTimer
 $script:animTimer.Interval = [TimeSpan]::FromMilliseconds(16)
-$script:animFrom = 0.0
-$script:animTo = 0.0
+$script:animFromH = 0.0
+$script:animToH = 0.0
+$script:animFromW = 0.0
+$script:animToW = 0.0
 $script:animStep = 0
 $script:animSteps = 24
 $script:animTimer.Add_Tick({
     $script:animStep += 1
     $t = $script:animStep / [double]$script:animSteps
     if ($t -ge 1) {
-        $window.Height = $script:animTo
+        $window.Height = $script:animToH
+        $window.Width = $script:animToW
         Sync-LogbookTimerShape
         $script:animTimer.Stop()
         return
     }
     $eased = 1 - [Math]::Pow(1 - $t, 3)
-    $window.Height = $script:animFrom + ($script:animTo - $script:animFrom) * $eased
+    $window.Height = $script:animFromH + ($script:animToH - $script:animFromH) * $eased
+    $window.Width = $script:animFromW + ($script:animToW - $script:animFromW) * $eased
     Sync-LogbookTimerShape
 })
 
-function Start-LogbookHeightAnimation([double]$ToHeight) {
-    if ([Math]::Abs($window.Height - $ToHeight) -lt 0.5) { return }
+# Animates the window to whatever Get-LogbookTimerTargetSize currently
+# says, no-op when already there.
+function Update-LogbookTimerSize {
+    $target = Get-LogbookTimerTargetSize
+    if ([Math]::Abs($window.Height - $target.Height) -lt 0.5 -and
+        [Math]::Abs($window.Width - $target.Width) -lt 0.5) { return }
     $script:animTimer.Stop()
-    $script:animFrom = $window.Height
-    $script:animTo = $ToHeight
+    $script:animFromH = $window.Height
+    $script:animToH = $target.Height
+    $script:animFromW = $window.Width
+    $script:animToW = $target.Width
     $script:animStep = 0
     $script:animTimer.Start()
 }
 
 # Full info (nama/tujuan/device) shows for the first 10 seconds of a
 # session, or on hover -- collapsed the rest of the time so the widget is
-# just the clock, letting the user focus on time, not data. Instant
-# (unanimated) toggle -- only the message extend/collapse is animated.
+# just the clock, letting the user focus on time, not data. The window
+# then animates to the matching size (narrow clock-only at rest).
 function Update-LogbookInfoVisibility {
     $elapsedSec = ((Get-Date) - $start).TotalSeconds
     $shouldShow = $script:isHovering -or ($elapsedSec -le 10)
     $isShown = $infoSection.Visibility -eq 'Visible'
-    if ($shouldShow -eq $isShown) { return }
-    $infoSection.Visibility = if ($shouldShow) { 'Visible' } else { 'Collapsed' }
-    if ($messageSection.Visibility -ne 'Visible') {
-        $window.Height = Get-LogbookBaseHeight
-        Sync-LogbookTimerShape
+    if ($shouldShow -ne $isShown) {
+        $infoSection.Visibility = if ($shouldShow) { 'Visible' } else { 'Collapsed' }
     }
+    Update-LogbookTimerSize
 }
 $window.Add_MouseEnter({ $script:isHovering = $true; Update-LogbookInfoVisibility })
 $window.Add_MouseLeave({ $script:isHovering = $false; Update-LogbookInfoVisibility })
@@ -171,7 +190,7 @@ function Show-LogbookPendingMessage {
         Set-LogbookMessageContent $msg
         $messageSection.Opacity = 0
         $messageSection.Visibility = 'Visible'
-        Start-LogbookHeightAnimation ((Get-LogbookBaseHeight) + $script:MESSAGE_EXTRA)
+        Update-LogbookTimerSize
         $fadeIn = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds(420))
         $fadeIn.EasingFunction = New-Object System.Windows.Media.Animation.SineEase
         $messageSection.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fadeIn)
@@ -185,7 +204,7 @@ function Show-LogbookPendingMessage {
 
 function Hide-LogbookMessage {
     $messageSection.Visibility = 'Collapsed'
-    Start-LogbookHeightAnimation (Get-LogbookBaseHeight)
+    Update-LogbookTimerSize
 }
 
 $timer = New-Object Windows.Threading.DispatcherTimer

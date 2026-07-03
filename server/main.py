@@ -18,6 +18,30 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Logix Central Admin Server")
 
+
+# --- .env autoload -----------------------------------------------------------
+# Minimal stdlib loader so `uvicorn main:app` works right after
+# install/setup_server.py without the operator exporting variables or wiring
+# systemd's EnvironmentFile. Real environment variables always win: a key
+# already present in os.environ is never overwritten.
+def _load_dotenv(path: Path) -> None:
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+
+_load_dotenv(Path(__file__).resolve().parent / ".env")
+
 # --- Deployment mode & CORS -------------------------------------------------
 # 0 = production posture (no mock auth, strict origin allowlist).
 # 1 = local development (mock auth allowed, permissive CORS).
