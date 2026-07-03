@@ -17,10 +17,14 @@ point at the commit reviewed; treat them as approximate if the code has moved.
   only (not the server).
 - `windows/` — WPF sign-in popup with a cascading JSON rebrand config.
 
-**Preview / not production-ready — the server:**
-- `server/main.py`, `server/static/*` are **untracked in git**, absent from CI,
-  untested, and not installed by the installer. They hold the project's only
-  serious security issues (§3).
+**The server (updated after the hardening + deployment passes):**
+- `server/main.py`, `server/static/*` are committed, covered by
+  `tests/test_server_*.py` in CI, and hardened (§3 findings all fixed).
+  Deployment is one command: `install/setup_server.py` writes `.env`
+  (generating the ingest key), installs deps, and can register a boot
+  service (systemd / launchd / Task Scheduler). The server auto-loads
+  `server/.env` at startup. No Docker anywhere, by explicit project
+  decision — plain Python + SQLite.
 
 ## 2. Public-repo readiness
 
@@ -33,11 +37,11 @@ Added in batch 1: `SECURITY.md`, `docs/PRIVACY.md`, `CONTRIBUTING.md`,
 hardening.
 
 Still open:
-- Decide whether to commit `server/` (after hardening) or exclude it.
-- Remove the working-tree `server/central_logix.db` (ignored, but present).
-- Rebrand ~75 hardcoded `FTMM` / `MindLab` / `C:\lab` / brand-hex /
-  `admin@logix.com` / `admin123` occurrences across 17 files into config.
-- Add CI coverage for the server module if it is kept.
+- Rebrand remaining hardcoded `MindLab` / `C:\lab` occurrences in the
+  Windows scripts into config (the popup/branding layer is already
+  config-driven; the paths and task names are not).
+- `server/central_logix.db` exists in working trees that ran the server
+  (gitignored, confirmed untracked).
 
 ## 3. Security findings — server (verified, by severity)
 
@@ -99,6 +103,7 @@ user notice. See `docs/PRIVACY.md`.
 - [x] **G. Dashboard: modularize, add Device Registry / Detail / Sync Health, add loading/empty/error/offline/stale states** — Med / High / Low. *(done — new Devices tab: fleet stat row (total/online/stale/offline/pending), device registry table, and a Device Detail modal with policy, Sync Health counts, and recent-command history with Retry; sidebar connectivity indicator now polls `/api/health` instead of a static dot; shared `renderLoading`/`renderError`/`renderEmpty` helpers in `api.js` give Monitoring/Analytics/Devices one consistent empty/error look; a global offline banner reacts to the browser's online/offline signal)*
 - [x] **H. First-run wizard (interactive + `--non-interactive`)** — Med / Med / Low. *(done — `install/install.py` is now interactive (device name, server URL, enrollment code or shared key, privacy mode with the actual `docs/PRIVACY.md` summary shown inline), mirroring `install/setup_sync.py`'s existing `prompt()`/`--non-interactive` pattern; `windows/logbook_setup.ps1` gained the privacy-mode field it was missing)*
 - [x] **I. Rebrand hardcoded strings → config schema** — Med / Med / Low. *(done — `docs/config.schema.json` no longer describes speculative unimplemented fields (`product`/`organization`/`device`/`privacyMode`); it now matches `DEFAULT_CONFIG`'s real `devices`/`reports`/`privacy` shape, and `tests/test_config_schema.py` fails the build if they drift apart again)*
+- [x] **J. Server deployment packaging (no Docker)** — High / Low / Low. *(done — `install/setup_server.py` (interactive + flags): writes `server/.env` from `.env.example`, generates the ingest key, optional `--install-deps` and `--service` (systemd/launchd/Task Scheduler); `server/main.py` auto-loads `server/.env` (env vars win); covered by `tests/test_setup_server.py`. Verified live end-to-end: 40-check API sweep + a real device (upgrade-in-place, heartbeat, BROADCAST delivered → shown by the timer widget → acked → audit `done`) on 2026-07-03)*
 
 ## 6. Migration & compatibility
 

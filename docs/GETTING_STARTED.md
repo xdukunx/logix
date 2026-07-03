@@ -109,57 +109,40 @@ isn't collected.
 
 ---
 
-## Part 2 — Central server + dashboard (preview — read this first)
-
-> ### ⚠ Before you touch this section
-> The server currently has a real authentication gap: **if you don't
-> configure real Google OAuth credentials, anyone who can reach the server
-> gets a full admin session automatically** (this is a known issue, tracked
-> in [`SECURITY.md`](../SECURITY.md) and [`AUDIT_AND_ROADMAP.md`](AUDIT_AND_ROADMAP.md)).
-> Until that's patched:
-> - **Do not** expose this server to the public internet.
-> - **Do not** run it somewhere untrusted people can reach it on the network.
-> - If you do set it up, configure a real `GOOGLE_CLIENT_ID` /
->   `GOOGLE_CLIENT_SECRET` (see step 2 below) rather than leaving them blank —
->   leaving them blank is what triggers the bypass.
-> This section exists so you can experiment on a trusted LAN or your own
-> laptop, not to hand a student a public URL.
+## Part 2 — Central server + dashboard
 
 This part gives you a live dashboard showing which machines are active and
 lets you browse session logs from a browser, on one central machine.
 
-### 1. Install server dependencies
+The defaults are locked down (see [`SECURITY.md`](../SECURITY.md)): without
+real Google OAuth credentials the login simply refuses (503) rather than
+letting anyone in, and devices must present an API key to push anything.
+The two rules that remain yours to follow:
 
-On the machine that will act as the server (your spare PC / mini-PC / Pi):
+> - Never set `LOGIX_DEV_MODE=1` on a machine other people can reach — it
+>   re-enables the local-development mock login.
+> - Anything reachable beyond `localhost` belongs behind a TLS reverse
+>   proxy (walkthrough in the README's "Running it for real" section).
+
+### 1. Configure + install in one command
+
+On the machine that will act as the server (your spare PC / mini-PC / Pi),
+from a clone of this repo:
 
 ```bash
-cd server
-pip install -r requirements.txt --break-system-packages   # or use a venv
+python3 install/setup_server.py --install-deps
 ```
 
-### 2. Configure it
+It prompts for admin email(s) and Google OAuth credentials (from Google
+Cloud Console: OAuth 2.0 Client, "Web application" type, redirect URI
+`http://<server-ip>:8000/api/auth/callback` — must match
+`GOOGLE_REDIRECT_URI` exactly), generates a strong device API key, and
+writes everything to `server/.env`. Add `--service` (elevated) to also
+start the server on every boot. Prefer doing it by hand? Copy
+`server/.env.example` to `server/.env` and fill it in — the server
+auto-loads that file on start.
 
-Copy the example env file and fill it in:
-
-```bash
-cp server/.env.example server/.env
-```
-
-At minimum, set:
-
-- `ADMIN_EMAILS` — comma-separated Google account emails allowed to sign in.
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — from Google Cloud Console
-  (OAuth 2.0 Client, "Web application" type). **Leaving these blank is the
-  bypass mentioned above — don't skip this if anyone besides you can reach
-  the machine.**
-- `GOOGLE_REDIRECT_URI` — must exactly match what you register in Google
-  Cloud Console, e.g. `http://<server-ip>:8000/api/auth/callback`.
-
-Load the file before starting the server (exact command depends on your
-shell — `export $(cat server/.env | xargs)` on bash, or use a process
-manager that reads `.env` files for you).
-
-### 3. Run it
+### 2. Run it
 
 ```bash
 cd server
@@ -169,36 +152,38 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 Then open `http://<server-ip>:8000` in a browser. If OAuth is configured
 correctly, you'll see a "Sign in with Google" screen.
 
-### 4. Point a device at it
+### 3. Point a device at it
 
 On a device that already has the core installed (Part 1), edit its
 `config.env` (in the install directory from Part 1) and add:
 
 ```
 LOGIX_SERVER_URL="http://<server-ip>:8000"
+LOGIX_SERVER_API_KEY="<the key setup_server.py printed>"
 ```
 
-The next time an event is logged on that device, `log_physical.py` will try
-to push any unsynced rows to `/api/log` on the server. Note: as of today the
-server does **not** yet validate an API key on that endpoint (also tracked in
-the security doc) — this works, but treat it as a LAN-only, trusted-network
-feature for now, not something to expose publicly.
+(Or answer the device installer's prompts — it asks for exactly these, and
+can redeem a per-device enrollment code from the dashboard instead of the
+shared key.)
+
+The device then appears on the dashboard via its heartbeats, and remote
+commands (lock, broadcast message) work. **Session rows are a separate,
+deliberate step**: per [`PRIVACY.md`](PRIVACY.md), nothing from the local
+logbook leaves the device unless `LOGIX_PRIVACY_MODE=admin_full_sync` is
+set explicitly — the default (`local_only`) keeps all session data local
+even with a server configured.
 
 ### What's genuinely not built yet
 
-To set expectations correctly — these are **designed, not implemented**:
+To set expectations correctly — these are **designed, not implemented**
+(see [`LOGIX_CONTROL.md`](LOGIX_CONTROL.md) milestones 4-11):
 
-- An installer flag to pick "server" vs "device" role. Today, "being the
-  server" just means running `uvicorn` in `server/`, and "being a device"
-  just means setting `LOGIX_SERVER_URL` in `config.env`. There's no wizard.
-- Enrollment tokens / a device registry / device categories.
+- Open-website / approved-program remote commands.
+- The branded lock-screen overlay.
+- File transfer, screen thumbnails, remote view/control, power actions —
+  all deliberately deferred until the auth/RBAC/audit foundations they
+  require are proven in the field.
 - The mascot / branded onboarding UI.
-- Enforced privacy modes (`local_only` / `redacted_sync` / `admin_full_sync`)
-  — right now, if `LOGIX_SERVER_URL` is set, everything in the local table
-  gets pushed as-is.
-
-See [`AUDIT_AND_ROADMAP.md`](AUDIT_AND_ROADMAP.md) for the plan to build
-these.
 
 ---
 

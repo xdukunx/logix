@@ -11,7 +11,7 @@ Logix ships in two parts with **different maturity levels**:
 | Component | Location | Status | Network exposure |
 |---|---|---|---|
 | **Core** (bridge, reporting, SQL helper, GSheet redaction) | `logix/`, `install/`, `windows/` | Stable, tested, CI-covered | Local only (optional outbound GSheet push) |
-| **Central server + dashboard** | `server/` | **Preview / not production-ready** | Listens on HTTP; see caveats below |
+| **Central server + dashboard** | `server/` | Hardened (audit item C fixed + tested); younger than the core | Listens on HTTP — needs a TLS reverse proxy for non-local use; see below |
 
 The **core is the recommended deployment.** It keeps all data local and has no
 inbound network surface.
@@ -30,28 +30,40 @@ Please do **not** open a public issue for security problems. Instead:
 
 Do not include real personal data (names, IDs, IPs) in any report or attachment.
 
-## Known security caveats — central server (`server/`)
+## Central server (`server/`) — hardening status
 
-The `server/` module is a **preview** and is **not hardened for untrusted
-networks**. Before exposing it beyond `localhost` on a trusted admin machine,
-be aware of the following (tracked in `docs/AUDIT_AND_ROADMAP.md`):
+The findings from the original audit (roadmap item C in
+`docs/AUDIT_AND_ROADMAP.md`) are **fixed and regression-tested** in
+[`tests/test_server_security.py`](tests/test_server_security.py):
 
-- **Development auth fallback.** If `GOOGLE_CLIENT_ID` is unset, the Google
-  login route grants an admin session without real authentication. This is a
-  developer convenience and **must not run in production.** Configure real
-  OAuth, and run the server only behind a `LOGIX_DEV_MODE=0` gate once the
-  hardening patch (roadmap item C) lands.
-- **Ingest authentication.** The `/api/log` and `/api/heartbeat` endpoints do
-  not yet enforce the `X-API-Key` header. Do not expose these to untrusted
-  clients until API-key validation is enabled.
-- **CORS.** The server currently allows all origins with credentials — intended
-  for local development only.
-- **Output escaping.** The dashboard renders some client-supplied fields into
-  HTML; treat all ingested data as untrusted until the escaping fix lands.
+- **Auth fallback gated.** The unauthenticated developer mock login only
+  exists behind `LOGIX_DEV_MODE=1`. In the default production posture
+  (`LOGIX_DEV_MODE=0`), a server without real Google OAuth credentials
+  refuses login (503) rather than granting a session. The OAuth callback
+  enforces the `ADMIN_EMAILS` allowlist in both directions.
+- **Ingest authentication.** `/api/log` and `/api/heartbeat` validate
+  `X-API-Key` (constant-time compare) outside dev mode; devices get
+  individual revocable keys via enrollment, or use the shared
+  `LOGIX_INGEST_API_KEY`.
+- **CORS.** Outside dev mode, only origins listed in
+  `LOGIX_ALLOWED_ORIGINS` are allowed; the wildcard+credentials
+  combination is never used.
+- **Output escaping.** The dashboard escapes agent-supplied fields before
+  rendering.
 
-Until these are resolved, run the server **only** on a trusted host bound to
-`127.0.0.1` (or behind a reverse proxy that enforces authentication), and never
-on a public interface.
+Caveats that remain true by design — plan your deployment around them:
+
+- **No built-in TLS.** Session tokens and API keys travel in headers; put a
+  TLS reverse proxy in front of anything reachable beyond `localhost`
+  (walkthrough in the README) and keep uvicorn bound to `127.0.0.1`.
+- **In-memory admin sessions.** Login tokens are lost on restart (re-login
+  required); deliberate, but it also means a long-lived token survives
+  only as long as the process.
+- **`LOGIX_DEV_MODE=1` is for a private laptop only.** It re-enables the
+  mock login and permissive CORS. Never set it on a reachable server.
+- **Limited rate limiting.** Only `/api/enroll` has an abuse guard; on
+  public deployments the reverse proxy should provide general rate
+  limiting.
 
 ## Logix Control's security implications
 
