@@ -1,8 +1,10 @@
 # Logix Control — architecture and vision
 
-Status: **Milestone 1-2 (safe parts) only.** This document describes a
-subsystem that is mostly *not yet built*. Read [§7](#7-what-is-explicitly-not-built-yet)
-before assuming any capability described here is active.
+Status: **Milestones 1-3 built, plus enforced policy, power actions, and
+on-demand screen view.** Continuous screen streaming and remote input
+injection remain unbuilt. Read [§7](#7-what-is-built-and-what-is-explicitly-not)
+for the exact, current line between what exists and what does not before
+assuming any capability described here is active.
 
 ## 1. What Logix Control is
 
@@ -153,22 +155,43 @@ report, not something the caller depends on succeeding.
 `status: 'done'` — it just means "queued" now covers a narrower, more
 honest window than before.
 
-## 7. What is explicitly NOT built yet
+## 7. What is built, and what is explicitly NOT
 
-To prevent a reader from inferring capability from the presence of schema
-or documentation, stated as a literal list. None of the following exist in
-the codebase as of this milestone:
+**Now built (this milestone).** Stated as clearly as the "not built" list
+below, so the two stay honest against each other:
 
-- Screen capture, screen thumbnails, or any form of screen view
+- **Policy enforcement.** `device_policies` / `command_allowlist` are no
+  longer data-only: `enforce_command_policy()` in `server/main.py` gates
+  every control command against the target device's assigned policy
+  profile, including the "requires a reason" flag. LOCK/BROADCAST stay
+  allowed with no reason on every profile that had them before, for
+  backward compatibility; the larger-permission commands are
+  differentiated per posture (see `POLICY_COMMAND_RULES`).
+- **Power actions.** `POST /api/control/power` queues `SHUTDOWN`,
+  `RESTART`, or `LOGOFF`. The agent executes each with a 30-second
+  on-screen warning to the local user — never instant, never silent.
+- **On-demand screen view.** `POST /api/control/screenshot` queues one
+  capture; the agent shows the local user a notice that a capture
+  happened, takes a single downscaled screenshot, and uploads it. Only the
+  latest capture per device is stored (`device_screenshots`, one row per
+  device). This is a single-shot view, not a stream.
+- **User replies.** The person at a device can reply to an admin
+  broadcast from the session-timer widget; replies post to `/api/replies`
+  and surface on the dashboard's Monitoring tab.
+
+**Still explicitly NOT built.** None of the following exist in the codebase:
+
+- Continuous/streaming screen view or screen thumbnails (only the single
+  on-demand screenshot above exists)
 - Remote control / mouse-keyboard input injection
 - File transfer (send or collect)
-- Broadcast/demo screen sharing (text broadcast already existed before
-  Control; screen broadcast does not)
-- WebSocket or any realtime/duplex channel
-- Power actions (Wake-on-LAN, reboot, shutdown, logout)
+- Broadcast/demo screen sharing (text broadcast and text replies exist;
+  screen broadcast does not)
+- WebSocket or any realtime/duplex channel (the agent still polls via
+  heartbeat; screenshots and replies ride that same request/response loop)
+- Wake-on-LAN (the power actions above act on an already-running,
+  heartbeating agent; they cannot wake a powered-off device)
 - Run-approved-program / open-approved-website execution
-- Any enforcement of `device_policies` or `command_allowlist` — both exist
-  as seeded data only
 - Faculty/lab/room *scope* restriction within RBAC (§4) — roles gate
   which actions, not which devices; no backing entity for "their faculty"
   exists yet

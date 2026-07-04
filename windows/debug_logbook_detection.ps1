@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Continue'
-. 'C:\lab\logbook_common.ps1'
+. (Join-Path $PSScriptRoot 'logbook_common.ps1')
 Ensure-LogbookDirs
 Write-Host "=== Logix Logbook Detection Debug ==="
 Write-Host "User: $env:USERDOMAIN\$env:USERNAME"

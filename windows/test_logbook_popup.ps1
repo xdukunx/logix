@@ -1,2 +1,2 @@
 Set-ExecutionPolicy -Scope Process Bypass -Force
-& 'C:\lab\logbook_popup.ps1' -TestMode
+& (Join-Path $PSScriptRoot 'logbook_popup.ps1') -TestMode

@@ -6,7 +6,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
     exit 0
 }
-. 'C:\lab\logbook_common.ps1'
+. (Join-Path $PSScriptRoot 'logbook_common.ps1')
 Ensure-LogbookDirs
 
 try {
@@ -37,6 +37,10 @@ $messageText = $window.FindName('MessageText')
 $messageIconBadge = $window.FindName('MessageIconBadge')
 $messageIcon = $window.FindName('MessageIcon')
 $messageTitle = $window.FindName('MessageTitle')
+$replyRow = $window.FindName('ReplyRow')
+$replyBox = $window.FindName('ReplyBox')
+$replySendBtn = $window.FindName('ReplySendBtn')
+$replyStatus = $window.FindName('ReplyStatus')
 
 # Smooth breathing pulse instead of a discrete character swap.
 $pulseAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.25, [TimeSpan]::FromSeconds(1.1))
@@ -171,11 +175,27 @@ function Set-LogbookMessageContent($Msg) {
     if ($Msg.reason -eq 'Emergency Alert') {
         $messageTitle.Text = 'Emergency Alert'
         $messageIcon.Text = '!'
+    } elseif ($Msg.reason -eq 'Screen View Notice') {
+        $messageTitle.Text = 'Pemberitahuan Monitoring'
+        $messageIcon.Text = 'i'
     } else {
         $messageTitle.Text = 'Pesan dari Admin'
         $messageIcon.Text = 'i'
     }
     $messageText.Text = [string]$Msg.text
+
+    # Reply UI: shown for admin messages unless the sender flagged the
+    # message as informational-only (allow_reply = false, e.g. the
+    # screenshot transparency notice or a shutdown countdown).
+    $allowReply = $true
+    if ($Msg.PSObject.Properties['allow_reply'] -and -not $Msg.allow_reply) { $allowReply = $false }
+    $script:replyCommandId = if ($Msg.PSObject.Properties['command_id']) { [string]$Msg.command_id } else { '' }
+    $replyBox.Text = ''
+    $replyBox.IsEnabled = $true
+    $replyStatus.Text = ''
+    $replyStatus.Visibility = 'Collapsed'
+    $replySendBtn.IsEnabled = $true
+    $replyRow.Visibility = if ($allowReply) { 'Visible' } else { 'Collapsed' }
 }
 
 function Show-LogbookPendingMessage {
@@ -216,6 +236,33 @@ function Hide-LogbookMessage {
     Update-LogbookTimerSize
 }
 
+# Send the typed reply back to the admin dashboard. Keeps the message open
+# long enough for the user to read the delivery status, then auto-hides.
+$script:replyCommandId = ''
+$replySendBtn.Add_Click({
+    $text = $replyBox.Text.Trim()
+    if (-not $text) { return }
+    $replySendBtn.IsEnabled = $false
+    $replyStatus.Visibility = 'Visible'
+    $replyStatus.Text = 'Mengirim...'
+    $ok = Send-LogbookReply -Text $text -CommandId $script:replyCommandId
+    if ($ok) {
+        $replyStatus.Text = 'Balasan terkirim ke admin.'
+        $replyBox.Text = ''
+        $replyBox.IsEnabled = $false
+        $script:messageHideAtTick = $script:tick + 5
+    } else {
+        $replyStatus.Text = 'Gagal mengirim. Coba lagi.'
+        $replySendBtn.IsEnabled = $true
+    }
+})
+$replyBox.Add_KeyDown({ param($s,$e)
+    if ($e.Key -eq 'Return') {
+        $e.Handled = $true
+        $replySendBtn.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Button]::ClickEvent)))
+    }
+})
+
 $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromSeconds(1)
 $timer.Add_Tick({
@@ -244,8 +291,14 @@ $timer.Add_Tick({
     Show-LogbookPendingMessage
 
     if ($script:messageHideAtTick -ge 0 -and $script:tick -ge $script:messageHideAtTick) {
-        Hide-LogbookMessage
-        $script:messageHideAtTick = -1
+        # Never yank the message away mid-reply: while the user is typing
+        # (or the box still holds text), push the auto-hide back instead.
+        if ($replyBox.IsEnabled -and ($replyBox.IsKeyboardFocused -or $replyBox.Text.Trim())) {
+            $script:messageHideAtTick = $script:tick + 10
+        } else {
+            Hide-LogbookMessage
+            $script:messageHideAtTick = -1
+        }
     }
 })
 

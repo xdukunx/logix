@@ -202,9 +202,9 @@ def compute_sync_status(category: Optional[str], last_seen, now: Optional[dateti
 
 
 # Policy profiles: named bundles a device can be assigned to. Seeded with the
-# 7 profiles from docs/LOGIX_CONTROL.md §5 -- data only, nothing reads or
-# enforces allowed_capabilities yet (there's only "lock" and "broadcast" to
-# allow, so there's nothing to meaningfully differentiate profiles by).
+# 7 profiles from docs/LOGIX_CONTROL.md §5. allowed_capabilities is now
+# real: enforce_command_policy() reads the command_allowlist rows seeded from
+# POLICY_COMMAND_RULES below before any control command is queued.
 POLICY_COLUMNS = {
     "policy_name": "TEXT PRIMARY KEY",
     "description": "TEXT",
@@ -226,16 +226,32 @@ SYSTEM_POLICY_PROFILES = [
 ]
 
 # Which commands a policy profile allows, and whether a reason is required.
-# 7 policies x 2 commands (the only two that exist) = 14 rows, seeded as
-# today's actual behavior (any admin token can lock/broadcast any device, no
-# reason required) expressed as data -- nothing enforces this yet.
 COMMAND_ALLOWLIST_COLUMNS = {
     "policy_name": "TEXT NOT NULL",
     "command_type": "TEXT NOT NULL",
     "allowed": "INTEGER DEFAULT 1",
     "requires_reason": "INTEGER DEFAULT 0",
 }
-KNOWN_COMMAND_TYPES = ["LOCK", "BROADCAST"]
+KNOWN_COMMAND_TYPES = ["LOCK", "BROADCAST", "SCREENSHOT", "SHUTDOWN", "RESTART", "LOGOFF"]
+
+# policy -> command -> (allowed, requires_reason). Seeded into
+# command_allowlist (INSERT OR IGNORE, so an admin's later edits stick) and
+# enforced by enforce_command_policy() on every control endpoint. LOCK and
+# BROADCAST stay allowed everywhere they were before this shipped; the
+# larger-permission commands are differentiated per posture: privacy-first
+# profiles get nothing new, exam/instructor postures get screen view, and
+# headless servers get power actions but no interactive-session commands
+# (server_monitoring is the one profile that drops LOCK/BROADCAST on a
+# fresh install; an existing DB keeps its already-seeded rows untouched).
+POLICY_COMMAND_RULES = {
+    "strict_privacy":    {"LOCK": (1, 0), "BROADCAST": (1, 0), "SCREENSHOT": (0, 0), "SHUTDOWN": (0, 0), "RESTART": (0, 0), "LOGOFF": (0, 0)},
+    "lab_standard":      {"LOCK": (1, 0), "BROADCAST": (1, 0), "SCREENSHOT": (1, 1), "SHUTDOWN": (1, 1), "RESTART": (1, 1), "LOGOFF": (1, 1)},
+    "exam_mode":         {"LOCK": (1, 0), "BROADCAST": (1, 0), "SCREENSHOT": (1, 0), "SHUTDOWN": (1, 0), "RESTART": (1, 0), "LOGOFF": (1, 0)},
+    "instructor_demo":   {"LOCK": (1, 0), "BROADCAST": (1, 0), "SCREENSHOT": (1, 0), "SHUTDOWN": (0, 0), "RESTART": (0, 0), "LOGOFF": (0, 0)},
+    "office_device":     {"LOCK": (1, 0), "BROADCAST": (1, 0), "SCREENSHOT": (0, 0), "SHUTDOWN": (1, 1), "RESTART": (1, 1), "LOGOFF": (0, 0)},
+    "loaned_laptop":     {"LOCK": (1, 0), "BROADCAST": (1, 0), "SCREENSHOT": (0, 0), "SHUTDOWN": (0, 0), "RESTART": (0, 0), "LOGOFF": (0, 0)},
+    "server_monitoring": {"LOCK": (0, 0), "BROADCAST": (0, 0), "SCREENSHOT": (0, 0), "SHUTDOWN": (1, 1), "RESTART": (1, 1), "LOGOFF": (0, 0)},
+}
 
 # Audit log for every Control command, retrofitted onto the two that already
 # existed (lock, broadcast) rather than left as an empty table for a future
@@ -286,8 +302,38 @@ COMMAND_TTL_MINUTES = 5
 # logged 'done' immediately), and REVOKE_API_KEY is explicitly
 # security-sensitive -- neither is offered a Retry action, automatic or
 # manual, per roadmap item J §C.
-RETRYABLE_ACTION_TYPES = {"LOCK", "BROADCAST"}
+RETRYABLE_ACTION_TYPES = {"LOCK", "BROADCAST", "SCREENSHOT", "SHUTDOWN", "RESTART", "LOGOFF"}
 DEFAULT_MAX_RETRIES = 1
+
+# Latest screenshot per device (Logix Control screen view). Deliberately a
+# single row per device (PRIMARY KEY device_id, upsert-replace): screen
+# content is never persisted as history, per docs/PRIVACY.md's "Design
+# boundaries -- Logix Control" commitment. A capture only ever exists as
+# the direct, audit-logged result of POST /api/control/screenshot, and the
+# agent shows the local user a notice when it runs (never silent).
+DEVICE_SCREENSHOT_COLUMNS = {
+    "device_id": "TEXT PRIMARY KEY",
+    "hostname": "TEXT NOT NULL",
+    "command_id": "TEXT",
+    "image_base64": "TEXT NOT NULL",
+    "content_type": "TEXT DEFAULT 'image/jpeg'",
+    "captured_at": "TEXT NOT NULL",
+}
+
+# Replies sent by the person at a device in response to an admin broadcast
+# (or unsolicited, from the session-timer widget). command_id links back to
+# the remote_actions BROADCAST row that prompted it, when there is one.
+DEVICE_REPLY_COLUMNS = {
+    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+    "device_id": "TEXT",
+    "hostname": "TEXT NOT NULL",
+    "device_name": "TEXT",
+    "message": "TEXT NOT NULL",
+    "command_id": "TEXT",
+    "created_at": "TEXT NOT NULL",
+    "read_at": "TEXT",
+}
+REPLY_MAX_LENGTH = 1000
 
 # System Alerts (roadmap item I). Rows are never deleted -- a cleared
 # condition is marked 'resolved' (status: active|acknowledged|resolved) so
@@ -347,7 +393,7 @@ class ControlRequest(BaseModel):
 DEFAULT_CONFIG = {
     "branding": {
         "logoText": "Logix",
-        "logoPath": "C:\\lab\\logo.png",
+        "logoPath": "C:\\Program Files\\Logix\\logo.png",
         "title": "Report Logbook",
         "subtitle": "Computational Workstation",
         "colors": {
@@ -463,6 +509,13 @@ def init_control_tables():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_category_device ON alerts(category, device_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status)")
 
+        screenshot_defs = ",\n        ".join(f"{k} {v}" for k, v in DEVICE_SCREENSHOT_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS device_screenshots (\n        {screenshot_defs}\n    )")
+
+        reply_defs = ",\n        ".join(f"{k} {v}" for k, v in DEVICE_REPLY_COLUMNS.items())
+        conn.execute(f"CREATE TABLE IF NOT EXISTS device_replies (\n        {reply_defs}\n    )")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_device_replies_created ON device_replies(created_at)")
+
         # Additive migration: a remote_actions table created before command
         # acks shipped won't have these yet.
         existing_action_cols = {row["name"] for row in conn.execute("PRAGMA table_info(remote_actions)").fetchall()}
@@ -482,19 +535,22 @@ def init_control_tables():
 
         now = datetime.now().isoformat()
         for policy_name, description, privacy_mode_default in SYSTEM_POLICY_PROFILES:
+            rules = POLICY_COMMAND_RULES[policy_name]
+            capabilities = [cmd.lower() for cmd in KNOWN_COMMAND_TYPES if rules[cmd][0]]
             # INSERT OR IGNORE: idempotent across restarts, never clobbers an
             # admin's later edits to a seeded row.
             conn.execute(
                 "INSERT OR IGNORE INTO device_policies "
                 "(policy_name, description, allowed_capabilities, privacy_mode_default, "
                 "is_system_default, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
-                (policy_name, description, json.dumps(["lock", "broadcast"]), privacy_mode_default, now, now),
+                (policy_name, description, json.dumps(capabilities), privacy_mode_default, now, now),
             )
             for command_type in KNOWN_COMMAND_TYPES:
+                allowed, requires_reason = rules[command_type]
                 conn.execute(
                     "INSERT OR IGNORE INTO command_allowlist "
-                    "(policy_name, command_type, allowed, requires_reason) VALUES (?, ?, 1, 0)",
-                    (policy_name, command_type),
+                    "(policy_name, command_type, allowed, requires_reason) VALUES (?, ?, ?, ?)",
+                    (policy_name, command_type, allowed, requires_reason),
                 )
 
         conn.commit()
@@ -796,17 +852,21 @@ ROLE_PERMISSIONS: Dict[str, set] = {
     # make faculty_admin functionally equal to super_admin for as long as
     # scope enforcement (faculty-level restriction) remains unbuilt.
     "faculty_admin": {
-        "lock", "broadcast", "devices_read", "devices_write", "sessions_read", "analytics_read",
-        "audit_log_read", "reports_read", "invite_create", "devices_revoke",
-        "alerts_read", "alerts_write",
+        "lock", "broadcast", "power", "screenshot", "devices_read", "devices_write",
+        "sessions_read", "analytics_read", "audit_log_read", "reports_read",
+        "invite_create", "devices_revoke", "alerts_read", "alerts_write",
+        "replies_read", "replies_write",
     },
     "lab_admin": {
-        "lock", "broadcast", "devices_read", "devices_write", "sessions_read", "analytics_read",
-        "audit_log_read", "reports_read", "invite_create", "devices_revoke",
-        "alerts_read", "alerts_write",
+        "lock", "broadcast", "power", "screenshot", "devices_read", "devices_write",
+        "sessions_read", "analytics_read", "audit_log_read", "reports_read",
+        "invite_create", "devices_revoke", "alerts_read", "alerts_write",
+        "replies_read", "replies_write",
     },
-    "instructor": {"lock", "broadcast"},
-    "viewer": {"devices_read", "sessions_read", "analytics_read", "audit_log_read", "reports_read", "alerts_read"},
+    # Instructors get screen view for classroom/demo oversight but not power
+    # actions -- shutting devices down is an admin's call, not a class-time one.
+    "instructor": {"lock", "broadcast", "screenshot", "replies_read"},
+    "viewer": {"devices_read", "sessions_read", "analytics_read", "audit_log_read", "reports_read", "alerts_read", "replies_read"},
     "auditor": {"audit_log_read", "reports_read"},
 }
 
@@ -939,12 +999,12 @@ def google_login():
                   <head>
                     <title>Login Belum Dikonfigurasi</title>
                     <style>
-                      body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #080d16; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                      .card { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); padding: 32px; border-radius: 16px; max-width: 520px; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5); }
-                      h2 { color: #3b82f6; margin-top: 0; }
-                      p, li { color: #94a3b8; font-size: 14px; line-height: 1.6; }
-                      code { background: #111827; padding: 2px 6px; border-radius: 4px; color: #e2e8f0; font-size: 12.5px; }
-                      a { color: #60a5fa; }
+                      body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #f1f5f9; color: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                      .card { background: #ffffff; border: 1px solid #dbeafe; padding: 32px; border-radius: 16px; max-width: 520px; box-shadow: 0 4px 30px rgba(15, 23, 42, 0.08); }
+                      h2 { color: #2563eb; margin-top: 0; }
+                      p, li { color: #475569; font-size: 14px; line-height: 1.6; }
+                      code { background: #eef2f7; padding: 2px 6px; border-radius: 4px; color: #0f172a; font-size: 12.5px; }
+                      a { color: #2563eb; }
                     </style>
                   </head>
                   <body>
@@ -1052,11 +1112,11 @@ def google_callback(code: str):
                     <title>Akses Ditolak</title>
                     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
                     <style>
-                      body {{ font-family: 'Inter', sans-serif; background: #080d16; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-                      .card {{ background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); padding: 32px; border-radius: 16px; text-align: center; max-width: 400px; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5); }}
-                      h2 {{ color: #ef4444; margin-top: 0; }}
-                      p {{ color: #94a3b8; font-size: 14px; line-height: 1.5; }}
-                      .btn {{ display: inline-block; margin-top: 20px; background: #3b82f6; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; }}
+                      body {{ font-family: 'Inter', sans-serif; background: #f1f5f9; color: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
+                      .card {{ background: #ffffff; border: 1px solid #fecaca; padding: 32px; border-radius: 16px; text-align: center; max-width: 400px; box-shadow: 0 4px 30px rgba(15, 23, 42, 0.08); }}
+                      h2 {{ color: #dc2626; margin-top: 0; }}
+                      p {{ color: #475569; font-size: 14px; line-height: 1.5; }}
+                      .btn {{ display: inline-block; margin-top: 20px; background: #2563eb; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; }}
                     </style>
                   </head>
                   <body>
@@ -1609,32 +1669,81 @@ def rename_device(payload: RenameDeviceRequest, email: str = Depends(require_per
     return {"status": "success", "display_name": name}
 
 
-# Control Command Endpoints (Admins post commands here)
-@app.post("/api/control/lock")
-def queue_lock_command(payload: ControlRequest, email: str = Depends(require_permission("lock"))):
-    host = payload.hostname
-    command_id = str(uuid.uuid4())
-    if host not in PENDING_COMMANDS:
-        PENDING_COMMANDS[host] = []
-    PENDING_COMMANDS[host].append({
-        "command_id": command_id, "command": "LOCK", "param": "",
-        "queued_at": datetime.now().isoformat(),
-    })
-    detail = f"Lock command queued for {host}"
+# --- Control Command Endpoints (Admins post commands here) -----------------
 
-    # Audit logging must never block the real command from being queued --
-    # it already was, above, regardless of what happens here.
+def enforce_command_policy(hostname: str, command_type: str, reason: str) -> None:
+    """Gate a control command on the target device's assigned policy profile
+    (docs/LOGIX_CONTROL.md §5 -- this is where device_policies /
+    command_allowlist stop being data-only). Raises 403 when the policy
+    disallows the command, 400 when the policy requires a reason and none
+    was given. Fails open for LOCK/BROADCAST when no rule exists (a device
+    the registry hasn't seen yet keeps the pre-Control behavior) and closed
+    for every newer, larger-permission command type."""
+    rule = None
     try:
         conn = get_db()
         try:
-            log_remote_action(conn, email, host, "LOCK", "queued", reason=payload.reason,
-                               result_summary=detail, command_id=command_id)
+            device = conn.execute(
+                "SELECT policy_profile FROM devices WHERE hostname = ?", (hostname,)
+            ).fetchone()
+            if device:
+                rule = conn.execute(
+                    "SELECT allowed, requires_reason FROM command_allowlist "
+                    "WHERE policy_name = ? AND command_type = ?",
+                    (device["policy_profile"], command_type),
+                ).fetchone()
+        finally:
+            conn.close()
+    except HTTPException:
+        raise
+    except Exception:
+        rule = None
+
+    if rule is None:
+        if command_type in ("LOCK", "BROADCAST"):
+            return
+        raise HTTPException(status_code=403,
+                            detail=f"{command_type} is not permitted: no policy rule covers this device")
+    if not rule["allowed"]:
+        raise HTTPException(status_code=403,
+                            detail=f"Device policy does not allow {command_type}")
+    if rule["requires_reason"] and not (reason or "").strip():
+        raise HTTPException(status_code=400,
+                            detail=f"Device policy requires a reason for {command_type}")
+
+
+def queue_command(email: str, hostname: str, command_type: str, param: str = "",
+                  reason: str = "", command_id: Optional[str] = None) -> str:
+    """Append one command to a device's in-memory delivery queue and write
+    its audit row. The audit write is best-effort -- it must never block the
+    command that was already queued (the original retrofit contract from
+    docs/LOGIX_CONTROL.md §6)."""
+    command_id = command_id or str(uuid.uuid4())
+    entry = {
+        "command_id": command_id, "command": command_type, "param": param,
+        "queued_at": datetime.now().isoformat(),
+    }
+    if command_type == "BROADCAST":
+        entry["reason"] = reason or "Direction Message"
+    PENDING_COMMANDS.setdefault(hostname, []).append(entry)
+    try:
+        conn = get_db()
+        try:
+            log_remote_action(conn, email, hostname, command_type, "queued", reason=reason,
+                               param=param, result_summary=f"{command_type} queued for {hostname}",
+                               command_id=command_id)
         finally:
             conn.close()
     except Exception:
         pass
+    return command_id
 
-    return {"status": "success", "detail": detail}
+
+@app.post("/api/control/lock")
+def queue_lock_command(payload: ControlRequest, email: str = Depends(require_permission("lock"))):
+    enforce_command_policy(payload.hostname, "LOCK", payload.reason)
+    queue_command(email, payload.hostname, "LOCK", reason=payload.reason)
+    return {"status": "success", "detail": f"Lock command queued for {payload.hostname}"}
 
 
 @app.post("/api/control/broadcast")
@@ -1643,21 +1752,27 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
     msg = payload.param or "Perhatian: Alert dari Administrator."
 
     if host == "ALL":
-        # Broadcast to all known heartbeating hosts. All fanned-out copies
-        # share one command_id, matching the "one admin action, one audit
-        # row" precedent below -- the first device to ack it transitions
-        # the shared row to done/failed (log_remote_action's UPDATE guard
-        # makes later acks for the same command_id no-ops).
+        # Broadcast to all known heartbeating hosts whose policy allows it.
+        # All fanned-out copies share one command_id, matching the "one
+        # admin action, one audit row" precedent -- the first device to ack
+        # it transitions the shared row to done/failed (apply_command_acks'
+        # UPDATE guard makes later acks for the same command_id no-ops).
         command_id = str(uuid.uuid4())
         queued_at = datetime.now().isoformat()
+        skipped = []
         for h in HEARTBEATS.keys():
-            if h not in PENDING_COMMANDS:
-                PENDING_COMMANDS[h] = []
-            PENDING_COMMANDS[h].append({
+            try:
+                enforce_command_policy(h, "BROADCAST", payload.reason)
+            except HTTPException:
+                skipped.append(h)
+                continue
+            PENDING_COMMANDS.setdefault(h, []).append({
                 "command_id": command_id, "command": "BROADCAST", "param": msg,
                 "reason": payload.reason or "Direction Message", "queued_at": queued_at,
             })
         detail = "Broadcast queued for all hosts"
+        if skipped:
+            detail += f" (skipped by policy: {', '.join(sorted(skipped))})"
         # One audit row for this one admin action, not one per fanned-out
         # host -- an admin took a single action; that's what the log reflects.
         try:
@@ -1672,26 +1787,204 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
             pass
         return {"status": "success", "detail": detail}
 
-    command_id = str(uuid.uuid4())
-    if host not in PENDING_COMMANDS:
-        PENDING_COMMANDS[host] = []
-    PENDING_COMMANDS[host].append({
-        "command_id": command_id, "command": "BROADCAST", "param": msg,
-        "reason": payload.reason or "Direction Message", "queued_at": datetime.now().isoformat(),
-    })
-    detail = f"Broadcast queued for {host}"
-    try:
-        conn = get_db()
-        try:
-            log_remote_action(conn, email, host, "BROADCAST", "queued",
-                               reason=payload.reason, param=msg, result_summary=detail,
-                               command_id=command_id)
-        finally:
-            conn.close()
-    except Exception:
-        pass
+    enforce_command_policy(host, "BROADCAST", payload.reason)
+    queue_command(email, host, "BROADCAST", param=msg, reason=payload.reason)
+    return {"status": "success", "detail": f"Broadcast queued for {host}"}
 
-    return {"status": "success", "detail": detail}
+
+class PowerRequest(BaseModel):
+    hostname: str
+    action: str  # shutdown | restart | logoff
+    reason: Optional[str] = ""
+
+
+POWER_ACTIONS = {"shutdown": "SHUTDOWN", "restart": "RESTART", "logoff": "LOGOFF"}
+
+
+# Power actions (Logix Control). The agent executes these with a 30-second
+# on-screen warning (never instantly, never silently) -- see the SHUTDOWN/
+# RESTART/LOGOFF handlers in windows/logbook_common.ps1.
+@app.post("/api/control/power")
+def queue_power_command(payload: PowerRequest, email: str = Depends(require_permission("power"))):
+    action_type = POWER_ACTIONS.get((payload.action or "").lower())
+    if not action_type:
+        raise HTTPException(status_code=400, detail="action must be one of: shutdown, restart, logoff")
+    enforce_command_policy(payload.hostname, action_type, payload.reason)
+    queue_command(email, payload.hostname, action_type, reason=payload.reason)
+    return {"status": "success", "detail": f"{action_type} queued for {payload.hostname}"}
+
+
+# On-demand screen view (Logix Control). One capture per explicit admin
+# action: queues SCREENSHOT to the agent, which captures the screen, shows
+# the local user a notice that it happened (never silent -- docs/PRIVACY.md
+# "Design boundaries -- Logix Control"), and uploads the image on the spot.
+# Only the latest capture per device is stored, never a history.
+@app.post("/api/control/screenshot")
+def queue_screenshot_command(payload: ControlRequest, email: str = Depends(require_permission("screenshot"))):
+    enforce_command_policy(payload.hostname, "SCREENSHOT", payload.reason)
+    command_id = queue_command(email, payload.hostname, "SCREENSHOT", reason=payload.reason)
+    return {"status": "success", "detail": f"Screenshot request queued for {payload.hostname}",
+            "command_id": command_id}
+
+
+class ScreenshotUpload(BaseModel):
+    hostname: str
+    command_id: str
+    image_base64: str
+    content_type: Optional[str] = "image/jpeg"
+
+
+# ~4 MB of base64 (~3 MB decoded) is far above what the agent's downscaled
+# JPEG produces; anything bigger is malformed or abusive.
+SCREENSHOT_MAX_BASE64_CHARS = 4_000_000
+
+
+@app.post("/api/control/screenshot/upload")
+def upload_screenshot(payload: ScreenshotUpload, _: None = Depends(verify_api_key)):
+    if not payload.image_base64 or len(payload.image_base64) > SCREENSHOT_MAX_BASE64_CHARS:
+        raise HTTPException(status_code=400, detail="image_base64 missing or too large")
+    conn = get_db()
+    try:
+        # The upload must answer a real, audit-logged SCREENSHOT command for
+        # this exact hostname -- an agent credential alone can't push
+        # arbitrary images into the dashboard.
+        action = conn.execute(
+            "SELECT action_id FROM remote_actions WHERE command_id = ? "
+            "AND action_type = 'SCREENSHOT' AND target_device = ?",
+            (payload.command_id, payload.hostname),
+        ).fetchone()
+        if not action:
+            raise HTTPException(status_code=400, detail="Unknown screenshot command_id for this hostname")
+        device = conn.execute(
+            "SELECT device_id FROM devices WHERE hostname = ?", (payload.hostname,)
+        ).fetchone()
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+        now = datetime.now().isoformat()
+        conn.execute(
+            "INSERT INTO device_screenshots (device_id, hostname, command_id, image_base64, content_type, captured_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(device_id) DO UPDATE SET hostname = excluded.hostname, "
+            "command_id = excluded.command_id, image_base64 = excluded.image_base64, "
+            "content_type = excluded.content_type, captured_at = excluded.captured_at",
+            (device["device_id"], payload.hostname, payload.command_id,
+             payload.image_base64, payload.content_type or "image/jpeg", now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "success"}
+
+
+@app.get("/api/devices/{device_id}/screenshot")
+def get_device_screenshot(device_id: str, email: str = Depends(require_permission("screenshot"))):
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT hostname, command_id, image_base64, content_type, captured_at "
+            "FROM device_screenshots WHERE device_id = ?",
+            (device_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="No screenshot captured for this device")
+    return dict(row)
+
+
+# --- Device replies (user -> admin messages) --------------------------------
+
+class ReplyPayload(BaseModel):
+    hostname: str
+    message: str
+    command_id: Optional[str] = ""
+    device_name: Optional[str] = ""
+
+
+@app.post("/api/replies")
+def post_reply(payload: ReplyPayload, _: None = Depends(verify_api_key)):
+    message = (payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+    if len(message) > REPLY_MAX_LENGTH:
+        raise HTTPException(status_code=400, detail=f"message exceeds {REPLY_MAX_LENGTH} characters")
+    conn = get_db()
+    try:
+        device = conn.execute(
+            "SELECT device_id, display_name FROM devices WHERE hostname = ?", (payload.hostname,)
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO device_replies (device_id, hostname, device_name, message, command_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (device["device_id"] if device else None,
+             payload.hostname,
+             payload.device_name or (device["display_name"] if device else payload.hostname),
+             message, payload.command_id or None, datetime.now().isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "success"}
+
+
+@app.get("/api/replies")
+def get_replies(
+    unread: Optional[bool] = None,
+    limit: int = 50,
+    offset: int = 0,
+    email: str = Depends(require_permission("replies_read")),
+):
+    conn = get_db()
+    try:
+        query = "SELECT * FROM device_replies WHERE 1=1"
+        count_query = "SELECT COUNT(*) FROM device_replies WHERE 1=1"
+        args: List[Any] = []
+        if unread is not None:
+            clause = " AND read_at IS NULL" if unread else " AND read_at IS NOT NULL"
+            query += clause
+            count_query += clause
+        total = conn.execute(count_query, args).fetchone()[0]
+        unread_count = conn.execute(
+            "SELECT COUNT(*) FROM device_replies WHERE read_at IS NULL"
+        ).fetchone()[0]
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        args.extend([limit, offset])
+        rows = conn.execute(query, args).fetchall()
+        replies = []
+        for r in rows:
+            reply = dict(r)
+            # Show what the user was replying to, when the reply is linked
+            # to a broadcast the admin sent.
+            if reply.get("command_id"):
+                original = conn.execute(
+                    "SELECT param FROM remote_actions WHERE command_id = ? AND action_type = 'BROADCAST' LIMIT 1",
+                    (reply["command_id"],),
+                ).fetchone()
+                reply["in_reply_to"] = original["param"] if original else None
+            else:
+                reply["in_reply_to"] = None
+            replies.append(reply)
+        return {"total": total, "unread": unread_count, "replies": replies}
+    finally:
+        conn.close()
+
+
+@app.post("/api/replies/{reply_id}/read")
+def mark_reply_read(reply_id: int, email: str = Depends(require_permission("replies_write"))):
+    conn = get_db()
+    try:
+        existing = conn.execute("SELECT id, read_at FROM device_replies WHERE id = ?", (reply_id,)).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Reply not found")
+        if not existing["read_at"]:
+            conn.execute(
+                "UPDATE device_replies SET read_at = ? WHERE id = ?",
+                (datetime.now().isoformat(), reply_id),
+            )
+            conn.commit()
+    finally:
+        conn.close()
+    return {"status": "success", "reply_id": reply_id}
 
 
 # Logging Endpoints

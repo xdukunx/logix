@@ -187,6 +187,49 @@ const retryAction = async (deviceId, actionId) => {
     }
 };
 
+// Latest screenshot for the detail modal (Logix Control screen view).
+// 404/403 are normal ("no capture yet" / role without the screenshot
+// permission) -- the section stays hidden rather than erroring.
+const loadScreenshot = async (deviceId) => {
+    const container = document.getElementById("device-screenshot-section");
+    if (!container) return;
+    try {
+        const res = await fetchWithAuth(`/api/devices/${deviceId}/screenshot`);
+        if (!res.ok) return;
+        const shot = await res.json();
+        container.innerHTML = `
+            <div class="section-header" style="border-bottom: none;">
+                <h2 style="font-size: 14px;"><i class="fa-solid fa-camera"></i> Tangkapan Layar Terakhir</h2>
+            </div>
+            <div class="screenshot-preview">
+                <img src="data:${escapeHtml(shot.content_type || "image/jpeg")};base64,${shot.image_base64}" alt="Screenshot ${escapeHtml(shot.hostname)}">
+                <div class="screenshot-meta">Diambil ${new Date(shot.captured_at).toLocaleString("id-ID")} — hanya tangkapan terbaru yang disimpan; pengguna di perangkat selalu diberi tahu saat layar diambil.</div>
+            </div>
+        `;
+    } catch (err) {
+        console.error(err);
+    }
+};
+
+const screenshotFromDetail = async (deviceId, hostname) => {
+    const reason = prompt(`Alasan mengambil screenshot ${hostname} (kebijakan device dapat mewajibkan ini):`, "");
+    if (reason === null) return;
+    try {
+        const res = await fetchWithAuth("/api/control/screenshot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, reason: reason.trim() })
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.detail || "Gagal meminta screenshot");
+        }
+        showToast("Permintaan screenshot dikirim. Hasil muncul di sini setelah device merespons (heartbeat berikutnya).");
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
 export const openDeviceDetail = async (deviceId) => {
     modal.classList.remove("hidden");
     modal.dataset.currentDeviceId = deviceId; // read by the delegated retry-button listener below
@@ -254,8 +297,11 @@ export const openDeviceDetail = async (deviceId) => {
                 </table>
             </div>
 
+            <div id="device-screenshot-section"></div>
+
             <div class="message-card-footer" style="margin-top: 20px;">
                 <button class="btn-action btn-sm" id="btn-detail-rename"><i class="fa-solid fa-pen"></i> Rename</button>
+                <button class="btn-action btn-sm" id="btn-detail-screenshot"><i class="fa-solid fa-camera"></i> Ambil Screenshot</button>
                 <button class="btn-action btn-sm btn-danger" id="btn-detail-revoke"><i class="fa-solid fa-ban"></i> Revoke API Key</button>
             </div>
         `;
@@ -263,9 +309,14 @@ export const openDeviceDetail = async (deviceId) => {
         document.getElementById("btn-detail-rename").addEventListener("click", () => {
             renameFromDetail(deviceId, device.hostname, device.display_name);
         });
+        document.getElementById("btn-detail-screenshot").addEventListener("click", () => {
+            screenshotFromDetail(deviceId, device.hostname);
+        });
         document.getElementById("btn-detail-revoke").addEventListener("click", () => {
             revokeFromDetail(deviceId, device.hostname);
         });
+
+        loadScreenshot(deviceId);
     } catch (err) {
         console.error(err);
         renderError(modalBody, "Gagal memuat detail device.");

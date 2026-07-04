@@ -32,24 +32,27 @@ contradict the unconditional list above if left unqualified. This section
 exists so that contradiction is resolved explicitly, in public, before any
 of that capability is built, rather than discovered later.
 
-**As of this document, Logix Control has shipped none of the capability
-described below.** Only a persisted device registry and an audit log for
-two pre-existing commands (lock, broadcast) exist — see
+**Current state.** Logix Control now ships an *on-demand screen view*
+(single screenshot per explicit admin action) and *power actions*
+(shutdown/restart/logoff), in addition to the earlier lock/broadcast
+commands and the persisted device registry + audit log — see
 [docs/LOGIX_CONTROL.md §7](LOGIX_CONTROL.md#7-what-is-explicitly-not-built-yet)
-for the exact, current state. The commitments below are being made *ahead*
-of that capability existing, specifically so they are reviewable before
-they matter, not written to justify something already shipped.
+for exactly what is and is not built. Continuous/streaming screen view and
+mouse-keyboard remote control are still **not** built. The screen-view
+capability that does exist was implemented to honor every commitment below,
+which were written *ahead* of it specifically so they would be reviewable
+before they mattered.
 
-When screen view and remote control are eventually built, they will, without
-exception:
+Screen view and power actions, as built (and remote control, if it is ever
+added), will, without exception:
 
 - **Never run without an explicit, individually-authorized admin action**
   that produces an audit-logged `remote_actions` row before or as the
   action starts — no scheduled, background, or automatic screen access.
-- **Never persist screen content to disk or the server by default.** Any
-  future retention (e.g. an explicit, policy-controlled screenshot record)
-  requires its own opt-in and a stated retention period — never silent,
-  never indefinite by default.
+- **Never persist screen content beyond the latest capture.** The screen
+  view stores only the single most recent screenshot per device
+  (`device_screenshots`, one row per device, replaced on every capture) —
+  no accumulating history, no per-capture archive.
 - **Never run silently or hidden from the local user.** A visible
   indicator that screen view/remote control is active is required
   whenever it runs; this is a design requirement, not a UI nicety.

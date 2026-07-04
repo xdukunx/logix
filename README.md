@@ -160,7 +160,7 @@ installed, a small setup window opens automatically
 
 Use **Uji Koneksi** to verify the server URL/key actually reach a running
 server before saving. You can re-run this setup window any time — it's
-`C:\lab\logbook_setup.ps1` after install — to rename the device or update
+`"C:\Program Files\Logix\logbook_setup.ps1"` after install — to rename the device or update
 server details. The device only appears on the admin dashboard once it
 starts sending heartbeats (every 30s while the monitor is running).
 
@@ -361,7 +361,7 @@ python logix/log_physical.py --sync-preview
   editing code**. Copy [`windows/logbook_config.example.json`](windows/logbook_config.example.json)
   to either location — later overrides earlier:
   1. built-in defaults (the original FTMM faculty UI),
-  2. `C:\lab\logbook_config.json` (machine-wide),
+  2. `%ProgramData%\Logix\logbook_config.json` (machine-wide),
   3. `%APPDATA%\MindLabLogbook\logbook_config.json` (per-user).
 
   Override any subset of: branding (logo text/image, title, subtitle, theme

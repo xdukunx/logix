@@ -1,16 +1,22 @@
-# MindLab Report Logbook common helpers v5.7
+# MindLab Report Logbook common helpers v5.8
 $ErrorActionPreference = 'Stop'
 
-$Global:LabDir = 'C:\lab'
+# Scripts live wherever this file was installed (the standard install target
+# is %ProgramFiles%\Logix -- see install_logbook_tasks.ps1). $PSScriptRoot
+# makes a dev checkout work identically to an installed copy. Mutable state
+# (session/log/config cache) lives under ProgramData because Program Files
+# is not writable by the standard user account the popup/monitor run as.
+$Global:LabDir = if ($PSScriptRoot) { $PSScriptRoot } else { Join-Path $env:ProgramFiles 'Logix' }
 $Global:StateDir = Join-Path $env:ProgramData 'MindLabLogbook'
+$Global:ConfigDir = Join-Path $env:ProgramData 'Logix'
 $Global:SessionFile = Join-Path $Global:StateDir 'session.json'
-$Global:ErrorLog = Join-Path $Global:LabDir 'logbook_error.log'
+$Global:ErrorLog = Join-Path $Global:StateDir 'logbook_error.log'
 $Global:PopupLock = Join-Path $Global:StateDir 'popup.lock'
 
 function Write-LogbookError {
     param([string]$Message)
     try {
-        New-Item -ItemType Directory -Force -Path $Global:LabDir | Out-Null
+        New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
         "$(Get-Date -Format o) $Message" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8
     } catch {}
 }
@@ -21,7 +27,6 @@ function Write-LogbookInfo {
 }
 
 function Ensure-LogbookDirs {
-    New-Item -ItemType Directory -Force -Path $Global:LabDir | Out-Null
     New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
 }
 
@@ -165,7 +170,7 @@ function Start-LogbookTimer {
     param([string]$SessionId = '')
     try {
         Stop-LogbookTimers
-        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_timer.ps1')
+        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_timer.ps1'))
         if ($SessionId) { $args += @('-SessionId', $SessionId) }
         $timer = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList $args
         $pidFile = Join-Path $Global:StateDir 'timer.pid'
@@ -181,7 +186,7 @@ function Start-LogbookPopup {
     param([switch]$ForceNew, [switch]$TestMode)
     try {
         if (Test-LogbookPopupRunning) { return $true }
-        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1')
+        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'))
         if ($ForceNew) { $args += '-ForceNew' }
         if ($TestMode) { $args += '-TestMode' }
         # IMPORTANT: do not use -WindowStyle Hidden here. It hides the WPF form too.
@@ -321,7 +326,7 @@ function Get-LogbookDefaultConfig {
     return @{
         branding = @{
             logoText = 'Logix'
-            logoPath = 'C:\lab\logo.png'
+            logoPath = (Join-Path $Global:LabDir 'logo.png')
             title    = 'Report Logbook'
             subtitle = 'Computational Workstation'
             colors   = @{ primary = '#073763'; accent = '#741B47'; muted = '#C0C0C0'; text = '#FFFFFF' }
@@ -388,7 +393,7 @@ function Get-LogbookConfigEnv {
     param([string]$Key)
     $envVal = [System.Environment]::GetEnvironmentVariable($Key)
     if ($envVal) { return $envVal }
-    $cfgPath = 'C:\ProgramData\Logix\config.env'
+    $cfgPath = Join-Path $Global:ConfigDir 'config.env'
     if (Test-Path $cfgPath) {
         try {
             $lines = Get-Content $cfgPath -ErrorAction SilentlyContinue
@@ -450,7 +455,7 @@ function Get-LogbookDeviceApiKey {
     # successful /api/enroll). Mirrors the server's own verify_api_key
     # fallback order: per-device key first, shared LOGIX_SERVER_API_KEY
     # from config.env as the bootstrap/unenrolled fallback.
-    $identityPath = 'C:\ProgramData\Logix\device.json'
+    $identityPath = Join-Path $Global:ConfigDir 'device.json'
     if (Test-Path $identityPath) {
         try {
             $obj = Get-Content $identityPath -Raw -ErrorAction Stop | ConvertFrom-Json
@@ -458,6 +463,97 @@ function Get-LogbookDeviceApiKey {
         } catch {}
     }
     return ''
+}
+
+# Drop a message for the session-timer widget to show inline near the
+# clock on its next tick (file-drop-and-poll, same IPC idiom as
+# session.json/popup.lock). Used both for admin BROADCASTs and for local
+# transparency notices (e.g. "a screenshot was just taken").
+function Set-LogbookIncomingMessage {
+    param([string]$Text, [string]$Reason = 'Direction Message', [string]$CommandId = '', [bool]$AllowReply = $true)
+    Ensure-LogbookDirs
+    $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
+    @{ text = $Text; reason = $Reason; command_id = $CommandId; allow_reply = $AllowReply; received_at = (Get-Date).ToString('o') } |
+        ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
+}
+
+# Send the user's reply to an admin message back to the central server.
+# Same auth chain as the heartbeat: per-device key first, shared bootstrap
+# key as fallback. Returns $true when the server confirmed receipt.
+function Send-LogbookReply {
+    param([Parameter(Mandatory=$true)][string]$Text, [string]$CommandId = '')
+    try {
+        $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+        if (-not $serverUrl) { return $false }
+        $serverKey = Get-LogbookDeviceApiKey
+        if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
+        $payload = @{
+            hostname    = $env:COMPUTERNAME
+            device_name = Get-LogbookDeviceDisplayName
+            message     = $Text
+            command_id  = $CommandId
+        }
+        $headers = @{ 'Content-Type' = 'application/json' }
+        if ($serverKey) { $headers['X-API-Key'] = $serverKey }
+        $apiUrl = $serverUrl.TrimEnd('/') + '/api/replies'
+        Invoke-RestMethod -Uri $apiUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 3) -Headers $headers -TimeoutSec 5 -UseBasicParsing | Out-Null
+        Write-LogbookInfo "Reply sent to server (command_id: $CommandId)."
+        return $true
+    } catch {
+        Write-LogbookError "Reply send failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Capture the full virtual screen, downscale to keep the payload small, and
+# upload it as the answer to one specific SCREENSHOT command. Never silent:
+# the caller drops a notice for the timer widget before this runs.
+function Invoke-LogbookScreenshotCapture {
+    param([Parameter(Mandatory=$true)][string]$CommandId)
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+    } finally {
+        $graphics.Dispose()
+    }
+    # Downscale to <=1280px wide -- plenty for the dashboard's preview and
+    # keeps the base64 payload well under the server's upload cap.
+    $maxWidth = 1280
+    $sendBitmap = $bitmap
+    if ($bitmap.Width -gt $maxWidth) {
+        $scale = $maxWidth / $bitmap.Width
+        $sendBitmap = New-Object System.Drawing.Bitmap $bitmap, $maxWidth, ([int]([Math]::Round($bitmap.Height * $scale)))
+        $bitmap.Dispose()
+    }
+    try {
+        $stream = New-Object System.IO.MemoryStream
+        $jpegCodec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+        $encParams = New-Object System.Drawing.Imaging.EncoderParameters 1
+        $encParams.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]60)
+        $sendBitmap.Save($stream, $jpegCodec, $encParams)
+        $imageB64 = [Convert]::ToBase64String($stream.ToArray())
+        $stream.Dispose()
+    } finally {
+        $sendBitmap.Dispose()
+    }
+
+    $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+    if (-not $serverUrl) { throw 'LOGIX_SERVER_URL is not configured' }
+    $serverKey = Get-LogbookDeviceApiKey
+    if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
+    $headers = @{ 'Content-Type' = 'application/json' }
+    if ($serverKey) { $headers['X-API-Key'] = $serverKey }
+    $payload = @{
+        hostname     = $env:COMPUTERNAME
+        command_id   = $CommandId
+        image_base64 = $imageB64
+        content_type = 'image/jpeg'
+    }
+    $apiUrl = $serverUrl.TrimEnd('/') + '/api/control/screenshot/upload'
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 3) -Headers $headers -TimeoutSec 15 -UseBasicParsing | Out-Null
 }
 
 function Get-LogbookDeviceDisplayName {
@@ -537,36 +633,63 @@ function Send-LogbookHeartbeat {
                 $param = $cmd.param
                 Write-LogbookInfo "Received remote command: $name (param: $param)"
 
-                if ($name -eq 'LOCK') {
-                    Write-LogbookInfo "Remote LOCK trigger execution."
-                    try {
-                        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','LOCK') | Out-Null
-                        Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
-                    } catch {
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
+                try {
+                    switch ($name) {
+                        'LOCK' {
+                            Write-LogbookInfo "Remote LOCK trigger execution."
+                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','LOCK') | Out-Null
+                            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'),'-ForceNew') | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                        }
+                        'BROADCAST' {
+                            # Drop for the timer widget to pick up on its next
+                            # tick and show inline, near the timer -- not a
+                            # separate MessageBox popup. "done" here means the
+                            # file was written for the timer to pick up, not
+                            # that the user has seen/dismissed it. command_id
+                            # rides along so a reply typed into the widget can
+                            # reference the exact broadcast it answers.
+                            Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
+                            $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
+                            Set-LogbookIncomingMessage -Text $param -Reason $reason -CommandId ([string]$cmd.command_id)
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                        }
+                        'SCREENSHOT' {
+                            # Transparency first, then capture: the person at
+                            # the device always sees that a capture happened
+                            # (docs/PRIVACY.md, "never silently").
+                            Write-LogbookInfo "Remote SCREENSHOT trigger execution."
+                            Set-LogbookIncomingMessage -Text 'Admin baru saja mengambil tangkapan layar perangkat ini untuk keperluan pemantauan.' -Reason 'Screen View Notice' -AllowReply $false
+                            Invoke-LogbookScreenshotCapture -CommandId ([string]$cmd.command_id)
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'screenshot uploaded' }
+                        }
+                        'SHUTDOWN' {
+                            Write-LogbookInfo "Remote SHUTDOWN trigger execution."
+                            Set-LogbookIncomingMessage -Text 'Perangkat ini akan dimatikan oleh admin dalam 30 detik. Simpan pekerjaan Anda sekarang.' -Reason 'Emergency Alert' -AllowReply $false
+                            & shutdown.exe /s /t 30 /c 'Logix: perangkat dimatikan oleh admin. Simpan pekerjaan Anda.' | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'shutdown scheduled (30s)' }
+                        }
+                        'RESTART' {
+                            Write-LogbookInfo "Remote RESTART trigger execution."
+                            Set-LogbookIncomingMessage -Text 'Perangkat ini akan dimulai ulang oleh admin dalam 30 detik. Simpan pekerjaan Anda sekarang.' -Reason 'Emergency Alert' -AllowReply $false
+                            & shutdown.exe /r /t 30 /c 'Logix: perangkat dimulai ulang oleh admin. Simpan pekerjaan Anda.' | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'restart scheduled (30s)' }
+                        }
+                        'LOGOFF' {
+                            # Close the logbook session cleanly first so hours
+                            # aren't lost, then sign the user out.
+                            Write-LogbookInfo "Remote LOGOFF trigger execution."
+                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') -Wait | Out-Null
+                            & shutdown.exe /l /f | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'user logged off' }
+                        }
+                        default {
+                            Write-LogbookError "Unknown remote command: $name"
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = "unknown command $name" }
+                        }
                     }
-                }
-                elseif ($name -eq 'BROADCAST') {
-                    # Drop for the timer widget to pick up on its next tick
-                    # and show inline, near the timer -- not a separate
-                    # MessageBox popup. Same file-drop-and-poll idiom as
-                    # session.json/popup.lock/timer.pid; there's no other
-                    # IPC channel between this process (the monitor loop)
-                    # and the timer's own separate powershell.exe process.
-                    # "done" here means the file was written for the timer
-                    # to pick up, not that the user has seen/dismissed it.
-                    Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
-                    try {
-                        Ensure-LogbookDirs
-                        $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
-                        $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
-                        @{ text = $param; reason = $reason; received_at = (Get-Date).ToString('o') } |
-                            ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
-                    } catch {
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
-                    }
+                } catch {
+                    $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
                 }
             }
         }
@@ -634,7 +757,7 @@ function Get-LogbookConfig {
         $cfg = Merge-LogbookConfig $cfg $serverCfg
     }
     
-    $machine = Join-Path $Global:LabDir 'logbook_config.json'
+    $machine = Join-Path $Global:ConfigDir 'logbook_config.json'
     $perUser = Join-Path (Join-Path $env:APPDATA 'MindLabLogbook') 'logbook_config.json'
     foreach ($path in @($machine, $perUser)) {
         $override = Read-LogbookConfigFile $path
@@ -976,6 +1099,17 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
           <StackPanel Grid.Column="1">
             <TextBlock Name="MessageTitle" Text="Emergency Alert" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$accent"/>
             <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="10.5" Foreground="$text" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            <Grid Name="ReplyRow" Visibility="Collapsed" Margin="0,8,0,0">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBox Name="ReplyBox" MinHeight="26" MaxLength="1000" FontFamily="Segoe UI" FontSize="10.5"
+                       Background="#22FFFFFF" Foreground="$text" CaretBrush="$text" BorderBrush="$muted"
+                       BorderThickness="1" Padding="6,4" VerticalContentAlignment="Center" TextWrapping="Wrap" />
+              <Button Name="ReplySendBtn" Grid.Column="1" Content="Balas" Margin="6,0,0,0" Padding="8,3"
+                      FontFamily="Segoe UI Semibold" FontSize="10.5" Background="$accent" Foreground="#0B0F19"
+                      BorderThickness="0" VerticalAlignment="Bottom" />
+            </Grid>
+            <TextBlock Name="ReplyStatus" Text="" Visibility="Collapsed" FontFamily="Segoe UI" FontSize="9.5"
+                       Foreground="$muted" Margin="0,4,0,0"/>
           </StackPanel>
         </Grid>
       </Border>

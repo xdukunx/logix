@@ -1,6 +1,6 @@
 param([switch]$Once)
 $ErrorActionPreference = 'Stop'
-. 'C:\lab\logbook_common.ps1'
+. (Join-Path $PSScriptRoot 'logbook_common.ps1')
 Ensure-LogbookDirs
 
 $created = $false
@@ -50,9 +50,9 @@ Invoke-InitialPopupOrTimer
 $action = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: SessionSwitch reason=$reason" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    try { "$stamp INFO: SessionSwitch reason=$reason" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8 } catch {}
     if ($reason -in @('SessionLock','ConsoleDisconnect','RemoteDisconnect','SessionLogoff')) {
-        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','END') | Out-Null
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') | Out-Null
     } elseif ($reason -in @('SessionUnlock','ConsoleConnect','RemoteConnect','SessionLogon')) {
         # Don't stack a second popup on top of one the user already left
         # open unanswered (e.g. opened it, then locked the screen with
@@ -66,9 +66,9 @@ $action = {
             $alreadyShowing = (($procs | Measure-Object).Count -gt 0)
         } catch {}
         if (-not $alreadyShowing) {
-            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'),'-ForceNew') | Out-Null
         } else {
-            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8 } catch {}
         }
     }
 }
@@ -88,8 +88,8 @@ try {
 $endingAction = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','END') | Out-Null
+    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8 } catch {}
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') | Out-Null
 }
 try {
     Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionEnding -SourceIdentifier MindLabLogbookSessionEnding -Action $endingAction | Out-Null
@@ -113,7 +113,7 @@ try {
 $powerAction = {
     $mode = $Event.SourceEventArgs.Mode
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8 } catch {}
     if ($mode -eq [Microsoft.Win32.PowerModes]::Resume) {
         $alreadyShowing = $false
         try {
@@ -123,7 +123,7 @@ $powerAction = {
             $alreadyShowing = (($procs | Measure-Object).Count -gt 0)
         } catch {}
         if (-not $alreadyShowing) {
-            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'),'-ForceNew') | Out-Null
         }
     }
 }

@@ -7,6 +7,7 @@ import { fetchAnalytics, fetchSessionLogs, fetchAuditLog } from "./js/analytics.
 import { loadConfiguration } from "./js/settings.js";
 import { fetchDevices, fetchBacklogCount } from "./js/devices.js";
 import { fetchAlerts } from "./js/alerts.js";
+import { fetchReplies } from "./js/replies.js";
 import "./js/report-modal.js"; // self-wires its own listeners on import
 
 const loginOverlay = document.getElementById("login-overlay");
@@ -20,7 +21,7 @@ const serverStatusDot = document.getElementById("server-status-dot");
 const serverStatusText = document.getElementById("server-status-text");
 
 const TABS = {
-    monitoring: { title: "Monitoring", onShow: () => fetchActiveWorkstations() },
+    monitoring: { title: "Monitoring", onShow: () => { fetchActiveWorkstations(); fetchReplies(); } },
     analytics: { title: "Analytics", onShow: () => { fetchAnalytics(); fetchSessionLogs(); fetchAuditLog(); } },
     devices: { title: "Devices", onShow: () => { fetchDevices(); fetchBacklogCount(); } },
     settings: { title: "Settings", onShow: () => loadConfiguration() },
@@ -135,7 +136,7 @@ if (queryToken) {
 // Auto Polling -- only refreshes data for the currently visible tab.
 setInterval(() => {
     if (!getToken()) return;
-    if (currentTab === "monitoring") fetchActiveWorkstations();
+    if (currentTab === "monitoring") { fetchActiveWorkstations(); fetchReplies(); }
     if (currentTab === "analytics") fetchAnalytics();
     if (currentTab === "devices") { fetchDevices(); fetchBacklogCount(); }
 }, 10000);

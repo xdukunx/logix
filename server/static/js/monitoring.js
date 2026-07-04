@@ -52,6 +52,57 @@ const sendDirectMessage = async (hostname) => {
     }
 };
 
+// Request an on-demand screenshot (Logix Control screen view). The agent
+// notifies the person at the device that a capture happened -- never
+// silent -- and only the latest capture per device is kept server-side.
+// View it from the device's row in the Devices tab (Device Detail modal).
+const requestScreenshot = async (hostname) => {
+    const reason = prompt(`Alasan mengambil screenshot ${hostname} (kebijakan device dapat mewajibkan ini):`, "");
+    if (reason === null) return;
+    try {
+        const res = await fetchWithAuth("/api/control/screenshot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, reason: reason.trim() })
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.detail || "Gagal meminta screenshot");
+        }
+        showToast(`Permintaan screenshot dikirim ke ${hostname}. Hasilnya muncul di Device Detail (tab Devices).`);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
+// Power actions (Logix Control): shutdown / restart / logoff. The agent
+// gives the user a 30-second on-screen warning before executing.
+const POWER_LABELS = {
+    shutdown: "mematikan",
+    restart: "memulai ulang",
+    logoff: "mengeluarkan pengguna dari",
+};
+
+const sendPowerCommand = async (hostname, action) => {
+    if (!confirm(`Yakin ingin ${POWER_LABELS[action]} ${hostname}? Pengguna diberi peringatan 30 detik.`)) return;
+    const reason = prompt(`Alasan (kebijakan device dapat mewajibkan ini):`, "");
+    if (reason === null) return;
+    try {
+        const res = await fetchWithAuth("/api/control/power", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, action, reason: reason.trim() })
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.detail || "Gagal mengirim perintah daya");
+        }
+        showToast(`Perintah ${action.toUpperCase()} ditambahkan ke antrean ${hostname}.`);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
 // Rename a device from the dashboard. Sticks across future heartbeats --
 // see display_name_set_by_admin in server/main.py.
 const renameWorkstation = async (hostname, currentName) => {
@@ -116,11 +167,18 @@ const showContextMenu = (x, y, card) => {
         contextMenu.appendChild(menuItem("Remote", "fa-desktop", { disabled: true, title: "AnyDesk ID tidak terdeteksi" }));
     }
     contextMenu.appendChild(menuItem("Lock", "fa-lock", { onClick: () => lockWorkstation(hostname) }));
+    contextMenu.appendChild(menuItem("Screenshot", "fa-camera", { onClick: () => requestScreenshot(hostname) }));
     contextMenu.appendChild(menuItem("Rename", "fa-pen", { onClick: () => renameWorkstation(hostname, deviceName) }));
     const sep = document.createElement("li");
     sep.className = "context-menu-separator";
     contextMenu.appendChild(sep);
     contextMenu.appendChild(menuItem("Send Message", "fa-message", { onClick: () => sendDirectMessage(hostname) }));
+    const sep2 = document.createElement("li");
+    sep2.className = "context-menu-separator";
+    contextMenu.appendChild(sep2);
+    contextMenu.appendChild(menuItem("Log Off User", "fa-user-slash", { onClick: () => sendPowerCommand(hostname, "logoff") }));
+    contextMenu.appendChild(menuItem("Restart", "fa-rotate", { danger: true, onClick: () => sendPowerCommand(hostname, "restart") }));
+    contextMenu.appendChild(menuItem("Shut Down", "fa-power-off", { danger: true, onClick: () => sendPowerCommand(hostname, "shutdown") }));
 
     contextMenu.classList.add("visible");
     // Clamp so the menu never renders off-screen.
@@ -206,7 +264,7 @@ export const fetchActiveWorkstations = async () => {
                         </div>
                     ` : ""}
                     ${isUserActive ? `
-                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Rename, Send Message)</div>
+                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Screenshot, Message, Power)</div>
                     ` : ""}
                 </div>
             `;

@@ -1,6 +1,7 @@
 """Tests for the policy-profile and command-allowlist data model (Logix
-Control, Milestone 2). Data only -- nothing in server/main.py reads or
-enforces this yet. See docs/LOGIX_CONTROL.md §5.
+Control, Milestone 2). Enforcement of these rows now lives in
+enforce_command_policy() -- covered by tests/test_server_control.py; this
+file covers the seeding itself. See docs/LOGIX_CONTROL.md §5.
 """
 import importlib
 import json
@@ -51,7 +52,7 @@ def test_seeds_exactly_seven_policy_profiles(monkeypatch, tmp_path):
         assert isinstance(caps, list) and len(caps) > 0
 
 
-def test_seeds_fourteen_allowlist_rows_all_allowed(monkeypatch, tmp_path):
+def test_seeds_allowlist_rows_matching_policy_rules(monkeypatch, tmp_path):
     module = _load_main(monkeypatch, tmp_path)
     with TestClient(module.app):
         conn = module.get_db()
@@ -60,9 +61,28 @@ def test_seeds_fourteen_allowlist_rows_all_allowed(monkeypatch, tmp_path):
         finally:
             conn.close()
 
-    assert len(rows) == 14  # 7 policies x 2 commands
+    assert len(rows) == len(module.SYSTEM_POLICY_PROFILES) * len(module.KNOWN_COMMAND_TYPES)
     for r in rows:
-        assert r["command_type"] in ("LOCK", "BROADCAST")
+        expected_allowed, expected_reason = module.POLICY_COMMAND_RULES[r["policy_name"]][r["command_type"]]
+        assert r["allowed"] == expected_allowed, (r["policy_name"], r["command_type"])
+        assert r["requires_reason"] == expected_reason, (r["policy_name"], r["command_type"])
+
+
+def test_lab_standard_keeps_legacy_commands_reason_free(monkeypatch, tmp_path):
+    """The default profile must keep LOCK/BROADCAST exactly as they behaved
+    before enforcement existed: allowed, no reason required."""
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app):
+        conn = module.get_db()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM command_allowlist WHERE policy_name = 'lab_standard' "
+                "AND command_type IN ('LOCK', 'BROADCAST')"
+            ).fetchall()
+        finally:
+            conn.close()
+    assert len(rows) == 2
+    for r in rows:
         assert r["allowed"] == 1
         assert r["requires_reason"] == 0
 
@@ -85,7 +105,7 @@ def test_reseeding_on_restart_is_idempotent(monkeypatch, tmp_path):
         conn.close()
 
     assert policy_count == 7
-    assert allowlist_count == 14
+    assert allowlist_count == len(module.SYSTEM_POLICY_PROFILES) * len(module.KNOWN_COMMAND_TYPES)
 
 
 def test_allowlist_references_only_existing_policies(monkeypatch, tmp_path):

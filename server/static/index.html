@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="dark-theme">
+<body class="light-theme">
     <!-- Login Page Overlay -->
     <div id="login-overlay" class="login-overlay">
         <div class="login-card">
@@ -121,6 +121,21 @@
                         <div class="loading-placeholder">
                             <i class="fa-solid fa-circle-notch fa-spin"></i>
                             <p>Memuat status PC...</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Replies typed by users at the workstations, in answer to
+                     admin messages/broadcasts (see windows/logbook_timer.ps1). -->
+                <section class="grid-section" id="replies-container">
+                    <div class="section-header">
+                        <h2><i class="fa-solid fa-comments"></i> Balasan Pengguna</h2>
+                        <span class="badge hidden" id="replies-unread-badge">0 belum dibaca</span>
+                    </div>
+                    <div class="reply-list" id="replies-list">
+                        <div class="loading-placeholder">
+                            <i class="fa-solid fa-circle-notch fa-spin"></i>
+                            <p>Memuat balasan...</p>
                         </div>
                     </div>
                 </section>

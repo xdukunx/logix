@@ -6,7 +6,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$lab = 'C:\lab'
+# Install target: %ProgramFiles%\Logix, like a regular Windows application.
+# Program Files is admin-writable only, which is exactly right for the
+# scripts (a standard user must not be able to swap them out); all mutable
+# runtime state lives under ProgramData -- see logbook_common.ps1.
+$lab = Join-Path $env:ProgramFiles 'Logix'
 New-Item -ItemType Directory -Force -Path $lab | Out-Null
 
 # Whether session events log through WSL (lab workstations that already have
@@ -40,7 +44,7 @@ if (-not $PSBoundParameters.ContainsKey('UseWSL')) {
 Set-LogixConfigValue -Key 'LOGIX_USE_WSL' -Value $(if ($useWsl) { '1' } else { '0' })
 Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python (requires install/install.py to have deployed the core to this machine already)' })" -ForegroundColor Green
 
-# Copy scripts from installer source folder to C:\lab
+# Copy scripts from installer source folder to Program Files\Logix
 $files = @(
     'logbook_common.ps1',
     'logbook_popup.ps1',
@@ -58,8 +62,19 @@ foreach ($f in $files) {
     }
 }
 
-. 'C:\lab\logbook_common.ps1'
+. (Join-Path $lab 'logbook_common.ps1')
 Ensure-LogbookDirs
+
+# One-time migration from the legacy C:\lab install location: the task and
+# Run-key registrations below already point at the new path; the old copies
+# just need to not be left behind as a stale, still-runnable duplicate.
+$legacyLab = 'C:\lab'
+if (($lab -ne $legacyLab) -and (Test-Path (Join-Path $legacyLab 'logbook_common.ps1'))) {
+    Write-Host "Legacy install detected at $legacyLab - removing old script copies." -ForegroundColor Yellow
+    foreach ($f in $files) {
+        Remove-Item (Join-Path $legacyLab $f) -Force -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host 'Logix Report Logbook installer' -ForegroundColor Cyan
 Write-Host 'User:' $TaskUser
@@ -85,7 +100,8 @@ try {
     }
 } catch {}
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\lab\logbook_monitor.ps1"'
+$monitorPath = Join-Path $lab 'logbook_monitor.ps1'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$monitorPath`""
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
 $principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 30)
@@ -96,19 +112,19 @@ Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $actio
 try {
     $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $runPath -Force | Out-Null
-    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\lab\logbook_monitor.ps1"'
+    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$monitorPath`""
 } catch { Write-LogbookError "HKCU Run registration failed: $($_.Exception.Message)" }
 
 Write-Host 'OK: single monitor installed. Old duplicate Start/End tasks removed.' -ForegroundColor Green
 Get-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' | Select-Object TaskName, State
 
 Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
-Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_setup.ps1') -Wait | Out-Null
+Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $lab 'logbook_setup.ps1')) -Wait | Out-Null
 
 if ($RunNow) {
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_monitor.ps1') | Out-Null
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$monitorPath) | Out-Null
     Write-Host 'Monitor launched.' -ForegroundColor Green
 }
 if ($TestPopup) {
-    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-TestMode') | Out-Null
+    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $lab 'logbook_popup.ps1'),'-TestMode') | Out-Null
 }
