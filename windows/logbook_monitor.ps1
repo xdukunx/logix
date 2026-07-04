@@ -97,6 +97,42 @@ try {
     Write-LogbookError "Register session ending failed: $($_.Exception.Message)"
 }
 
+# Sleep/hibernate (S3/S4) doesn't raise SessionSwitch's Lock/Unlock at all on
+# machines where "require sign-in on wake" is off (common on personal
+# laptops) -- the session file simply survives the whole suspend untouched,
+# and since its elapsed time is wall-clock (now - start_time), the sleep
+# duration silently counts as session time too. This was observed as an
+# 8-hour-old timer on a laptop the user had just woken up, not rebooted --
+# LastBootUpTime predated session start, so the reboot-based
+# Close-StaleLogbookSessionIfAny correctly stayed quiet; this is a different
+# gap. PowerModeChanged fires on the actual OS power transition regardless of
+# lock policy, so treat Resume exactly like SessionSwitch's Unlock branch
+# below: reuse -ForceNew, which already closes a stale session (AUTO_FINISH)
+# before prompting fresh. Same deliberate no-cross-scope-function-call
+# constraint as $action above -- built-in cmdlets only.
+$powerAction = {
+    $mode = $Event.SourceEventArgs.Mode
+    $stamp = (Get-Date).ToString('o')
+    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    if ($mode -eq [Microsoft.Win32.PowerModes]::Resume) {
+        $alreadyShowing = $false
+        try {
+            $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+                $_.CommandLine -and $_.CommandLine -match 'logbook_popup\.ps1'
+            }
+            $alreadyShowing = (($procs | Measure-Object).Count -gt 0)
+        } catch {}
+        if (-not $alreadyShowing) {
+            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
+        }
+    }
+}
+try {
+    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName PowerModeChanged -SourceIdentifier MindLabLogbookPowerModeChanged -Action $powerAction | Out-Null
+} catch {
+    Write-LogbookError "Register power mode changed failed: $($_.Exception.Message)"
+}
+
 try {
     if (Test-Path $Global:SessionFile) { Send-LogbookHeartbeat -Status 'ACTIVE' } else { Send-LogbookHeartbeat -Status 'LOCKED' }
 } catch {}
