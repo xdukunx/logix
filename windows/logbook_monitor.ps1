@@ -13,6 +13,10 @@ if (-not $created) {
 Write-LogbookInfo "Monitor started. User=$env:USERNAME PID=$PID"
 
 function Invoke-InitialPopupOrTimer {
+    if (Close-StaleLogbookSessionIfAny) {
+        Start-LogbookPopup | Out-Null
+        return
+    }
     if (Test-Path $Global:SessionFile) {
         $s = Get-ActiveLogbookSession
         if ($s -and $s.session_id) { Start-LogbookTimer -SessionId $s.session_id | Out-Null }
@@ -73,6 +77,24 @@ try {
     Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionSwitch -SourceIdentifier MindLabLogbookSessionSwitch -Action $action | Out-Null
 } catch {
     Write-LogbookError "Register session switch failed: $($_.Exception.Message)"
+}
+
+# SessionSwitch's SessionLogoff reason covers an explicit interactive sign-out,
+# but does not reliably fire for a plain power Shut Down/Restart while a user
+# is logged in. SessionEnding is raised from the WM_QUERYENDSESSION broadcast
+# Windows sends before tearing the session down, so it catches that case too.
+# Best-effort only -- Close-StaleLogbookSessionIfAny above is the guaranteed
+# backstop if this doesn't finish before Windows kills the process tree.
+$endingAction = {
+    $reason = $Event.SourceEventArgs.Reason.ToString()
+    $stamp = (Get-Date).ToString('o')
+    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','END') | Out-Null
+}
+try {
+    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionEnding -SourceIdentifier MindLabLogbookSessionEnding -Action $endingAction | Out-Null
+} catch {
+    Write-LogbookError "Register session ending failed: $($_.Exception.Message)"
 }
 
 try {
