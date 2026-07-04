@@ -925,9 +925,25 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
       </Grid.RowDefinitions>
 
       <Grid Grid.Row="0" Margin="18,14,18,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <Ellipse Name="Pulse" Width="8" Height="8" Fill="$accent" Margin="0,3,8,0" VerticalAlignment="Center" />
         <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" TextTrimming="CharacterEllipsis" />
+        <Button Grid.Column="2" Name="ExitBtn" Content="SELESAI" Padding="6,2" Margin="6,-2,0,0" Cursor="Hand"
+                Background="Transparent" BorderBrush="$muted" BorderThickness="1" Foreground="$muted"
+                FontFamily="Segoe UI Semibold" FontSize="8.5" ToolTip="Akhiri sesi &amp; kunci workstation">
+          <Button.Template>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="ExitBtnBg" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="ExitBtnBg" Property="Background" Value="$accent" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Button.Template>
+        </Button>
       </Grid>
 
       <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,10" VerticalAlignment="Bottom">
@@ -1053,4 +1069,66 @@ function Close-StaleLogbookSessionIfAny {
         }
     } catch { Write-LogbookError "Stale session check failed: $($_.Exception.Message)" }
     return $false
+}
+
+# Product decision: a lock or sleep/resume cycle, by itself, is NOT a
+# session boundary -- someone stepping away for coffee (or a laptop lid
+# closing) shouldn't split one lab visit into two logbook rows, no matter
+# how long the lock/sleep lasted. Only a real departure signal ends a
+# session: explicit sign-out (this function, wired to the timer widget's
+# SELESAI button), OS shutdown/logoff (SessionEnding /
+# ConsoleDisconnect/RemoteDisconnect/SessionLogoff in logbook_monitor.ps1),
+# reboot (Close-StaleLogbookSessionIfAny above), or genuinely being idle
+# with the screen unlocked for LOGIX_IDLE_TIMEOUT_HOURS (below). Locking
+# the workstation here is deliberate: it both signals departure to anyone
+# walking up to the machine and guarantees the *next* sign-in goes through
+# the unlock path, which starts a fresh session when none is on disk.
+function Close-LogbookSessionAndLock {
+    Close-ActiveLogbookSession -Reason 'END' | Out-Null
+    try {
+        Start-Process 'rundll32.exe' -ArgumentList 'user32.dll,LockWorkStation' | Out-Null
+    } catch {
+        Write-LogbookError "Lock workstation failed: $($_.Exception.Message)"
+    }
+}
+
+function Get-LogbookIdleTimeoutSeconds {
+    $hours = Get-LogbookConfigEnv 'LOGIX_IDLE_TIMEOUT_HOURS'
+    $parsed = 0.0
+    if ($hours -and [double]::TryParse($hours, [ref]$parsed) -and $parsed -gt 0) {
+        return [int]($parsed * 3600)
+    }
+    return 4 * 3600
+}
+
+if (-not ([System.Management.Automation.PSTypeName]'LogixIdle').Type) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class LogixIdle {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+    [DllImport("user32.dll")]
+    public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+}
+"@
+}
+
+# Seconds since the last keyboard/mouse input anywhere on the machine (not
+# per-window) -- used only to catch "left unlocked and walked away"; a
+# locked screen is gated out separately (see logbook_monitor.ps1's
+# workstation_locked.flag) because locking already means "same session,
+# any duration" per the product decision above.
+function Get-LogbookIdleSeconds {
+    try {
+        $lii = New-Object LogixIdle+LASTINPUTINFO
+        $lii.cbSize = [uint32][System.Runtime.InteropServices.Marshal]::SizeOf($lii)
+        if (-not [LogixIdle]::GetLastInputInfo([ref]$lii)) { return $null }
+        $idleMs = [Environment]::TickCount - $lii.dwTime
+        if ($idleMs -lt 0) { return 0 }
+        return [double]$idleMs / 1000.0
+    } catch {
+        Write-LogbookError "Get idle seconds failed: $($_.Exception.Message)"
+        return $null
+    }
 }

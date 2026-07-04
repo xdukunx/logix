@@ -35,6 +35,20 @@ Living plan for what's built and what's next. Privacy rules in
   (run in CI on windows-latest). Example:
   [`windows/logbook_config.example.json`](../windows/logbook_config.example.json).
 
+- **Session-boundary redesign: lock/sleep no longer split a visit.** Product
+  decision: locking the screen or sleeping/waking a laptop is a pause, not a
+  departure, no matter how long it lasts — the same on-disk session just
+  resumes, and `logbook_popup.ps1` only re-prompts when no session is on
+  disk. A session now ends only on a real departure signal: explicit
+  sign-off (new **SELESAI** button on the timer widget — closes the session
+  and locks the workstation via `Close-LogbookSessionAndLock`), OS
+  shutdown/logoff/reboot (unchanged), or genuine idle-with-screen-unlocked
+  past `LOGIX_IDLE_TIMEOUT_HOURS` (default 4h, `Get-LogbookIdleSeconds` /
+  `GetLastInputInfo`-based, gated out entirely while locked via
+  `workstation_locked.flag` so a legitimately locked-overnight session is
+  never auto-closed). All in `windows/logbook_common.ps1` +
+  `windows/logbook_monitor.ps1` + `windows/logbook_timer.ps1`.
+
 ## Next
 
 0. **Logix Control** — a separate, larger initiative (remote lab-device

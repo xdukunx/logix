@@ -101,11 +101,18 @@ one-way push straight to Google Sheets.
 ## Using the sign-in popup
 
 If your admin has set up the Windows popup on this machine, you'll see it
-when you unlock or log in. Fill in your name/ID, pick the access type and
+the first time you sign in. Fill in your name/ID, pick the access type and
 purpose, and submit. That's it — the system records the session start; it
 does not record keystrokes, screenshots, or anything from your browser. See
 [`PRIVACY.md`](PRIVACY.md) if you want the full explanation of what is and
 isn't collected.
+
+Locking the screen or letting the laptop sleep doesn't end your session —
+it's still the same visit when you come back, no matter how long you were
+away, and the timer widget just keeps going. Only a real sign-off ends it:
+click **SELESAI** on the timer widget (it locks the workstation for you),
+sign all the way out, or shut down/restart. The next person to sign in then
+gets a fresh popup.
 
 ---
 

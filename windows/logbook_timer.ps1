@@ -37,6 +37,18 @@ $messageText = $window.FindName('MessageText')
 $messageIconBadge = $window.FindName('MessageIconBadge')
 $messageIcon = $window.FindName('MessageIcon')
 $messageTitle = $window.FindName('MessageTitle')
+$exitBtn = $window.FindName('ExitBtn')
+
+$exitBtn.Add_Click({
+    $confirm = [System.Windows.MessageBox]::Show(
+        'Akhiri sesi ini dan kunci workstation? Sesi berikutnya akan tercatat sebagai kunjungan baru.',
+        'Akhiri sesi', 'YesNo', 'Question')
+    if ($confirm -ne 'Yes') { return }
+    try { Close-LogbookSessionAndLock } catch { Write-LogbookError "SELESAI button failed: $($_.Exception.Message)" }
+    $script:allowClose = $true
+    $timer.Stop()
+    $window.Close()
+})
 
 # Smooth breathing pulse instead of a discrete character swap.
 $pulseAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.25, [TimeSpan]::FromSeconds(1.1))
