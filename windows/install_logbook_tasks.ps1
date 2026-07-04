@@ -1,12 +1,44 @@
 param(
     [string]$TaskUser = "$env:USERDOMAIN\$env:USERNAME",
     [switch]$RunNow,
-    [switch]$TestPopup
+    [switch]$TestPopup,
+    [switch]$UseWSL
 )
 $ErrorActionPreference = 'Stop'
 
 $lab = 'C:\lab'
 New-Item -ItemType Directory -Force -Path $lab | Out-Null
+
+# Whether session events log through WSL (lab workstations that already have
+# a distro set up for the SSH-side bridge) or the native Python core that
+# install/install.py deploys to LOGIX_HOME on every OS. Loaned/rented laptops
+# typically have no WSL distro at all, so native is the safer default -- see
+# Invoke-WSLLogbook / Test-LogbookUseWSL in logbook_common.ps1.
+function Set-LogixConfigValue {
+    param([string]$Key, [string]$Value)
+    $cfgDir = Join-Path $env:ProgramData 'Logix'
+    New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+    $cfgPath = Join-Path $cfgDir 'config.env'
+    $lines = if (Test-Path $cfgPath) { @(Get-Content $cfgPath) } else { @() }
+    $pattern = "^\s*#?\s*(?:export\s+)?$Key\s*="
+    $found = $false
+    $out = foreach ($line in $lines) {
+        if ($line -match $pattern) { $found = $true; "$Key=$Value" } else { $line }
+    }
+    if (-not $found) { $out += "$Key=$Value" }
+    $out | Set-Content -Path $cfgPath -Encoding UTF8
+}
+
+$useWsl = $UseWSL.IsPresent
+if (-not $PSBoundParameters.ContainsKey('UseWSL')) {
+    Write-Host ''
+    Write-Host 'Does this machine have WSL set up with a Linux distro for the logging bridge?' -ForegroundColor Cyan
+    Write-Host '  Most lab workstations do; loaned/rented laptops usually do not.' -ForegroundColor DarkGray
+    $ans = Read-Host 'Use WSL bridge instead of native Python? (y/N)'
+    $useWsl = $ans -match '^(y|yes)$'
+}
+Set-LogixConfigValue -Key 'LOGIX_USE_WSL' -Value $(if ($useWsl) { '1' } else { '0' })
+Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python (requires install/install.py to have deployed the core to this machine already)' })" -ForegroundColor Green
 
 # Copy scripts from installer source folder to C:\lab
 $files = @(

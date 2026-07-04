@@ -193,6 +193,84 @@ function Start-LogbookPopup {
     }
 }
 
+# Whether to route bridge events through WSL (lab workstations, dual-boot
+# boxes with a distro already set up for SSH logging) or call the native
+# Python core directly (everything else, notably loaned/rented laptops --
+# they typically have no WSL distro installed at all, which makes the WSL
+# call fail outright; see logbook_error.log "no installed distributions").
+# install/install.py already deploys log_physical.py + paths.py natively to
+# LOGIX_HOME on every OS, so native is the safe default; WSL is opt-in via
+# LOGIX_USE_WSL=1 in config.env (set by install_logbook_tasks.ps1 -UseWSL).
+function Test-LogbookUseWSL {
+    $val = Get-LogbookConfigEnv 'LOGIX_USE_WSL'
+    return ($val -eq '1' -or $val -eq 'true')
+}
+
+function Get-LogixCoreDir {
+    $logixHome = Get-LogbookConfigEnv 'LOGIX_HOME'
+    if ($logixHome) { return $logixHome }
+    return (Join-Path $env:ProgramData 'Logix')
+}
+
+function Find-LogixPython {
+    foreach ($cmd in @('python', 'py')) {
+        $found = Get-Command $cmd -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
+    return $null
+}
+
+function Invoke-WSLBridge {
+    param([string]$PayloadPath, [string]$Event, [string]$SessionId)
+    $wslPayloadPath = '/mnt/c/ProgramData/MindLabLogbook/' + (Split-Path $PayloadPath -Leaf)
+    $output = & wsl.exe -u root -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
+    $rc = $LASTEXITCODE
+    if ($rc -ne 0) {
+        Write-LogbookError "WSL root log returned exit code $rc for event $Event. Output: $output"
+        $output = & wsl.exe -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
+        $rc = $LASTEXITCODE
+        if ($rc -ne 0) {
+            Write-LogbookError "WSL user log returned exit code $rc for event $Event. Output: $output"
+            return $false
+        }
+    }
+    Write-LogbookInfo "WSL log OK event=$Event sid=$SessionId Output: $output"
+    return $true
+}
+
+function Invoke-NativeBridge {
+    param([string]$PayloadPath, [string]$Event, [string]$SessionId)
+    $python = Find-LogixPython
+    if (-not $python) {
+        Write-LogbookError "Native bridge: no python/py found on PATH for event $Event"
+        return $false
+    }
+    $script = Join-Path (Get-LogixCoreDir) 'log_physical.py'
+    if (-not (Test-Path $script)) {
+        Write-LogbookError "Native bridge: log_physical.py not found at $script (run install/install.py on this machine first) for event $Event"
+        return $false
+    }
+    # Local ErrorActionPreference override: this file sets 'Stop' globally, and
+    # under 'Stop' any stderr line from a native exe (2>&1) -- even a benign
+    # informational one, like log_physical.py's local_only privacy notice --
+    # gets promoted from a non-terminating to a terminating error and throws,
+    # masquerading as a bridge failure. $LASTEXITCODE is the real signal.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $python $script --json-file $PayloadPath 2>&1
+        $rc = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($rc -ne 0) {
+        Write-LogbookError "Native bridge returned exit code $rc for event $Event. Output: $output"
+        return $false
+    }
+    Write-LogbookInfo "Native bridge log OK event=$Event sid=$SessionId Output: $output"
+    return $true
+}
+
 function Invoke-WSLLogbook {
     param(
         [Parameter(Mandatory=$true)][string]$Event,
@@ -207,7 +285,6 @@ function Invoke-WSLLogbook {
     Ensure-LogbookDirs
     $winUser = "$env:USERDOMAIN\$env:USERNAME"
     $payloadPath = Join-Path $Global:StateDir ("payload-{0}.json" -f ([guid]::NewGuid().ToString('N')))
-    $wslPayloadPath = '/mnt/c/ProgramData/MindLabLogbook/' + (Split-Path $payloadPath -Leaf)
     $payload = [ordered]@{
         timestamp = (Get-Date).ToString('o')
         event = $Event
@@ -225,22 +302,13 @@ function Invoke-WSLLogbook {
     }
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
-        Write-LogbookInfo "WSL payload event=$Event sid=$SessionId nama=$Nama nim=$Nim tujuan=$Tujuan"
-        $output = & wsl.exe -u root -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
-        $rc = $LASTEXITCODE
-        if ($rc -ne 0) {
-            Write-LogbookError "WSL root log returned exit code $rc for event $Event. Output: $output"
-            $output = & wsl.exe -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
-            $rc = $LASTEXITCODE
-            if ($rc -ne 0) {
-                Write-LogbookError "WSL user log returned exit code $rc for event $Event. Output: $output"
-                return $false
-            }
+        Write-LogbookInfo "Bridge payload event=$Event sid=$SessionId nama=$Nama nim=$Nim tujuan=$Tujuan"
+        if (Test-LogbookUseWSL) {
+            return Invoke-WSLBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId
         }
-        Write-LogbookInfo "WSL log OK event=$Event sid=$SessionId Output: $output"
-        return $true
+        return Invoke-NativeBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId
     } catch {
-        Write-LogbookError "WSL log error for event ${Event}: $($_.Exception.Message)"
+        Write-LogbookError "Bridge log error for event ${Event}: $($_.Exception.Message)"
         return $false
     } finally {
         Remove-Item $payloadPath -Force -ErrorAction SilentlyContinue
@@ -952,4 +1020,37 @@ function Close-ActiveLogbookSession {
         Stop-LogbookTimers
         return $false
     }
+}
+
+function Get-SystemBootTime {
+    try {
+        return (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+    } catch {
+        Write-LogbookError "Get boot time failed: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+# A session file that predates the machine's most recent boot means whatever
+# was supposed to close it (lock/logoff/shutdown handler) never finished --
+# e.g. a hard shutdown killed the process before the WSL call completed, or
+# the shutdown reason simply wasn't one Windows delivered to this process in
+# time. Resuming it blindly (the old behavior) lets elapsed time keep
+# accumulating across reboots -- this is how a session was observed still
+# "active" 16 hours later. Call this before resuming any on-disk session.
+function Close-StaleLogbookSessionIfAny {
+    if (-not (Test-Path $Global:SessionFile)) { return $false }
+    $session = Get-ActiveLogbookSession
+    if ($null -eq $session -or -not $session.start_time) { return $false }
+    try {
+        $start = [datetime]$session.start_time
+        $bootTime = Get-SystemBootTime
+        if ($null -eq $bootTime) { return $false }
+        if ($bootTime -gt $start) {
+            Write-LogbookInfo "Stale session detected sid=$($session.session_id) started=$($session.start_time) boot=$($bootTime.ToString('o')); auto-closing instead of resuming."
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+            return $true
+        }
+    } catch { Write-LogbookError "Stale session check failed: $($_.Exception.Message)" }
+    return $false
 }
