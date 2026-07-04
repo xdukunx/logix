@@ -19,7 +19,7 @@
     --danger-color: #ef4444;
     --danger-glow: rgba(239, 68, 68, 0.4);
     --muted-color: #475569;
-    --transition-speed: 0.3s;
+    --transition-speed: 0.15s;
 }
 
 * {
