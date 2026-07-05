@@ -263,6 +263,9 @@ export const fetchActiveWorkstations = async () => {
                      data-device-name="${deviceName}"
                      data-anydesk-id="${escapeHtml(pc.anydesk_id) || ""}"
                      data-active="${isUserActive}">
+                    <button class="ws-reply-badge hidden" data-hostname="${hostname}" title="Balasan pengguna belum dibaca">
+                        <i class="fa-solid fa-comment-dots"></i> <span class="ws-reply-count">0</span>
+                    </button>
                     <div class="ws-status-light ${statusClass}"></div>
                     <div class="ws-host">${deviceName}</div>
                     ${showHostnameMeta ? `<div class="ws-meta">Hostname: ${hostname}</div>` : ""}
@@ -281,11 +284,112 @@ export const fetchActiveWorkstations = async () => {
             `;
         }).join("");
 
+        renderReplyBadges();
     } catch (err) {
         console.error(err);
         renderError(pcsGrid, "Gagal memuat status workstation.");
     }
 };
+
+// --- User replies as a per-card notification badge -------------------------
+// Replies surface on the device's own workstation card (a badge), not a
+// separate section. Clicking the badge opens a floating popover listing that
+// device's replies with a "mark all read" action.
+const replyPopover = document.getElementById("reply-popover");
+let repliesByHost = {};
+
+const timeAgo = (iso) => {
+    if (!iso) return "";
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return "Baru saja";
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m} menit lalu`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} jam lalu`;
+    return `${Math.floor(h / 24)} hari lalu`;
+};
+
+const unreadFor = (hostname) => (repliesByHost[hostname] || []).filter(r => !r.read_at).length;
+
+const renderReplyBadges = () => {
+    pcsGrid.querySelectorAll(".workstation-card").forEach(card => {
+        const badge = card.querySelector(".ws-reply-badge");
+        if (!badge) return;
+        const n = unreadFor(card.dataset.hostname);
+        const countEl = badge.querySelector(".ws-reply-count");
+        if (countEl) countEl.textContent = n;
+        badge.classList.toggle("hidden", n === 0);
+    });
+};
+
+export const fetchReplies = async () => {
+    try {
+        const res = await fetchWithAuth("/api/replies?limit=100");
+        if (!res.ok) return; // 403 (role can't read) or transient error: leave badges as-is
+        const data = await res.json();
+        repliesByHost = {};
+        for (const r of (data.replies || [])) {
+            (repliesByHost[r.hostname] = repliesByHost[r.hostname] || []).push(r);
+        }
+        renderReplyBadges();
+    } catch (err) {
+        console.error(err);
+    }
+};
+
+const hideReplyPopover = () => { replyPopover.classList.add("hidden"); replyPopover.innerHTML = ""; };
+
+const showReplyPopover = (hostname, anchor) => {
+    const replies = (repliesByHost[hostname] || []).slice()
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (replies.length === 0) return;
+    replyPopover.innerHTML = `
+        <div class="reply-popover-head">
+            <span><i class="fa-solid fa-comments"></i> ${escapeHtml(replies[0].device_name || hostname)}</span>
+            <button class="reply-popover-close" aria-label="Tutup">&times;</button>
+        </div>
+        <div class="reply-popover-body">
+            ${replies.map(r => `
+                <div class="reply-row ${r.read_at ? "" : "unread"}">
+                    <div class="reply-row-msg">${escapeHtml(r.message)}</div>
+                    <div class="reply-row-meta">${timeAgo(r.created_at)}${r.read_at ? " · Dibaca" : ""}</div>
+                </div>`).join("")}
+        </div>
+        <div class="reply-popover-foot">
+            <button class="btn-action btn-sm" id="reply-mark-all" data-hostname="${escapeHtml(hostname)}">Tandai semua dibaca</button>
+        </div>`;
+    replyPopover.classList.remove("hidden");
+    const rect = anchor.getBoundingClientRect();
+    const pr = replyPopover.getBoundingClientRect();
+    let left = Math.min(rect.right - pr.width, window.innerWidth - pr.width - 8);
+    let top = rect.bottom + 6;
+    if (top + pr.height > window.innerHeight - 8) top = rect.top - pr.height - 6;
+    replyPopover.style.left = `${Math.max(8, left)}px`;
+    replyPopover.style.top = `${Math.max(8, top)}px`;
+};
+
+const markAllRead = async (hostname) => {
+    const unread = (repliesByHost[hostname] || []).filter(r => !r.read_at);
+    await Promise.all(unread.map(r =>
+        fetchWithAuth(`/api/replies/${r.id}/read`, { method: "POST" }).catch(() => {})));
+    hideReplyPopover();
+    fetchReplies();
+};
+
+pcsGrid.addEventListener("click", (e) => {
+    const badge = e.target.closest(".ws-reply-badge");
+    if (badge) { e.stopPropagation(); showReplyPopover(badge.dataset.hostname, badge); }
+});
+replyPopover.addEventListener("click", (e) => {
+    if (e.target.closest(".reply-popover-close")) { hideReplyPopover(); return; }
+    const markBtn = e.target.closest("#reply-mark-all");
+    if (markBtn) markAllRead(markBtn.dataset.hostname);
+});
+document.addEventListener("click", (e) => {
+    if (!replyPopover.classList.contains("hidden")
+        && !replyPopover.contains(e.target)
+        && !e.target.closest(".ws-reply-badge")) hideReplyPopover();
+});
 
 // Send an Emergency Alert to every active workstation. Always targets
 // "ALL" and always confirms -- this card no longer has a non-emergency

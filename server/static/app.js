@@ -2,12 +2,11 @@
 // sections are bookmarkable/refreshable), auth bootstrap, and polling.
 // Feature logic lives in js/*.js, imported below.
 import { getToken, setToken, clearToken, fetchWithAuth, setOnSessionExpired, showToast } from "./js/api.js";
-import { fetchActiveWorkstations } from "./js/monitoring.js";
+import { fetchActiveWorkstations, fetchReplies } from "./js/monitoring.js";
 import { fetchAnalytics, fetchSessionLogs, fetchAuditLog } from "./js/analytics.js";
 import { loadConfiguration } from "./js/settings.js";
 import { fetchDevices, fetchBacklogCount } from "./js/devices.js";
 import { fetchAlerts } from "./js/alerts.js";
-import { fetchReplies } from "./js/replies.js";
 import "./js/report-modal.js"; // self-wires its own listeners on import
 
 const loginOverlay = document.getElementById("login-overlay");

@@ -2,7 +2,11 @@ param(
     [string]$TaskUser = "$env:USERDOMAIN\$env:USERNAME",
     [switch]$RunNow,
     [switch]$TestPopup,
-    [switch]$UseWSL
+    [switch]$UseWSL,
+    # Path to the AnyDesk 7 installer to deploy so the "Remote" action works.
+    # Defaults to an AnyDesk*.exe sitting next to this script. -SkipAnyDesk opts out.
+    [string]$AnyDeskInstaller = "",
+    [switch]$SkipAnyDesk
 )
 $ErrorActionPreference = 'Stop'
 
@@ -93,6 +97,59 @@ Grant-LogbookTaskMgrGateAccess
 # user-owned so ending a session (removing session.json) can never fail. See
 # Grant-LogbookStateDirAccess in logbook_common.ps1.
 Grant-LogbookStateDirAccess
+
+# Auto-deploy AnyDesk 7 so the dashboard's "Remote" action works out of the box.
+# The agent already reports this device's AnyDesk ID on every heartbeat
+# (Get-AnyDeskId in logbook_common.ps1), so once AnyDesk is present the ID shows
+# up on the dashboard automatically -- no admin typing it in. Idempotent: skips
+# if AnyDesk is already installed.
+function Install-AnyDesk {
+    param([string]$InstallerPath)
+    $anydeskExe = @(
+        "$env:ProgramFiles\AnyDesk\AnyDesk.exe",
+        "${env:ProgramFiles(x86)}\AnyDesk\AnyDesk.exe"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if (-not $anydeskExe) {
+        if (-not $InstallerPath) {
+            $found = Get-ChildItem -Path $PSScriptRoot -Filter 'AnyDesk*.exe' -File -ErrorAction SilentlyContinue |
+                     Select-Object -First 1
+            if ($found) { $InstallerPath = $found.FullName }
+        }
+        if (-not $InstallerPath -or -not (Test-Path $InstallerPath)) {
+            Write-Host 'AnyDesk installer not found -- skipping (Remote will stay disabled).' -ForegroundColor Yellow
+            Write-Host "  Drop the AnyDesk 7 installer at windows\AnyDesk.exe or pass -AnyDeskInstaller <path>." -ForegroundColor DarkGray
+            return
+        }
+        Write-Host "Installing AnyDesk silently from $InstallerPath ..." -ForegroundColor Cyan
+        $target = "${env:ProgramFiles(x86)}\AnyDesk"
+        try {
+            & $InstallerPath --install $target --start-with-win --create-shortcuts --silent
+            Start-Sleep -Seconds 5
+        } catch { Write-LogbookError "AnyDesk silent install failed: $($_.Exception.Message)" }
+        $anydeskExe = @("$target\AnyDesk.exe", "$env:ProgramFiles\AnyDesk\AnyDesk.exe") |
+                      Where-Object { Test-Path $_ } | Select-Object -First 1
+    } else {
+        Write-Host "AnyDesk already installed ($anydeskExe)." -ForegroundColor Green
+    }
+    if (-not $anydeskExe) { Write-Host 'AnyDesk install did not complete; Remote stays disabled.' -ForegroundColor Yellow; return }
+
+    # Optional unattended-access password (LOGIX_ANYDESK_PASSWORD in config.env)
+    # so an admin can connect without the local user clicking Accept. Only set
+    # when explicitly configured -- never a default.
+    $adPass = Get-LogbookConfigEnv 'LOGIX_ANYDESK_PASSWORD'
+    if ($adPass) {
+        try {
+            $adPass | & $anydeskExe --set-password
+            Write-Host 'AnyDesk unattended-access password configured.' -ForegroundColor Green
+        } catch { Write-LogbookError "AnyDesk set-password failed: $($_.Exception.Message)" }
+    }
+    try {
+        $id = (& $anydeskExe --get-id 2>$null | Out-String).Trim()
+        if ($id) { Write-Host "AnyDesk ID for this device: $id (auto-reported to the dashboard)." -ForegroundColor Green }
+    } catch {}
+}
+if (-not $SkipAnyDesk) { Install-AnyDesk -InstallerPath $AnyDeskInstaller }
 
 # Clean the old direct Start/End tasks that caused duplicate stacks.
 foreach ($t in @('MindLab Report Logbook Start','MindLab Report Logbook End','Lab Logbook Start','Lab Logbook End')) {

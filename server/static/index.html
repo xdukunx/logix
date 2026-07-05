@@ -125,21 +125,12 @@
                     </div>
                 </section>
 
-                <!-- Replies typed by users at the workstations, in answer to
-                     admin messages/broadcasts (see windows/logbook_timer.ps1). -->
-                <section class="grid-section" id="replies-container">
-                    <div class="section-header">
-                        <h2><i class="fa-solid fa-comments"></i> Balasan Pengguna</h2>
-                        <span class="badge hidden" id="replies-unread-badge">0 belum dibaca</span>
-                    </div>
-                    <div class="reply-list" id="replies-list">
-                        <div class="loading-placeholder">
-                            <i class="fa-solid fa-circle-notch fa-spin"></i>
-                            <p>Memuat balasan...</p>
-                        </div>
-                    </div>
-                </section>
             </section>
+
+            <!-- User replies now surface as a notification badge on each
+                 workstation card (see monitoring.js); clicking it opens this
+                 floating popover instead of a separate section. -->
+            <div id="reply-popover" class="reply-popover hidden"></div>
 
             <!-- ===================== Analytics ===================== -->
             <section class="tab-panel" id="tab-analytics" hidden>
