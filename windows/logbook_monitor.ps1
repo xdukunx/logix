@@ -1,6 +1,6 @@
 param([switch]$Once)
 $ErrorActionPreference = 'Stop'
-. 'C:\lab\logbook_common.ps1'
+. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 
 # Assume unlocked at monitor start (Task Scheduler's AtLogOn trigger only
@@ -20,7 +20,11 @@ if (-not $created) {
 Write-LogbookInfo "Monitor started. User=$env:USERNAME PID=$PID"
 
 function Invoke-InitialPopupOrTimer {
-    if (Close-StaleLogbookSessionIfAny) {
+    # Close-StaleLogbookSessionIfAny catches sessions predating the last boot;
+    # Close-OverAgeLogbookSessionIfAny additionally catches one that survived an
+    # overnight lock/sleep with no reboot (start_time still newer than boot).
+    # Either way, show a fresh sign-in form rather than resume a stale timer.
+    if (Close-StaleLogbookSessionIfAny -or (Close-OverAgeLogbookSessionIfAny)) {
         Start-LogbookPopup | Out-Null
         return
     }
@@ -57,13 +61,13 @@ Invoke-InitialPopupOrTimer
 $action = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: SessionSwitch reason=$reason" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    try { "$stamp INFO: SessionSwitch reason=$reason" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
     $lockedFlag = 'C:\ProgramData\MindLabLogbook\workstation_locked.flag'
     if ($reason -in @('ConsoleDisconnect','RemoteDisconnect','SessionLogoff')) {
         # A real departure signal (user switch, RDP disconnect, sign-out) --
         # unlike a plain lock, ends the session outright.
         Remove-Item $lockedFlag -Force -ErrorAction SilentlyContinue
-        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','END') | Out-Null
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_end.ps1','-Reason','END') | Out-Null
     } elseif ($reason -eq 'SessionLock') {
         # Locking is a pause, not a departure -- product decision: the
         # session stays open across any lock/sleep duration and just
@@ -89,9 +93,9 @@ $action = {
             # normal lock/unlock case) this just resumes its timer with no
             # re-prompt; a fresh popup only appears if no session is on
             # disk (already closed via sign-out/idle-timeout/SELESAI/reboot).
-            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1') | Out-Null
+            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1') | Out-Null
         } else {
-            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
         }
     }
 }
@@ -111,8 +115,8 @@ try {
 $endingAction = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','END') | Out-Null
+    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_end.ps1','-Reason','END') | Out-Null
 }
 try {
     Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionEnding -SourceIdentifier MindLabLogbookSessionEnding -Action $endingAction | Out-Null
@@ -134,7 +138,7 @@ try {
 $powerAction = {
     $mode = $Event.SourceEventArgs.Mode
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath 'C:\lab\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
     $lockedFlag = 'C:\ProgramData\MindLabLogbook\workstation_locked.flag'
     if ($mode -eq [Microsoft.Win32.PowerModes]::Suspend) {
         try { '' | Out-File -FilePath $lockedFlag -Force -Encoding UTF8 } catch {}
@@ -148,7 +152,7 @@ $powerAction = {
             $alreadyShowing = (($procs | Measure-Object).Count -gt 0)
         } catch {}
         if (-not $alreadyShowing) {
-            Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1') | Out-Null
+            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1') | Out-Null
         }
     }
 }
@@ -162,8 +166,12 @@ try {
     if (Test-Path $Global:SessionFile) { Send-LogbookHeartbeat -Status 'ACTIVE' } else { Send-LogbookHeartbeat -Status 'LOCKED' }
 } catch {}
 
+# Poll interval doubles as the remote-command latency ceiling -- see
+# Get-LogbookHeartbeatSeconds (LOGIX_HEARTBEAT_SECONDS, default 5s). Read once
+# so a config change applies on next monitor restart, not mid-loop.
+$heartbeatSeconds = Get-LogbookHeartbeatSeconds
 while ($true) {
-    Start-Sleep -Seconds 30
+    Start-Sleep -Seconds $heartbeatSeconds
     try {
         if (Test-Path $Global:SessionFile) {
             Send-LogbookHeartbeat -Status 'ACTIVE'
@@ -177,6 +185,14 @@ while ($true) {
             Send-LogbookHeartbeat -Status 'LOCKED'
         }
     } catch { Write-LogbookError "Monitor heartbeat failed: $($_.Exception.Message)" }
+
+    # Cap total session span even while locked/slept: a session older than
+    # Get-LogbookMaxSessionSeconds is closed regardless of lock state, so it
+    # never resumes -- or reports to the dashboard -- as a multi-day "active"
+    # session. The resume/unlock path in logbook_popup.ps1 enforces the same
+    # cap; doing it here too closes it promptly instead of only when someone
+    # next unlocks. Once closed, the idle block below no-ops (no session file).
+    try { Close-OverAgeLogbookSessionIfAny | Out-Null } catch { Write-LogbookError "Max session age check failed: $($_.Exception.Message)" }
 
     # The only auto-close path left for a session that's neither locked nor
     # slept: genuinely idle with the screen unlocked (forgot to lock, walked

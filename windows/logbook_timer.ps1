@@ -6,7 +6,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
     exit 0
 }
-. 'C:\lab\logbook_common.ps1'
+. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 
 try {
@@ -40,11 +40,10 @@ $messageTitle = $window.FindName('MessageTitle')
 $exitBtn = $window.FindName('ExitBtn')
 
 $exitBtn.Add_Click({
-    $confirm = [System.Windows.MessageBox]::Show(
-        'Akhiri sesi ini dan kunci workstation? Sesi berikutnya akan tercatat sebagai kunjungan baru.',
-        'Akhiri sesi', 'YesNo', 'Question')
-    if ($confirm -ne 'Yes') { return }
-    try { Close-LogbookSessionAndLock } catch { Write-LogbookError "SELESAI button failed: $($_.Exception.Message)" }
+    # No confirmation prompt (product decision): END ends the session and locks
+    # immediately. Close-LogbookSessionAndLock also spawns the next sign-in form
+    # so a new session reliably starts when the user returns.
+    try { Close-LogbookSessionAndLock } catch { Write-LogbookError "END button failed: $($_.Exception.Message)" }
     $script:allowClose = $true
     $timer.Stop()
     $window.Close()
@@ -156,6 +155,11 @@ function Update-LogbookInfoVisibility {
     if ($shouldShow -ne $isShown) {
         $infoSection.Visibility = if ($shouldShow) { 'Visible' } else { 'Collapsed' }
     }
+    # The END button only appears while the pointer is over the widget -- NOT
+    # during the first-10s info reveal -- so the resting widget is just the
+    # status + clock, and ending a session is a deliberate hover-then-click.
+    $exitVisible = if ($script:isHovering) { 'Visible' } else { 'Collapsed' }
+    if ($exitBtn.Visibility -ne $exitVisible) { $exitBtn.Visibility = $exitVisible }
     Update-LogbookTimerSize
 }
 $window.Add_MouseEnter({ $script:isHovering = $true; Update-LogbookInfoVisibility })

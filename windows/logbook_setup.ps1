@@ -8,7 +8,7 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
     exit 0
 }
 
-. 'C:\lab\logbook_common.ps1'
+. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 
 try {

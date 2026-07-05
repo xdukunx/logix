@@ -16,7 +16,7 @@ let activeDeviceCount = 0;
 
 // Send Lock Command
 const lockWorkstation = async (hostname) => {
-    if (!confirm(`Apakah Anda yakin ingin mengunci stasiun ${hostname} secara paksa?`)) return;
+    // No confirmation (product decision): lock fires immediately.
     try {
         const res = await fetchWithAuth("/api/control/lock", {
             method: "POST",
@@ -47,6 +47,57 @@ const sendDirectMessage = async (hostname) => {
         });
         if (!res.ok) throw new Error("Gagal mengirim pesan");
         showToast(`Pesan dikirim ke ${hostname}`);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
+// Request an on-demand screenshot (Logix Control screen view). The agent
+// notifies the person at the device that a capture happened -- never
+// silent -- and only the latest capture per device is kept server-side.
+// View it from the device's row in the Devices tab (Device Detail modal).
+const requestScreenshot = async (hostname) => {
+    const reason = prompt(`Alasan mengambil screenshot ${hostname} (kebijakan device dapat mewajibkan ini):`, "");
+    if (reason === null) return;
+    try {
+        const res = await fetchWithAuth("/api/control/screenshot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, reason: reason.trim() })
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.detail || "Gagal meminta screenshot");
+        }
+        showToast(`Permintaan screenshot dikirim ke ${hostname}. Hasilnya muncul di Device Detail (tab Devices).`);
+    } catch (err) {
+        showToast(err.message, true);
+    }
+};
+
+// Power actions (Logix Control): shutdown / restart / logoff. The agent
+// gives the user a 30-second on-screen warning before executing.
+const POWER_LABELS = {
+    shutdown: "mematikan",
+    restart: "memulai ulang",
+    logoff: "mengeluarkan pengguna dari",
+};
+
+const sendPowerCommand = async (hostname, action) => {
+    if (!confirm(`Yakin ingin ${POWER_LABELS[action]} ${hostname}? Pengguna diberi peringatan 30 detik.`)) return;
+    const reason = prompt(`Alasan (kebijakan device dapat mewajibkan ini):`, "");
+    if (reason === null) return;
+    try {
+        const res = await fetchWithAuth("/api/control/power", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hostname, action, reason: reason.trim() })
+        });
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.detail || "Gagal mengirim perintah daya");
+        }
+        showToast(`Perintah ${action.toUpperCase()} ditambahkan ke antrean ${hostname}.`);
     } catch (err) {
         showToast(err.message, true);
     }
@@ -116,11 +167,18 @@ const showContextMenu = (x, y, card) => {
         contextMenu.appendChild(menuItem("Remote", "fa-desktop", { disabled: true, title: "AnyDesk ID tidak terdeteksi" }));
     }
     contextMenu.appendChild(menuItem("Lock", "fa-lock", { onClick: () => lockWorkstation(hostname) }));
+    contextMenu.appendChild(menuItem("Screenshot", "fa-camera", { onClick: () => requestScreenshot(hostname) }));
     contextMenu.appendChild(menuItem("Rename", "fa-pen", { onClick: () => renameWorkstation(hostname, deviceName) }));
     const sep = document.createElement("li");
     sep.className = "context-menu-separator";
     contextMenu.appendChild(sep);
     contextMenu.appendChild(menuItem("Send Message", "fa-message", { onClick: () => sendDirectMessage(hostname) }));
+    const sep2 = document.createElement("li");
+    sep2.className = "context-menu-separator";
+    contextMenu.appendChild(sep2);
+    contextMenu.appendChild(menuItem("Log Off User", "fa-user-slash", { onClick: () => sendPowerCommand(hostname, "logoff") }));
+    contextMenu.appendChild(menuItem("Restart", "fa-rotate", { danger: true, onClick: () => sendPowerCommand(hostname, "restart") }));
+    contextMenu.appendChild(menuItem("Shut Down", "fa-power-off", { danger: true, onClick: () => sendPowerCommand(hostname, "shutdown") }));
 
     contextMenu.classList.add("visible");
     // Clamp so the menu never renders off-screen.
@@ -131,11 +189,22 @@ const showContextMenu = (x, y, card) => {
     contextMenu.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
 };
 
-pcsGrid.addEventListener("contextmenu", (e) => {
+// Document-level, not grid-only: after the first open the menu sits under the
+// cursor, so a second right-click landed ON the menu (not a card), the old
+// handler's closest(".workstation-card") returned null, preventDefault never
+// ran, and the browser's Inspect/Reload menu appeared -- the "works once" bug.
+// Card -> our menu; on our menu -> keep it (no native menu); anywhere else ->
+// dismiss ours and let the native menu through.
+document.addEventListener("contextmenu", (e) => {
     const card = e.target.closest(".workstation-card");
-    if (!card || card.dataset.active !== "true") return; // let the browser's default menu show
-    e.preventDefault();
-    showContextMenu(e.clientX, e.clientY, card);
+    if (card && card.dataset.active === "true") {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, card);
+    } else if (contextMenu.contains(e.target)) {
+        e.preventDefault();
+    } else {
+        hideContextMenu();
+    }
 });
 
 document.addEventListener("click", (e) => {
@@ -206,7 +275,7 @@ export const fetchActiveWorkstations = async () => {
                         </div>
                     ` : ""}
                     ${isUserActive ? `
-                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Rename, Send Message)</div>
+                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Screenshot, Message, Power)</div>
                     ` : ""}
                 </div>
             `;
@@ -231,8 +300,7 @@ btnSendMessage.addEventListener("click", async () => {
     }
     if (activeDeviceCount === 0) return;
 
-    if (!confirm("Emergency alert will be sent to all active workstations. Continue?")) return;
-
+    // No confirmation (product decision): the emergency alert sends immediately.
     try {
         const res = await fetchWithAuth("/api/control/broadcast", {
             method: "POST",

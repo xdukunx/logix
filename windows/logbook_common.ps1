@@ -1,16 +1,23 @@
 # MindLab Report Logbook common helpers v5.7
 $ErrorActionPreference = 'Stop'
 
-$Global:LabDir = 'C:\lab'
+# Program scripts live in $Global:InstallDir (Program Files) -- read-only at
+# runtime, written only by the elevated installer. All WRITABLE runtime state
+# (session.json, timer.pid, the error log, markers) lives in $Global:StateDir
+# under %ProgramData%, which the non-elevated agent can create and modify. The
+# error log was historically in the program dir (C:\lab); it moved to StateDir
+# because Program Files is not writable by the standard-user runtime.
+$Global:InstallDir = 'C:\Program Files\Logix'
+$Global:LabDir = $Global:InstallDir   # back-compat alias for older references
 $Global:StateDir = Join-Path $env:ProgramData 'MindLabLogbook'
 $Global:SessionFile = Join-Path $Global:StateDir 'session.json'
-$Global:ErrorLog = Join-Path $Global:LabDir 'logbook_error.log'
+$Global:ErrorLog = Join-Path $Global:StateDir 'logbook_error.log'
 $Global:PopupLock = Join-Path $Global:StateDir 'popup.lock'
 
 function Write-LogbookError {
     param([string]$Message)
     try {
-        New-Item -ItemType Directory -Force -Path $Global:LabDir | Out-Null
+        New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
         "$(Get-Date -Format o) $Message" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8
     } catch {}
 }
@@ -20,8 +27,9 @@ function Write-LogbookInfo {
     Write-LogbookError "INFO: $Message"
 }
 
+# Only the writable StateDir is created at runtime; InstallDir (Program Files)
+# is provisioned by the elevated installer, not here.
 function Ensure-LogbookDirs {
-    New-Item -ItemType Directory -Force -Path $Global:LabDir | Out-Null
     New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
 }
 
@@ -119,6 +127,55 @@ function Grant-LogbookTaskMgrGateAccess {
     }
 }
 
+# Runtime processes (monitor/popup/timer) must be able to DELETE state files in
+# $Global:StateDir -- most importantly session.json, whose removal is what
+# actually ends a session (SELESAI / END / AUTO_CLOSE / idle-timeout). If any of
+# those processes ever ran elevated (an old scheduled task registered with
+# -RunLevel Highest, or a manual elevated restart helper), the files it created
+# are owned by BUILTIN\Administrators with no delete right for the normal
+# interactive account. A later NON-elevated run then logs the END event but
+# silently fails to remove session.json, leaving a "zombie" session: its timer
+# keeps counting (even from a previous day) and the next unlock shows no sign-in
+# form because the popup sees a session still on disk and only resumes the timer.
+# This grants the interactive user an inheritable Modify ACE on the state dir so
+# every file created there -- whoever creates it -- stays deletable by that user,
+# and repairs any children already orphaned by a past elevated run. Install-time
+# only: resetting admin-owned children requires running elevated.
+function Grant-LogbookStateDirAccess {
+    $identity = "$env:USERDOMAIN\$env:USERNAME"
+    try {
+        New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
+        $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
+                   [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $acl = Get-Acl -Path $Global:StateDir
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $identity,
+            [System.Security.AccessControl.FileSystemRights]::Modify,
+            $inherit,
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow)))
+        Set-Acl -Path $Global:StateDir -AclObject $acl
+        # Children created before this ACE never inherited it and may still be
+        # admin-owned -- grant the same right on each directly so the current
+        # session.json/timer.pid become removable by this account immediately.
+        foreach ($child in @(Get-ChildItem -Path $Global:StateDir -Force -ErrorAction SilentlyContinue)) {
+            try {
+                $childAcl = Get-Acl -Path $child.FullName
+                $childAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    $identity,
+                    [System.Security.AccessControl.FileSystemRights]::Modify,
+                    [System.Security.AccessControl.AccessControlType]::Allow)))
+                Set-Acl -Path $child.FullName -AclObject $childAcl
+            } catch {
+                Write-LogbookError "State dir child ACL repair failed for $($child.FullName): $($_.Exception.Message)"
+            }
+        }
+        Write-LogbookInfo "State dir access ensured for $identity on $Global:StateDir."
+    } catch {
+        Write-LogbookError "Grant-LogbookStateDirAccess failed for ${identity}: $($_.Exception.Message)"
+    }
+}
+
 # Gate Task Manager while the sign-in popup is showing, using the standard
 # Windows policy Task Manager itself honors (shows "disabled by your
 # administrator" instead of opening) rather than fighting the process.
@@ -165,7 +222,7 @@ function Start-LogbookTimer {
     param([string]$SessionId = '')
     try {
         Stop-LogbookTimers
-        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_timer.ps1')
+        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_timer.ps1')
         if ($SessionId) { $args += @('-SessionId', $SessionId) }
         $timer = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList $args
         $pidFile = Join-Path $Global:StateDir 'timer.pid'
@@ -181,11 +238,14 @@ function Start-LogbookPopup {
     param([switch]$ForceNew, [switch]$TestMode)
     try {
         if (Test-LogbookPopupRunning) { return $true }
-        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1')
+        $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1')
         if ($ForceNew) { $args += '-ForceNew' }
         if ($TestMode) { $args += '-TestMode' }
-        # IMPORTANT: do not use -WindowStyle Hidden here. It hides the WPF form too.
-        Start-Process powershell.exe -ArgumentList $args | Out-Null
+        # -WindowStyle Hidden hides only the powershell CONSOLE window, not the
+        # WPF form the popup opens with ShowDialog() -- the timer widget launches
+        # exactly this way and renders fine. Keeps a stray console from sitting
+        # on the user's desktop for the whole session.
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
         return $true
     } catch {
         Write-LogbookError "Popup start failed: $($_.Exception.Message)"
@@ -321,7 +381,7 @@ function Get-LogbookDefaultConfig {
     return @{
         branding = @{
             logoText = 'Logix'
-            logoPath = 'C:\lab\logo.png'
+            logoPath = 'C:\Program Files\Logix\logo.png'
             title    = 'Report Logbook'
             subtitle = 'Computational Workstation'
             colors   = @{ primary = '#073763'; accent = '#741B47'; muted = '#C0C0C0'; text = '#FFFFFF' }
@@ -470,6 +530,58 @@ function Get-LogbookDeviceDisplayName {
     return $deviceName
 }
 
+# Writes the single incoming-message drop the timer widget polls each tick and
+# shows inline near the clock. allow_reply lets the widget offer a reply box for
+# admin messages (BROADCAST) but not for one-way notices (screenshot/power).
+function Set-LogbookIncomingMessage {
+    param([string]$Text, [string]$Reason = 'Direction Message', [string]$CommandId = '', [bool]$AllowReply = $true)
+    Ensure-LogbookDirs
+    $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
+    @{ text = $Text; reason = $Reason; command_id = $CommandId; allow_reply = $AllowReply; received_at = (Get-Date).ToString('o') } |
+        ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
+}
+
+# Device -> admin message (Logix Control replies). Posts to /api/replies with the
+# same credential order as the heartbeat (per-device key first, shared key
+# fallback). command_id links a reply back to the broadcast it answers.
+function Send-LogbookReply {
+    param([Parameter(Mandatory=$true)][string]$Text, [string]$CommandId = '')
+    try {
+        $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+        if (-not $serverUrl) { return $false }
+        $serverKey = Get-LogbookDeviceApiKey
+        if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
+        $payload = @{
+            hostname    = $env:COMPUTERNAME
+            device_name = Get-LogbookDeviceDisplayName
+            message     = $Text
+            command_id  = $CommandId
+        }
+        $headers = @{ 'Content-Type' = 'application/json' }
+        if ($serverKey) { $headers['X-API-Key'] = $serverKey }
+        $apiUrl = $serverUrl.TrimEnd('/') + '/api/replies'
+        Invoke-RestMethod -Uri $apiUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 3) -Headers $headers -TimeoutSec 5 -UseBasicParsing | Out-Null
+        Write-LogbookInfo "Reply sent to server (command_id: $CommandId)."
+        return $true
+    } catch {
+        Write-LogbookError "Reply send failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Screen capture lives in its own on-demand script (logbook_screenshot.ps1),
+# NOT here: the capture-and-upload pattern trips Windows Defender's AMSI, and
+# having it inline would get this whole always-loaded core file blocked as
+# "malicious", breaking every agent function. Isolated, only the screenshot
+# feature is affected if AV objects, and the SCREENSHOT handler shells out to it.
+function Invoke-LogbookScreenshotCapture {
+    param([Parameter(Mandatory=$true)][string]$CommandId)
+    $script = Join-Path $Global:LabDir 'logbook_screenshot.ps1'
+    if (-not (Test-Path $script)) { throw "logbook_screenshot.ps1 not found at $script" }
+    Start-Process powershell.exe -WindowStyle Hidden -Wait -ArgumentList @(
+        '-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$script,'-CommandId',$CommandId) | Out-Null
+}
+
 function Send-LogbookHeartbeat {
     param(
         [Parameter(Mandatory=$true)][string]$Status
@@ -537,36 +649,65 @@ function Send-LogbookHeartbeat {
                 $param = $cmd.param
                 Write-LogbookInfo "Received remote command: $name (param: $param)"
 
-                if ($name -eq 'LOCK') {
-                    Write-LogbookInfo "Remote LOCK trigger execution."
-                    try {
-                        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_end.ps1','-Reason','LOCK') | Out-Null
-                        Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-ForceNew') | Out-Null
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
-                    } catch {
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
+                # Logix Control command dispatch. LOCK/BROADCAST are the
+                # originals; SCREENSHOT/SHUTDOWN/RESTART/LOGOFF are the Logix
+                # Control additions. All paths ack their outcome; unknown names
+                # fail explicitly rather than being silently dropped.
+                try {
+                    switch ($name) {
+                        'LOCK' {
+                            Write-LogbookInfo "Remote LOCK trigger execution."
+                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','LOCK') | Out-Null
+                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'),'-ForceNew') | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                        }
+                        'BROADCAST' {
+                            # Drop for the timer widget to show inline near the
+                            # clock -- not a separate MessageBox. command_id
+                            # rides along so a reply typed into the widget can
+                            # reference the exact broadcast it answers. "done"
+                            # means the file was written, not that the user saw it.
+                            Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
+                            $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
+                            Set-LogbookIncomingMessage -Text $param -Reason $reason -CommandId ([string]$cmd.command_id)
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                        }
+                        'SCREENSHOT' {
+                            # Transparency first, then capture: the person at the
+                            # device always sees a notice that a capture happened
+                            # (docs/PRIVACY.md, "never silently").
+                            Write-LogbookInfo "Remote SCREENSHOT trigger execution."
+                            Set-LogbookIncomingMessage -Text 'Admin baru saja mengambil tangkapan layar perangkat ini untuk keperluan pemantauan.' -Reason 'Screen View Notice' -AllowReply $false
+                            Invoke-LogbookScreenshotCapture -CommandId ([string]$cmd.command_id)
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'screenshot uploaded' }
+                        }
+                        'SHUTDOWN' {
+                            Write-LogbookInfo "Remote SHUTDOWN trigger execution."
+                            Set-LogbookIncomingMessage -Text 'Perangkat ini akan dimatikan oleh admin dalam 30 detik. Simpan pekerjaan Anda sekarang.' -Reason 'Emergency Alert' -AllowReply $false
+                            & shutdown.exe /s /t 30 /c 'Logix: perangkat dimatikan oleh admin. Simpan pekerjaan Anda.' | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'shutdown scheduled (30s)' }
+                        }
+                        'RESTART' {
+                            Write-LogbookInfo "Remote RESTART trigger execution."
+                            Set-LogbookIncomingMessage -Text 'Perangkat ini akan dimulai ulang oleh admin dalam 30 detik. Simpan pekerjaan Anda sekarang.' -Reason 'Emergency Alert' -AllowReply $false
+                            & shutdown.exe /r /t 30 /c 'Logix: perangkat dimulai ulang oleh admin. Simpan pekerjaan Anda.' | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'restart scheduled (30s)' }
+                        }
+                        'LOGOFF' {
+                            # Close the logbook session cleanly first so hours
+                            # aren't lost, then sign the user out.
+                            Write-LogbookInfo "Remote LOGOFF trigger execution."
+                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') -Wait | Out-Null
+                            & shutdown.exe /l /f | Out-Null
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'user logged off' }
+                        }
+                        default {
+                            Write-LogbookError "Unknown remote command: $name"
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = "unknown command $name" }
+                        }
                     }
-                }
-                elseif ($name -eq 'BROADCAST') {
-                    # Drop for the timer widget to pick up on its next tick
-                    # and show inline, near the timer -- not a separate
-                    # MessageBox popup. Same file-drop-and-poll idiom as
-                    # session.json/popup.lock/timer.pid; there's no other
-                    # IPC channel between this process (the monitor loop)
-                    # and the timer's own separate powershell.exe process.
-                    # "done" here means the file was written for the timer
-                    # to pick up, not that the user has seen/dismissed it.
-                    Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
-                    try {
-                        Ensure-LogbookDirs
-                        $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
-                        $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
-                        @{ text = $param; reason = $reason; received_at = (Get-Date).ToString('o') } |
-                            ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
-                    } catch {
-                        $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
-                    }
+                } catch {
+                    $newAcks += @{ command_id = $cmd.command_id; status = 'failed'; detail = $_.Exception.Message }
                 }
             }
         }
@@ -925,20 +1066,28 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
       </Grid.RowDefinitions>
 
       <Grid Grid.Row="0" Margin="18,14,18,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <Ellipse Name="Pulse" Width="8" Height="8" Fill="$accent" Margin="0,3,8,0" VerticalAlignment="Center" />
-        <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" TextTrimming="CharacterEllipsis" />
-        <Button Grid.Column="2" Name="ExitBtn" Content="SELESAI" Padding="6,2" Margin="6,-2,0,0" Cursor="Hand"
-                Background="Transparent" BorderBrush="$muted" BorderThickness="1" Foreground="$muted"
-                FontFamily="Segoe UI Semibold" FontSize="8.5" ToolTip="Akhiri sesi &amp; kunci workstation">
+        <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        <Button Grid.Column="2" Name="ExitBtn" Content="END" Cursor="Hand" VerticalAlignment="Center" Visibility="Collapsed"
+                Padding="8,2" Margin="8,0,0,0" Background="#1EFFFFFF" BorderBrush="$muted" BorderThickness="1"
+                Foreground="$text" FontFamily="Segoe UI Semibold" FontSize="9.5" SnapsToDevicePixels="True"
+                ToolTip="Akhiri sesi &amp; kunci workstation">
           <Button.Template>
             <ControlTemplate TargetType="Button">
-              <Border x:Name="ExitBtnBg" CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+              <Border x:Name="ExitBtnBg" CornerRadius="7" Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                      SnapsToDevicePixels="True">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"
+                                  TextElement.Foreground="{TemplateBinding Foreground}" />
               </Border>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter TargetName="ExitBtnBg" Property="Background" Value="$accent" />
+                  <Setter TargetName="ExitBtnBg" Property="BorderBrush" Value="$accent" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="ExitBtnBg" Property="Opacity" Value="0.8" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -1027,6 +1176,21 @@ function Close-ActiveLogbookSession {
             $session = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
             [void](Invoke-WSLLogbook -Event $Reason -SessionType $session.session_type -AnyDeskDetected ([int]$session.anydesk_detected) -SessionId $session.session_id -Nama $session.nama -Nim $session.nim -Tujuan $session.tujuan -Keterangan $session.keterangan)
             Remove-Item $Global:SessionFile -Force -ErrorAction SilentlyContinue
+            if (Test-Path $Global:SessionFile) {
+                # Removing session.json is what actually ends the session; if it
+                # survives, the session is NOT closed no matter that the event
+                # was logged above. Almost always an ACL/ownership problem (the
+                # file was created by an elevated run and this process is not).
+                # Do NOT report success -- surface the real error and fail so the
+                # caller (and the log) can see why SELESAI "did nothing".
+                try {
+                    Remove-Item $Global:SessionFile -Force -ErrorAction Stop
+                } catch {
+                    Write-LogbookError "Could NOT remove session file '$($Global:SessionFile)' closing sid=$($session.session_id) reason=$Reason -- session will not end and its timer keeps running. Likely ACL/ownership (file owned by another/elevated account). Run windows\repair_logbook_permissions.ps1 as admin. Error: $($_.Exception.Message)"
+                    Stop-LogbookTimers
+                    return $false
+                }
+            }
             Write-LogbookInfo "Closed active session sid=$($session.session_id) reason=$Reason"
         }
         Stop-LogbookTimers
@@ -1071,6 +1235,43 @@ function Close-StaleLogbookSessionIfAny {
     return $false
 }
 
+# Upper bound (seconds) on how long a single session may span before resuming it
+# stops making sense as a logbook duration. Configurable via
+# LOGIX_MAX_SESSION_HOURS; 0/unset falls back to the 8-hour default (roughly a
+# working day). See Close-OverAgeLogbookSessionIfAny.
+function Get-LogbookMaxSessionSeconds {
+    $hours = Get-LogbookConfigEnv 'LOGIX_MAX_SESSION_HOURS'
+    $parsed = 0.0
+    if ($hours -and [double]::TryParse($hours, [ref]$parsed) -and $parsed -gt 0) {
+        return [int]($parsed * 3600)
+    }
+    return 8 * 3600
+}
+
+# Companion to Close-StaleLogbookSessionIfAny, but keyed off wall-clock age
+# rather than reboot. A machine locked or slept overnight WITHOUT a reboot keeps
+# start_time newer than LastBootUpTime, so the stale-check above never fires and
+# the session resumes with a timer reading e.g. 25:00:00 -- "continuing from
+# yesterday". Call this on the resume/unlock path (see logbook_popup.ps1's
+# early-exit and logbook_monitor.ps1): a session older than
+# Get-LogbookMaxSessionSeconds is closed so a fresh sign-in form is shown
+# instead. Deliberately NOT called on every timer tick of an actively-used
+# unlocked session -- a legitimate long compute run stays open while the user is
+# present; this only caps the "came back to a locked machine" case.
+function Close-OverAgeLogbookSessionIfAny {
+    if (-not (Test-Path $Global:SessionFile)) { return $false }
+    $ageSec = Get-ActiveLogbookSessionAgeSeconds
+    if ($null -eq $ageSec) { return $false }
+    $maxSec = Get-LogbookMaxSessionSeconds
+    if ($maxSec -le 0) { return $false }
+    if ($ageSec -ge $maxSec) {
+        Write-LogbookInfo "Session age ${ageSec}s exceeds cap ${maxSec}s; auto-closing instead of resuming."
+        Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+        return $true
+    }
+    return $false
+}
+
 # Product decision: a lock or sleep/resume cycle, by itself, is NOT a
 # session boundary -- someone stepping away for coffee (or a laptop lid
 # closing) shouldn't split one lab visit into two logbook rows, no matter
@@ -1085,11 +1286,31 @@ function Close-StaleLogbookSessionIfAny {
 # the unlock path, which starts a fresh session when none is on disk.
 function Close-LogbookSessionAndLock {
     Close-ActiveLogbookSession -Reason 'END' | Out-Null
+    # Guarantee the next sign-in form appears rather than relying solely on the
+    # monitor's SessionUnlock event, which was observed NOT to re-prompt after an
+    # END (leaving the user with no way to start a new session on return). The
+    # popup is a full-screen topmost overlay, so it sits ready behind the Windows
+    # lock screen and is there the moment the user signs back in.
+    Start-LogbookPopup | Out-Null
     try {
         Start-Process 'rundll32.exe' -ArgumentList 'user32.dll,LockWorkStation' | Out-Null
     } catch {
         Write-LogbookError "Lock workstation failed: $($_.Exception.Message)"
     }
+}
+
+# How often the monitor heartbeats the server AND polls for queued remote
+# commands (lock / message / power). Lower = snappier remote actions -- a lock
+# from the dashboard lands within this many seconds instead of up to 30 -- at
+# the cost of more requests. Configurable via LOGIX_HEARTBEAT_SECONDS; default
+# 5s, floored at 2s.
+function Get-LogbookHeartbeatSeconds {
+    $val = Get-LogbookConfigEnv 'LOGIX_HEARTBEAT_SECONDS'
+    $parsed = 0
+    if ($val -and [int]::TryParse($val, [ref]$parsed) -and $parsed -ge 2) {
+        return $parsed
+    }
+    return 5
 }
 
 function Get-LogbookIdleTimeoutSeconds {

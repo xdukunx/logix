@@ -4,6 +4,9 @@
 # that runtime data may ever enter version control.
 # ============================================================
 
+# Claude Code local state — worktrees, job metadata, plans (never versioned)
+.claude/
+
 # Databases — contain all PII (names, NIM, IPs, session records)
 *.db
 *.db-wal

@@ -6,8 +6,21 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$lab = 'C:\lab'
-New-Item -ItemType Directory -Force -Path $lab | Out-Null
+# Writing to Program Files and registering a machine scheduled task both require
+# elevation. Fail fast with a clear message rather than half-installing.
+$__principal = New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $__principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host 'This installer must run elevated (it writes C:\Program Files\Logix and registers a scheduled task).' -ForegroundColor Yellow
+    Write-Host 'Open PowerShell as Administrator, then re-run this script.' -ForegroundColor Yellow
+    exit 1
+}
+
+# Program scripts install here (read-only at runtime). Runtime state stays in
+# %ProgramData%\MindLabLogbook. $oldLab is the legacy location we migrate away
+# from and remove at the end.
+$installDir = 'C:\Program Files\Logix'
+$oldLab = 'C:\lab'
+New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 # Whether session events log through WSL (lab workstations that already have
 # a distro set up for the SSH-side bridge) or the native Python core that
@@ -40,25 +53,27 @@ if (-not $PSBoundParameters.ContainsKey('UseWSL')) {
 Set-LogixConfigValue -Key 'LOGIX_USE_WSL' -Value $(if ($useWsl) { '1' } else { '0' })
 Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python (requires install/install.py to have deployed the core to this machine already)' })" -ForegroundColor Green
 
-# Copy scripts from installer source folder to C:\lab
+# Copy scripts from installer source folder to the install dir.
 $files = @(
     'logbook_common.ps1',
     'logbook_popup.ps1',
     'logbook_monitor.ps1',
     'logbook_timer.ps1',
+    'logbook_screenshot.ps1',
     'logbook_end.ps1',
     'logbook_setup.ps1',
     'cleanup_logbook_state.ps1',
-    'debug_logbook_detection.ps1'
+    'debug_logbook_detection.ps1',
+    'repair_logbook_permissions.ps1'
 )
 foreach ($f in $files) {
     $src = Join-Path $PSScriptRoot $f
     if (Test-Path $src) {
-        Copy-Item -Path $src -Destination (Join-Path $lab $f) -Force
+        Copy-Item -Path $src -Destination (Join-Path $installDir $f) -Force
     }
 }
 
-. 'C:\lab\logbook_common.ps1'
+. (Join-Path $installDir 'logbook_common.ps1')
 Ensure-LogbookDirs
 
 Write-Host 'Logix Report Logbook installer' -ForegroundColor Cyan
@@ -70,6 +85,14 @@ Write-Host 'User:' $TaskUser
 # Grant-LogbookTaskMgrGateAccess in logbook_common.ps1 for why this is safe
 # and narrowly scoped.
 Grant-LogbookTaskMgrGateAccess
+
+# Grant the interactive account an inheritable Modify ACE on the state dir so
+# session.json/timer.pid stay deletable by the (non-elevated) runtime, and
+# repair any files a past elevated run left owned by Administrators. Pairs with
+# the -RunLevel Limited task below -- together they keep all state files
+# user-owned so ending a session (removing session.json) can never fail. See
+# Grant-LogbookStateDirAccess in logbook_common.ps1.
+Grant-LogbookStateDirAccess
 
 # Clean the old direct Start/End tasks that caused duplicate stacks.
 foreach ($t in @('MindLab Report Logbook Start','MindLab Report Logbook End','Lab Logbook Start','Lab Logbook End')) {
@@ -85,9 +108,17 @@ try {
     }
 } catch {}
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\lab\logbook_monitor.ps1"'
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
-$principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Highest
+# RunLevel Limited (NOT Highest): the monitor and everything it spawns (popup,
+# timer) must run as the plain interactive user so the state files they create
+# are user-owned and therefore user-deletable. Running elevated made
+# session.json/timer.pid owned by BUILTIN\Administrators, after which a
+# non-elevated run (e.g. the HKCU Run fallback below) could no longer remove
+# them -- so ending a session silently failed and its timer kept counting. The
+# only privileged thing the popup does, gating Task Manager, already works
+# unelevated via Grant-LogbookTaskMgrGateAccess above.
+$principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 30)
 try { Unregister-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
 Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
@@ -96,19 +127,38 @@ Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $actio
 try {
     $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $runPath -Force | Out-Null
-    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\lab\logbook_monitor.ps1"'
+    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
 } catch { Write-LogbookError "HKCU Run registration failed: $($_.Exception.Message)" }
 
 Write-Host 'OK: single monitor installed. Old duplicate Start/End tasks removed.' -ForegroundColor Green
 Get-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' | Select-Object TaskName, State
 
 Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
-Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_setup.ps1') -Wait | Out-Null
+Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_setup.ps1') -Wait | Out-Null
+
+# Migrate any logo asset then remove the legacy C:\lab program dir so the app
+# lives entirely under Program Files. Runtime state (%ProgramData%) is untouched.
+if ((Test-Path $oldLab) -and ($oldLab -ne $installDir)) {
+    try {
+        $oldLogo = Join-Path $oldLab 'logo.png'
+        if (Test-Path $oldLogo) { Copy-Item $oldLogo (Join-Path $installDir 'logo.png') -Force -ErrorAction SilentlyContinue }
+        Get-ChildItem -Path $oldLab -Filter '*.ps1' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $oldLab 'logbook_error.log') -Force -ErrorAction SilentlyContinue
+        if (-not (Get-ChildItem -Path $oldLab -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item $oldLab -Force -Recurse -ErrorAction SilentlyContinue
+        }
+        Write-Host "Migrated program files to $installDir and cleaned up legacy $oldLab." -ForegroundColor Green
+    } catch { Write-LogbookError "Legacy C:\lab cleanup failed: $($_.Exception.Message)" }
+}
 
 if ($RunNow) {
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_monitor.ps1') | Out-Null
-    Write-Host 'Monitor launched.' -ForegroundColor Green
+    # Start via the scheduled task (NOT Start-Process): this installer runs
+    # elevated, and a Start-Process child would inherit that elevation, which is
+    # exactly what makes state files admin-owned and unremovable. The task's
+    # RunLevel Limited principal launches the monitor as the plain user.
+    Start-ScheduledTask -TaskName 'MindLab Report Logbook Monitor'
+    Write-Host 'Monitor launched (non-elevated via scheduled task).' -ForegroundColor Green
 }
 if ($TestPopup) {
-    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\lab\logbook_popup.ps1','-TestMode') | Out-Null
+    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1','-TestMode') | Out-Null
 }

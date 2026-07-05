@@ -6,11 +6,13 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
     $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-STAChild')
     if ($TestMode) { $args += '-TestMode' }
     if ($ForceNew) { $args += '-ForceNew' }
-    Start-Process powershell.exe -ArgumentList $args | Out-Null
+    # Hidden console only -- the WPF sign-in form still shows (same pattern the
+    # timer uses). Avoids a stray powershell window on the desktop.
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
     exit 0
 }
 
-. 'C:\lab\logbook_common.ps1'
+. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 $cfg = Get-LogbookConfig
 Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
@@ -41,6 +43,11 @@ if ((Test-Path $Global:SessionFile) -and -not $TestMode) {
     $age = Get-ActiveLogbookSessionAgeSeconds
     if ($ForceNew -and ($null -eq $age -or $age -gt 5)) {
         Close-ActiveLogbookSession -Reason 'AUTO_FINISH' | Out-Null
+    } elseif (Close-OverAgeLogbookSessionIfAny) {
+        # Session was left open past the max-session cap (typically locked or
+        # slept across the night). It has just been closed; fall through to
+        # render a fresh sign-in form instead of resuming a timer that would
+        # read from yesterday.
     } else {
         $active = Get-ActiveLogbookSession
         if ($active -and $active.session_id) { Start-LogbookTimer -SessionId $active.session_id | Out-Null }
