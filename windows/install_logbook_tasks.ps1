@@ -6,7 +6,14 @@ param(
     # Path to the AnyDesk 7 installer to deploy so the "Remote" action works.
     # Defaults to an AnyDesk*.exe sitting next to this script. -SkipAnyDesk opts out.
     [string]$AnyDeskInstaller = "",
-    [switch]$SkipAnyDesk
+    [switch]$SkipAnyDesk,
+    # Wizard/silent mode: no prompts, no settings popup. Server config comes
+    # from these params instead (written to config.env). Used by the Inno Setup
+    # wizard so a device installs unattended.
+    [switch]$NonInteractive,
+    [string]$ServerUrl = "",
+    [string]$ServerApiKey = "",
+    [string]$DeviceName = ""
 )
 $ErrorActionPreference = 'Stop'
 
@@ -47,7 +54,7 @@ function Set-LogixConfigValue {
 }
 
 $useWsl = $UseWSL.IsPresent
-if (-not $PSBoundParameters.ContainsKey('UseWSL')) {
+if (-not $PSBoundParameters.ContainsKey('UseWSL') -and -not $NonInteractive) {
     Write-Host ''
     Write-Host 'Does this machine have WSL set up with a Linux distro for the logging bridge?' -ForegroundColor Cyan
     Write-Host '  Most lab workstations do; loaned/rented laptops usually do not.' -ForegroundColor DarkGray
@@ -55,7 +62,13 @@ if (-not $PSBoundParameters.ContainsKey('UseWSL')) {
     $useWsl = $ans -match '^(y|yes)$'
 }
 Set-LogixConfigValue -Key 'LOGIX_USE_WSL' -Value $(if ($useWsl) { '1' } else { '0' })
-Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python (requires install/install.py to have deployed the core to this machine already)' })" -ForegroundColor Green
+Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python' })" -ForegroundColor Green
+
+# Server config passed by the wizard (or CLI) -> config.env, so the agent knows
+# where to report and with what key without the interactive settings popup.
+if ($ServerUrl)    { Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value $ServerUrl }
+if ($ServerApiKey) { Set-LogixConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value $ServerApiKey }
+if ($DeviceName)   { Set-LogixConfigValue -Key 'LOGIX_DEVICE_NAME'    -Value $DeviceName }
 
 # Copy scripts from installer source folder to the install dir.
 $files = @(
@@ -72,8 +85,12 @@ $files = @(
 )
 foreach ($f in $files) {
     $src = Join-Path $PSScriptRoot $f
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination (Join-Path $installDir $f) -Force
+    $dst = Join-Path $installDir $f
+    # Skip the copy when already running from the install dir (the wizard installs
+    # the scripts to $installDir first, then runs this from there) -- copying a
+    # file onto itself throws.
+    if ((Test-Path $src) -and -not ($src -ieq $dst)) {
+        Copy-Item -Path $src -Destination $dst -Force
     }
 }
 
@@ -190,8 +207,10 @@ try {
 Write-Host 'OK: single monitor installed. Old duplicate Start/End tasks removed.' -ForegroundColor Green
 Get-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' | Select-Object TaskName, State
 
-Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
-Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_setup.ps1') -Wait | Out-Null
+if (-not $NonInteractive) {
+    Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
+    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_setup.ps1') -Wait | Out-Null
+}
 
 # Migrate any logo asset then remove the legacy C:\lab program dir so the app
 # lives entirely under Program Files. Runtime state (%ProgramData%) is untouched.

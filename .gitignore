@@ -7,6 +7,12 @@
 # Claude Code local state — worktrees, job metadata, plans (never versioned)
 .claude/
 
+# Bundled third-party binaries + installer build output (not source)
+installer/assets/*.exe
+installer/Output/
+windows/*.exe
+windows/logo.png
+
 # Databases — contain all PII (names, NIM, IPs, session records)
 *.db
 *.db-wal
