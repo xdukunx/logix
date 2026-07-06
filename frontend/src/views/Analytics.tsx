@@ -24,6 +24,7 @@ import type { Analytics as AnalyticsData, AuditAction, CommandStatus, SessionLog
 import { formatDateTime, usePolling } from "../util";
 
 const ITEMS_PER_PAGE = 15;
+const AUDIT_PER_PAGE = 10;
 
 const AUDIT_BADGE: Record<CommandStatus, { label: string; variant: "success" | "warning" | "error" | "neutral" }> = {
   queued: { label: "Menunggu", variant: "warning" },
@@ -106,6 +107,8 @@ export default function Analytics() {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [audit, setAudit] = useState<AuditAction[] | null>(null);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotal, setAuditTotal] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const fetchAnalytics = useCallback(async () => {
@@ -134,20 +137,29 @@ export default function Analytics() {
 
   const fetchAudit = useCallback(async () => {
     try {
-      const data = await getJson<{ actions: AuditAction[] }>("/api/audit-log?limit=20", "Gagal mengambil audit log");
+      const offset = (auditPage - 1) * AUDIT_PER_PAGE;
+      const data = await getJson<{ total: number; actions: AuditAction[] }>(
+        `/api/audit-log?limit=${AUDIT_PER_PAGE}&offset=${offset}`,
+        "Gagal mengambil audit log",
+      );
       setAudit(data.actions);
+      setAuditTotal(data.total);
     } catch {
       setAudit([]);
     }
-  }, []);
+  }, [auditPage]);
 
   usePolling(fetchAnalytics, 10000);
-  usePolling(fetchAudit, 30000);
   useEffect(() => {
     fetchSessions();
     const id = setInterval(fetchSessions, 30000);
     return () => clearInterval(id);
   }, [fetchSessions]);
+  useEffect(() => {
+    fetchAudit();
+    const id = setInterval(fetchAudit, 30000);
+    return () => clearInterval(id);
+  }, [fetchAudit]);
 
   const onSearchChange = (value: string) => {
     setSearch(value);
@@ -262,7 +274,10 @@ export default function Analytics() {
       </VStack>
 
       <VStack gap={3}>
-        <Heading level={5}>Audit Log (Logix Control)</Heading>
+        <HStack gap={2} align="center">
+          <Heading level={5}>Audit Log (Logix Control)</Heading>
+          <Badge variant="neutral" label={`${auditTotal} total`} />
+        </HStack>
         {audit === null ? (
           <Text type="body">Memuat audit log...</Text>
         ) : audit.length === 0 ? (
@@ -290,6 +305,19 @@ export default function Analytics() {
             ]}
           />
         )}
+
+        <HStack gap={3} align="center" justify="end">
+          <Button label="Sebelumnya" size="sm" isDisabled={auditPage === 1} onClick={() => setAuditPage((p) => Math.max(1, p - 1))} />
+          <Text type="supporting" color="secondary">
+            Halaman {auditPage} dari {Math.ceil(auditTotal / AUDIT_PER_PAGE) || 1}
+          </Text>
+          <Button
+            label="Berikutnya"
+            size="sm"
+            isDisabled={(auditPage - 1) * AUDIT_PER_PAGE + (audit?.length ?? 0) >= auditTotal}
+            onClick={() => setAuditPage((p) => p + 1)}
+          />
+        </HStack>
       </VStack>
     </VStack>
   );

@@ -1,0 +1,41 @@
+# Logix central server — Caddy reverse proxy with automatic HTTPS.
+#
+# Caddy is the simplest way to put TLS in front of the Logix server: it
+# obtains and renews a Let's Encrypt certificate for you, with no certbot
+# step. The Logix server itself has no built-in TLS and must stay bound to
+# localhost (see README "Running it for real") — Caddy is what the internet
+# talks to; it forwards to 127.0.0.1:8000.
+#
+# SETUP
+#   1. Point your domain's DNS A/AAAA record at this host, and open port 443
+#      (and 80, which Caddy uses for the ACME challenge and an HTTPS redirect).
+#   2. Replace logix.example.org below with your real domain, and set the same
+#      domain in server/.env:
+#         LOGIX_ALLOWED_ORIGINS=https://logix.example.org
+#         GOOGLE_REDIRECT_URI=https://logix.example.org/api/auth/callback
+#      and register that exact redirect URI in the Google Cloud Console.
+#   3. Install Caddy (https://caddyserver.com/docs/install), put this file at
+#      /etc/caddy/Caddyfile, then:  sudo systemctl reload caddy
+#
+# There is nothing Logix-specific to configure beyond the domain — the server
+# serves the dashboard and the /api routes from the same origin, so a single
+# reverse_proxy covers everything (dashboard + API + OAuth callback).
+
+logix.example.org {
+	# Forward all traffic to the Logix server on localhost.
+	reverse_proxy 127.0.0.1:8000
+
+	# Screenshots and Excel reports can be a few MB; lift the default limits.
+	request_body {
+		max_size 20MB
+	}
+
+	encode gzip
+
+	# Optional: keep an access log for auditing who reached the dashboard.
+	# The Logix DB already holds the PII; this log is request metadata only.
+	log {
+		output file /var/log/caddy/logix-access.log
+		format console
+	}
+}
