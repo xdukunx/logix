@@ -23,7 +23,8 @@ if (-not (Test-Path $anydesk)) {
 # falls back to Inno's stock images (the .iss guards every branding directive).
 $mascot = Get-ChildItem -Path (Join-Path $here 'branding') -Filter 'mascot-source.*' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($mascot) {
-    $py = (Get-Command py -ErrorAction SilentlyContinue) ?? (Get-Command python -ErrorAction SilentlyContinue)
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command python -ErrorAction SilentlyContinue }
     if ($py) {
         Write-Host "Building mascot branding from $($mascot.Name)..." -ForegroundColor Cyan
         & $py.Source (Join-Path $here 'build_branding.py')

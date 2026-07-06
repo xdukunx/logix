@@ -59,26 +59,56 @@ WizardSmallImageFile={#BrandDir}\wizard-small.bmp
 #endif
 
 [Languages]
-; English only for now. To add a language picker like Comnyang's EN/KO/JA,
-; add more Name/MessagesFile lines here (Inno ships many under
-; compiler:Languages\; an Indonesian.isl can be dropped in installer\ and
-; referenced as "MessagesFile: Indonesian.isl").
+; EN/ID picker (Comnyang-style). Inno shows a language-select dialog at launch
+; whenever more than one language is defined. Indonesian.isl ships alongside
+; this script (Inno has no bundled Indonesian).
 Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "id"; MessagesFile: "Indonesian.isl"
 
 [Messages]
-; Warm, on-brand copy so the wizard reads like a product, not a raw installer.
-; The mascot shows on the Welcome/Finished pages via WizardImageFile above.
-SetupAppTitle=Logix
-SetupWindowTitle=Logix Setup
-WelcomeLabel1=Welcome to Logix
-WelcomeLabel2=This sets up the Logix agent on this computer: the sign-in logbook, session timer, AnyDesk for remote help, and monitoring.%n%nIt only takes a moment. Click Next to continue.
-FinishedHeadingLabel=Logix is ready
-FinishedLabel=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
-FinishedLabelNoIcons=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
+; Warm, on-brand copy per language so the wizard reads like a product. The
+; mascot shows on the Welcome/Finished pages via WizardImageFile above.
+en.SetupAppTitle=Logix
+id.SetupAppTitle=Logix
+en.SetupWindowTitle=Logix Setup
+id.SetupWindowTitle=Pemasangan Logix
+en.WelcomeLabel1=Welcome to Logix
+id.WelcomeLabel1=Selamat datang di Logix
+en.WelcomeLabel2=This sets up the Logix agent on this computer: the sign-in logbook, session timer, AnyDesk for remote help, and monitoring.%n%nIt only takes a moment. Click Next to continue.
+id.WelcomeLabel2=Ini memasang agen Logix di komputer ini: logbook sign-in, timer sesi, AnyDesk untuk bantuan jarak jauh, dan monitoring.%n%nHanya sebentar. Klik Berikutnya untuk melanjutkan.
+en.FinishedHeadingLabel=Logix is ready
+id.FinishedHeadingLabel=Logix siap digunakan
+en.FinishedLabel=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
+id.FinishedLabel=Agen Logix sudah terpasang dan berjalan. Kunci lalu buka kembali PC ini untuk melihat layar sign-in, dan perangkat akan muncul di dashboard dalam beberapa detik.
+en.FinishedLabelNoIcons=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
+id.FinishedLabelNoIcons=Agen Logix sudah terpasang dan berjalan. Kunci lalu buka kembali PC ini untuk melihat layar sign-in, dan perangkat akan muncul di dashboard dalam beberapa detik.
+
+[CustomMessages]
+; Strings for the bespoke server-settings page and the two validation prompts,
+; read from [Code] via {cm:...} so they follow the selected language.
+en.CfgCaption=Connect to your Logix server
+id.CfgCaption=Hubungkan ke server Logix
+en.CfgDesc=Tell this device where the dashboard lives.
+id.CfgDesc=Beri tahu perangkat ini di mana dashboard berada.
+en.CfgBody=These are saved to C:\ProgramData\Logix\config.env and can be changed later. Ask your Logix admin for the server address and key.
+id.CfgBody=Data ini disimpan di C:\ProgramData\Logix\config.env dan bisa diubah nanti. Minta alamat server dan kunci ke admin Logix.
+en.CfgUrl=Server URL (e.g. https://logix.example.org):
+id.CfgUrl=URL Server (mis. https://logix.example.org):
+en.CfgKey=Server API key (the ingest key from your server):
+id.CfgKey=Kunci API server (ingest key dari server kamu):
+en.CfgDevice=Device name (leave blank to use this PC's name):
+id.CfgDevice=Nama perangkat (kosongkan untuk memakai nama PC ini):
+en.CfgNeedUrl=Please enter the Logix server URL (e.g. https://logix.example.org).
+id.CfgNeedUrl=Masukkan URL server Logix (mis. https://logix.example.org).
+en.CfgNeedKey=Please enter the server API key (the ingest key from your Logix server).
+id.CfgNeedKey=Masukkan kunci API server (ingest key dari server Logix kamu).
+en.PyMissing=Logix installed. Note: Python 3 was not found on PATH. The agent runs fine, but local session logging (log_physical.py) needs Python 3 - install it from python.org to enable it.
+id.PyMissing=Logix terpasang. Catatan: Python 3 tidak ditemukan di PATH. Agen tetap berjalan, tapi pencatatan sesi lokal (log_physical.py) butuh Python 3 - pasang dari python.org untuk mengaktifkannya.
 
 [Files]
-; Agent scripts -> C:\Program Files\Logix
-Source: "{#SrcRoot}\windows\*.ps1"; DestDir: "{app}"; Flags: ignoreversion
+; Agent scripts -> C:\Program Files\Logix. Exclude the dev/test harnesses
+; (test_*.ps1, preview_popup.ps1) -- they're for the repo, not client PCs.
+Source: "{#SrcRoot}\windows\*.ps1"; DestDir: "{app}"; Excludes: "test_*.ps1,preview_popup.ps1"; Flags: ignoreversion
 ; AnyDesk installer bundled so setup can deploy it silently
 Source: "assets\anydesk-7-0-0.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; Optional branding logo (popup uses C:\Program Files\Logix\logo.png)
@@ -108,14 +138,15 @@ var
 
 procedure InitializeWizard;
 begin
+  // Strings come from [CustomMessages] via {cm:...} so the page follows the
+  // language picked at launch (EN/ID).
   ConfigPage := CreateInputQueryPage(wpSelectDir,
-    'Connect to your Logix server',
-    'Tell this device where the dashboard lives.',
-    'These are saved to C:\ProgramData\Logix\config.env and can be changed ' +
-    'later. Ask your Logix admin for the server address and key.');
-  ConfigPage.Add('Server URL (e.g. https://logix.example.org):', False);
-  ConfigPage.Add('Server API key (the ingest key from your server):', False);
-  ConfigPage.Add('Device name (leave blank to use this PC''s name):', False);
+    ExpandConstant('{cm:CfgCaption}'),
+    ExpandConstant('{cm:CfgDesc}'),
+    ExpandConstant('{cm:CfgBody}'));
+  ConfigPage.Add(ExpandConstant('{cm:CfgUrl}'), False);
+  ConfigPage.Add(ExpandConstant('{cm:CfgKey}'), False);
+  ConfigPage.Add(ExpandConstant('{cm:CfgDevice}'), False);
   ConfigPage.Values[0] := 'http://localhost:8000';
 end;
 
@@ -128,14 +159,12 @@ begin
   begin
     if Trim(ConfigPage.Values[0]) = '' then
     begin
-      MsgBox('Please enter the Logix server URL (e.g. https://logix.example.org).',
-             mbError, MB_OK);
+      MsgBox(ExpandConstant('{cm:CfgNeedUrl}'), mbError, MB_OK);
       Result := False;
     end
     else if Trim(ConfigPage.Values[1]) = '' then
     begin
-      MsgBox('Please enter the server API key (the ingest key from your Logix server).',
-             mbError, MB_OK);
+      MsgBox(ExpandConstant('{cm:CfgNeedKey}'), mbError, MB_OK);
       Result := False;
     end;
   end;
@@ -166,8 +195,6 @@ begin
   if CurStep = ssPostInstall then
   begin
     if not Exec('cmd.exe', '/c where python || where py', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-      MsgBox('Logix installed. Note: Python 3 was not found on PATH. The agent ' +
-             'runs fine, but local session logging (log_physical.py) needs ' +
-             'Python 3 - install it from python.org to enable it.', mbInformation, MB_OK);
+      MsgBox(ExpandConstant('{cm:PyMissing}'), mbInformation, MB_OK);
   end;
 end;
