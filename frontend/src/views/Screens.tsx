@@ -14,6 +14,7 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Spinner } from "@astryxdesign/core/Spinner";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useToast } from "@astryxdesign/core/Toast";
 import { CameraIcon, ComputerDesktopIcon } from "@heroicons/react/24/outline";
@@ -27,6 +28,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 interface Tile {
   hostname: string;
   device_name: string;
+  username: string | null;
   device_id: string | null;
   shot: DeviceScreenshot | null;
   capturing: boolean;
@@ -49,8 +51,14 @@ export default function Screens() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [enlarged, setEnlarged] = useState<{ src: string; name: string; at: string } | null>(null);
+  // Reset on every mount, not just unmount -- under StrictMode the mount →
+  // unmount → mount cycle would otherwise leave this stuck false and block
+  // every setState below.
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // Build the tile list from the active hosts, mapping each to its device_id
   // (needed to read its screenshot) and its last stored capture.
@@ -64,6 +72,7 @@ export default function Screens() {
       const base: Tile[] = active.map((a) => ({
         hostname: a.hostname,
         device_name: a.device_name || a.hostname,
+        username: a.username,
         device_id: idByHost.get(a.hostname) ?? null,
         shot: null,
         capturing: false,
@@ -89,7 +98,9 @@ export default function Screens() {
     const prevAt = tile.shot?.captured_at ?? "";
     setTiles((ts) => ts?.map((t) => (t.hostname === tile.hostname ? { ...t, capturing: true } : t)) ?? ts);
     try {
-      await sendJson("/api/control/screenshot", "POST", { hostname: tile.hostname }, "Gagal meminta screenshot");
+      // A reason is required by some device policies (e.g. lab_standard); send
+      // one so the wall works regardless of policy.
+      await sendJson("/api/control/screenshot", "POST", { hostname: tile.hostname, reason: "Monitoring wall" }, "Gagal meminta screenshot");
     } catch (err) {
       toast({ body: (err as Error).message, type: "error" });
       setTiles((ts) => ts?.map((t) => (t.hostname === tile.hostname ? { ...t, capturing: false } : t)) ?? ts);
@@ -157,7 +168,13 @@ export default function Screens() {
             <Card key={t.hostname} padding={3}>
               <VStack gap={2}>
                 <HStack gap={2} align="center" justify="between">
-                  <Text type="label">{t.device_name}</Text>
+                  <HStack gap={2} align="center">
+                    <StatusDot variant="success" label="Aktif" />
+                    <VStack gap={0}>
+                      <Text type="label">{t.device_name}</Text>
+                      {t.username && <Text type="supporting" color="secondary">{t.username}</Text>}
+                    </VStack>
+                  </HStack>
                   <Button
                     label="Ambil"
                     size="sm"
