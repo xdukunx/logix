@@ -16,6 +16,7 @@
 Unicode true
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "WinMessages.nsh"
 
 ; Paths are anchored to this script's folder so compile CWD doesn't matter.
 !define SRC      "${__FILEDIR__}\..\.."
@@ -37,9 +38,6 @@ BrandingText "Logix"
 Icon "${INSTDIRR}\branding\logix.ico"
 UninstallIcon "${INSTDIRR}\branding\logix.ico"
 
-; Mascot strip down the left of every page -- the Comnyang cat-next-to-progress look.
-AddBrandingImage left 96
-
 Var Dialog
 Var UrlBox
 Var KeyBox
@@ -47,6 +45,7 @@ Var DeviceBox
 Var ServerUrl
 Var ServerApiKey
 Var DeviceName
+Var TitleFont
 
 ; --- Languages (both bundled with NSIS; no custom translation needed) --------
 LoadLanguageFile "${NSISDIR}\Contrib\Language files\English.nlf"
@@ -78,8 +77,7 @@ UninstPage uninstConfirm
 UninstPage instfiles
 
 Function .onInit
-  InitPluginsDir
-  File "/oname=$PLUGINSDIR\brand.bmp" "${INSTDIRR}\branding\wizard-small.bmp"
+!ifndef PREVIEW
   ; Language picker (official languages.nsi pattern): push "", then id/name
   ; pairs, then "A" (auto-count), then the dialog title/text.
   Push ""
@@ -92,10 +90,7 @@ Function .onInit
   Pop $LANGUAGE
   StrCmp $LANGUAGE "cancel" 0 +2
     Abort
-FunctionEnd
-
-Function .onGUIInit
-  SetBrandingImage /RESIZETOFIT "$PLUGINSDIR\brand.bmp"
+!endif
 FunctionEnd
 
 Function ConfigPageCreate
@@ -105,24 +100,30 @@ Function ConfigPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 22u "$(CfgTitle)"
+  ; Header: the mascot as a crisp icon (from the installer's own icon, no
+  ; stretching) next to a bold "Logix" wordmark -- Comnyang-style small logo,
+  ; not a full-height strip.
+  ${NSD_CreateIcon} 0 0 24u 24u ""
   Pop $0
-  ${NSD_CreateLabel} 0 24u 100% 30u "$(CfgBody)"
+  ${NSD_SetIconFromInstaller} $0 $1
+  ${NSD_CreateLabel} 30u 6u 240u 16u "Logix"
   Pop $0
+  CreateFont $TitleFont "$(^Font)" "13" "700"
+  SendMessage $0 ${WM_SETFONT} $TitleFont 1
 
-  ${NSD_CreateLabel} 0 60u 100% 11u "$(CfgUrl)"
+  ${NSD_CreateLabel} 0 30u 100% 11u "$(CfgUrl)"
   Pop $0
-  ${NSD_CreateText} 0 72u 100% 12u "http://localhost:8000"
+  ${NSD_CreateText} 0 42u 100% 13u "http://localhost:8000"
   Pop $UrlBox
 
-  ${NSD_CreateLabel} 0 90u 100% 11u "$(CfgKey)"
+  ${NSD_CreateLabel} 0 64u 100% 11u "$(CfgKey)"
   Pop $0
-  ${NSD_CreateText} 0 102u 100% 12u ""
+  ${NSD_CreateText} 0 76u 100% 13u ""
   Pop $KeyBox
 
-  ${NSD_CreateLabel} 0 120u 100% 11u "$(CfgDev)"
+  ${NSD_CreateLabel} 0 98u 100% 11u "$(CfgDev)"
   Pop $0
-  ${NSD_CreateText} 0 132u 100% 12u ""
+  ${NSD_CreateText} 0 110u 100% 13u ""
   Pop $DeviceBox
 
   nsDialogs::Show
