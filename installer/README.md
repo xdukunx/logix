@@ -6,6 +6,11 @@ installs the Logix agent on any Windows device: sign-in/timer agent, AnyDesk 7
 monitor scheduled task, and the central-server settings — all elevated and
 unattended after the operator fills a couple of fields.
 
+> **Two installers, same payload.** This Inno Setup wizard is the default. A
+> compact **NSIS (Comnyang-style)** alternative lives in [nsis/](nsis/) — same
+> install logic, smaller window, mascot strip, EN/ID picker. Use whichever look
+> you prefer.
+
 ## What it installs
 | Path | Contents |
 |---|---|
