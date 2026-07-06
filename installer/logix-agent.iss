@@ -34,6 +34,10 @@ AppPublisher={#AppPublisher}
 DefaultDirName={commonpf64}\Logix
 DisableDirPage=yes
 DisableProgramGroupPage=yes
+; Snappier, Comnyang-style minimal flow: skip the extra "ready to install"
+; confirmation page -- the one custom page (server settings) already gates the
+; only decision the operator makes.
+DisableReadyPage=yes
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
@@ -53,6 +57,24 @@ WizardImageFile={#BrandDir}\wizard-image.bmp
 #if FileExists(BrandBase + "wizard-small.bmp")
 WizardSmallImageFile={#BrandDir}\wizard-small.bmp
 #endif
+
+[Languages]
+; English only for now. To add a language picker like Comnyang's EN/KO/JA,
+; add more Name/MessagesFile lines here (Inno ships many under
+; compiler:Languages\; an Indonesian.isl can be dropped in installer\ and
+; referenced as "MessagesFile: Indonesian.isl").
+Name: "en"; MessagesFile: "compiler:Default.isl"
+
+[Messages]
+; Warm, on-brand copy so the wizard reads like a product, not a raw installer.
+; The mascot shows on the Welcome/Finished pages via WizardImageFile above.
+SetupAppTitle=Logix
+SetupWindowTitle=Logix Setup
+WelcomeLabel1=Welcome to Logix
+WelcomeLabel2=This sets up the Logix agent on this computer: the sign-in logbook, session timer, AnyDesk for remote help, and monitoring.%n%nIt only takes a moment. Click Next to continue.
+FinishedHeadingLabel=Logix is ready
+FinishedLabel=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
+FinishedLabelNoIcons=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
 
 [Files]
 ; Agent scripts -> C:\Program Files\Logix
@@ -87,13 +109,36 @@ var
 procedure InitializeWizard;
 begin
   ConfigPage := CreateInputQueryPage(wpSelectDir,
-    'Central Server', 'Where should this device report?',
-    'Enter the Logix central server details. These are written to ' +
-    'C:\ProgramData\Logix\config.env and can be changed later.');
-  ConfigPage.Add('Server URL (e.g. http://192.168.1.10:8000):', False);
-  ConfigPage.Add('Server API key (X-API-Key / ingest key):', False);
-  ConfigPage.Add('Device name (blank = this PC''s hostname):', False);
+    'Connect to your Logix server',
+    'Tell this device where the dashboard lives.',
+    'These are saved to C:\ProgramData\Logix\config.env and can be changed ' +
+    'later. Ask your Logix admin for the server address and key.');
+  ConfigPage.Add('Server URL (e.g. https://logix.example.org):', False);
+  ConfigPage.Add('Server API key (the ingest key from your server):', False);
+  ConfigPage.Add('Device name (leave blank to use this PC''s name):', False);
   ConfigPage.Values[0] := 'http://localhost:8000';
+end;
+
+// Don't let the operator continue with an empty server URL or key -- a device
+// that can't reach the server or authenticate is a silent dead-end otherwise.
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = ConfigPage.ID then
+  begin
+    if Trim(ConfigPage.Values[0]) = '' then
+    begin
+      MsgBox('Please enter the Logix server URL (e.g. https://logix.example.org).',
+             mbError, MB_OK);
+      Result := False;
+    end
+    else if Trim(ConfigPage.Values[1]) = '' then
+    begin
+      MsgBox('Please enter the server API key (the ingest key from your Logix server).',
+             mbError, MB_OK);
+      Result := False;
+    end;
+  end;
 end;
 
 function GetServerUrl(Param: string): string;
@@ -123,6 +168,6 @@ begin
     if not Exec('cmd.exe', '/c where python || where py', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('Logix installed. Note: Python 3 was not found on PATH. The agent ' +
              'runs fine, but local session logging (log_physical.py) needs ' +
-             'Python 3 — install it from python.org to enable it.', mbInformation, MB_OK);
+             'Python 3 - install it from python.org to enable it.', mbInformation, MB_OK);
   end;
 end;
