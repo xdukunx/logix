@@ -49,6 +49,16 @@ export default function AlertsBell() {
     }
   };
 
+  const resolve = async (alertId: number) => {
+    try {
+      await postEmpty(`/api/alerts/${alertId}/resolve`, "Gagal menyelesaikan peringatan");
+      toast({ body: "Peringatan diselesaikan." });
+      refresh();
+    } catch (err) {
+      toast({ body: (err as Error).message, type: "error" });
+    }
+  };
+
   const unacknowledged = alerts.filter((a) => a.status === "active").length;
 
   return (
@@ -83,9 +93,12 @@ export default function AlertsBell() {
                           <StatusDot variant={SEVERITY_VARIANT[a.severity] ?? "accent"} label={a.severity} />
                           <Text type="label">{a.title}</Text>
                         </HStack>
-                        {!isAcknowledged && (
-                          <Button label="Tandai Diketahui" size="sm" onClick={() => acknowledge(a.id)} />
-                        )}
+                        <HStack gap={2} align="center">
+                          {!isAcknowledged && (
+                            <Button label="Tandai Diketahui" size="sm" onClick={() => acknowledge(a.id)} />
+                          )}
+                          <Button label="Selesaikan" size="sm" variant="ghost" onClick={() => resolve(a.id)} />
+                        </HStack>
                       </HStack>
                       <Text type="body">{a.message}</Text>
                       <Text type="supporting" color="secondary">

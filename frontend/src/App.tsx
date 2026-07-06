@@ -20,6 +20,7 @@ import {
   DocumentArrowDownIcon,
   ServerStackIcon,
   SignalIcon,
+  Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 
 import { clearToken, fetchWithAuth, getToken, setOnSessionExpired, setToken } from "./api";
@@ -30,12 +31,14 @@ import { usePolling } from "./util";
 import Analytics from "./views/Analytics";
 import Devices from "./views/Devices";
 import Monitoring from "./views/Monitoring";
+import Screens from "./views/Screens";
 import Settings from "./views/Settings";
 
 const TABS = {
   monitoring: { title: "Monitoring", icon: SignalIcon, view: Monitoring },
-  analytics: { title: "Analytics", icon: ChartBarIcon, view: Analytics },
+  screens: { title: "Layar", icon: Squares2X2Icon, view: Screens },
   devices: { title: "Devices", icon: ServerStackIcon, view: Devices },
+  analytics: { title: "Analytics", icon: ChartBarIcon, view: Analytics },
   settings: { title: "Settings", icon: Cog6ToothIcon, view: Settings },
 } as const;
 

@@ -23,6 +23,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import { fetchWithAuth, getJson, postEmpty, sendJson } from "../api";
+import EnrollDialog from "../components/EnrollDialog";
 import StatCard from "../components/StatCard";
 import type { CommandStatus, Device, DeviceDetail, DeviceScreenshot, SyncStatus } from "../types";
 import { formatDateTime, timeAgo, usePolling } from "../util";
@@ -143,8 +144,28 @@ export default function Devices() {
   const requestScreenshot = (hostname: string) => {
     const reason = prompt(`Alasan mengambil screenshot ${hostname} (kebijakan device dapat mewajibkan ini):`, "");
     if (reason === null) return;
+    const prevAt = screenshot?.captured_at ?? "";
     sendJson("/api/control/screenshot", "POST", { hostname, reason: reason.trim() }, "Gagal meminta screenshot")
-      .then(() => notify("Permintaan screenshot dikirim. Hasil muncul di sini setelah device merespons (heartbeat berikutnya)."))
+      .then(async () => {
+        notify("Permintaan screenshot dikirim. Menunggu device merespons...");
+        // Poll for the new capture so it appears here without reopening.
+        if (!detailId) return;
+        for (let i = 0; i < 12; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          try {
+            const res = await fetchWithAuth(`/api/devices/${detailId}/screenshot`);
+            if (res.ok) {
+              const shot: DeviceScreenshot = await res.json();
+              if (shot.captured_at !== prevAt) {
+                setScreenshot(shot);
+                return;
+              }
+            }
+          } catch {
+            /* keep polling */
+          }
+        }
+      })
       .catch((err) => notify(err.message, true));
   };
 
@@ -168,7 +189,10 @@ export default function Devices() {
 
   return (
     <VStack gap={6}>
-      <Heading level={3}>Devices</Heading>
+      <HStack gap={3} align="center" justify="between">
+        <Heading level={3}>Devices</Heading>
+        <EnrollDialog onEnrolled={refresh} />
+      </HStack>
 
       <Grid columns={{ minWidth: 170, repeat: "fit" }} gap={4}>
         <StatCard label="Total Devices" value={counts.total} icon={ServerStackIcon} variant="blue" />
