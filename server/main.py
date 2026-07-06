@@ -2261,9 +2261,16 @@ def favicon():
     return Response(status_code=204)
 
 
-# Mount frontend static directory
-static_dir = BASE_DIR / "static"
-static_dir.mkdir(exist_ok=True)
+# Mount frontend static directory. Prefers the built React dashboard
+# (frontend/dist, produced by `npm run build` in frontend/) when present;
+# falls back to the legacy vanilla-JS dashboard in server/static/ so a
+# checkout without Node still serves a working UI.
+_react_dist = BASE_DIR.parent / "frontend" / "dist"
+if (_react_dist / "index.html").exists():
+    static_dir = _react_dist
+else:
+    static_dir = BASE_DIR / "static"
+    static_dir.mkdir(exist_ok=True)
 
 @app.get("/")
 def read_root():

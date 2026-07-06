@@ -894,23 +894,21 @@ function Build-LogbookPopupXaml($cfg) {
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" CornerRadius="18,18,0,0" Padding="30,22,30,22" BorderBrush="$text" BorderThickness="0,0,0,1">
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="330" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Image Grid.Column="0" Name="LogoImage" Width="260" Height="72" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center"
-                   SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" />
-            <TextBlock Grid.Column="0" Name="LogoText" Text="$logoText" FontFamily="Poppins, Montserrat, Segoe UI Semibold" FontSize="30"
-                       FontWeight="SemiBold" Foreground="$text" VerticalAlignment="Center" />
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-              <TextBlock Text="$title" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="29" FontWeight="SemiBold"
-                         Foreground="$text" HorizontalAlignment="Right" />
-              <TextBlock Text="$subtitle" FontFamily="Montserrat, Poppins, Segoe UI" FontSize="14" Foreground="$muted"
-                         HorizontalAlignment="Right" Margin="0,2,0,0" />
-            </StackPanel>
-          </Grid>
+        <Border Grid.Row="0" CornerRadius="18,18,0,0" Padding="30,26,30,24" BorderBrush="$text" BorderThickness="0,0,0,1">
+          <!-- Mascot hero: the faculty mascot (MascotImage, populated from
+               branding.logoPath in logbook_popup.ps1) sits centred above the
+               wordmark and title. LogoText stays the wordmark fallback and is
+               always shown beneath the mascot. -->
+          <StackPanel HorizontalAlignment="Center">
+            <Image Name="MascotImage" Height="132" MaxWidth="240" Stretch="Uniform" HorizontalAlignment="Center"
+                   SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" Margin="0,0,0,12" />
+            <TextBlock Name="LogoText" Text="$logoText" FontFamily="Poppins, Montserrat, Segoe UI Semibold" FontSize="30"
+                       FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
+            <TextBlock Text="$title" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="20" FontWeight="SemiBold"
+                       Foreground="$text" HorizontalAlignment="Center" Margin="0,4,0,0" />
+            <TextBlock Text="$subtitle" FontFamily="Montserrat, Poppins, Segoe UI" FontSize="13" Foreground="$muted"
+                       HorizontalAlignment="Center" Margin="0,2,0,0" />
+          </StackPanel>
         </Border>
 
         <StackPanel Grid.Row="1" Margin="36,28,36,34">

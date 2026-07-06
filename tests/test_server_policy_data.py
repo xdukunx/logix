@@ -51,7 +51,7 @@ def test_seeds_exactly_seven_policy_profiles(monkeypatch, tmp_path):
         assert isinstance(caps, list) and len(caps) > 0
 
 
-def test_seeds_fourteen_allowlist_rows_all_allowed(monkeypatch, tmp_path):
+def test_seeds_allowlist_rows_mirroring_policy_command_rules(monkeypatch, tmp_path):
     module = _load_main(monkeypatch, tmp_path)
     with TestClient(module.app):
         conn = module.get_db()
@@ -60,11 +60,20 @@ def test_seeds_fourteen_allowlist_rows_all_allowed(monkeypatch, tmp_path):
         finally:
             conn.close()
 
-    assert len(rows) == 14  # 7 policies x 2 commands
-    for r in rows:
-        assert r["command_type"] in ("LOCK", "BROADCAST")
-        assert r["allowed"] == 1
-        assert r["requires_reason"] == 0
+    assert len(rows) == 42  # 7 policies x 6 commands
+    # Every (policy, command) row must carry exactly the (allowed,
+    # requires_reason) pair from POLICY_COMMAND_RULES -- including the
+    # privacy-first profiles where SCREENSHOT/power commands are NOT allowed.
+    seeded = {
+        (r["policy_name"], r["command_type"]): (r["allowed"], r["requires_reason"])
+        for r in rows
+    }
+    expected = {
+        (policy, command): rule
+        for policy, commands in module.POLICY_COMMAND_RULES.items()
+        for command, rule in commands.items()
+    }
+    assert seeded == expected
 
 
 def test_reseeding_on_restart_is_idempotent(monkeypatch, tmp_path):
@@ -85,7 +94,7 @@ def test_reseeding_on_restart_is_idempotent(monkeypatch, tmp_path):
         conn.close()
 
     assert policy_count == 7
-    assert allowlist_count == 14
+    assert allowlist_count == 42
 
 
 def test_allowlist_references_only_existing_policies(monkeypatch, tmp_path):

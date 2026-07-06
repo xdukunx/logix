@@ -12,6 +12,10 @@ installer/assets/*.exe
 installer/Output/
 windows/*.exe
 windows/logo.png
+# Generated mascot branding — rebuilt from installer/branding/mascot-source.*
+installer/branding/wizard-image.bmp
+installer/branding/wizard-small.bmp
+installer/branding/logix.ico
 
 # Databases — contain all PII (names, NIM, IPs, session records)
 *.db
@@ -69,3 +73,4 @@ Thumbs.db
 node_modules/
 .idea/
 .vscode/
+frontend/dist/

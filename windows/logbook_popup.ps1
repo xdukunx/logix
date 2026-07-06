@@ -112,15 +112,18 @@ $window.Activate() | Out-Null
 
 $bg = New-BlurredBackgroundImage
 if ($bg -ne $null) { $window.FindName('BgImage').Source = $bg }
+# Mascot hero: load branding.logoPath (the mascot PNG the installer lays down
+# at C:\Program Files\Logix\logo.png) into MascotImage above the wordmark. The
+# LogoText wordmark stays visible beneath it, so a missing/broken image just
+# leaves a clean wordmark-only header.
 $logoPath = [string]$cfg.branding.logoPath
 if (Test-Path $logoPath) {
     try {
-        $logo = New-Object System.Windows.Media.Imaging.BitmapImage
-        $logo.BeginInit(); $logo.UriSource = New-Object System.Uri($logoPath); $logo.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $logo.EndInit(); $logo.Freeze()
-        $window.FindName('LogoImage').Source = $logo
-        $window.FindName('LogoImage').Visibility = 'Visible'
-        $window.FindName('LogoText').Visibility = 'Collapsed'
-    } catch { Write-LogbookError "Logo load failed: $($_.Exception.Message)" }
+        $mascot = New-Object System.Windows.Media.Imaging.BitmapImage
+        $mascot.BeginInit(); $mascot.UriSource = New-Object System.Uri($logoPath); $mascot.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $mascot.EndInit(); $mascot.Freeze()
+        $window.FindName('MascotImage').Source = $mascot
+        $window.FindName('MascotImage').Visibility = 'Visible'
+    } catch { Write-LogbookError "Mascot load failed: $($_.Exception.Message)" }
 }
 # SessionBadge existed in the older layout, but the revamped layout removes it.
 # Keep this guarded so the popup does not crash when the element is absent.
