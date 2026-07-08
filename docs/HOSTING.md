@@ -16,35 +16,61 @@ Python + SQLite (the DB file is created automatically on first run).
 
 ## 1. One-command setup (recommended)
 
+**Fresh Linux/macOS host, one line** — clones the repo, checks/installs
+Python + git, builds the dashboard if Node is available, then runs the
+installer below:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xdukunx/logix/main/install/bootstrap-server.sh | bash
+```
+
+**Windows**, same idea:
+
+```powershell
+irm https://raw.githubusercontent.com/xdukunx/logix/main/install/bootstrap-server.ps1 | iex
+```
+
+Like any pipe-to-shell installer, you should read it first —
+`curl -fsSL <url> -o bootstrap-server.sh && less bootstrap-server.sh`. It's a
+thin wrapper: fetch the code, best-effort install prerequisites, build the
+dashboard, then hand off to the same `install/setup_server.py` described
+below — nothing it does isn't visible in that one file plus this one.
+
+To pass flags (admin emails, `--service`, a custom install dir, …) instead of
+answering prompts:
+
+```bash
+# Linux/macOS — bash -s -- forwards args through the pipe
+curl -fsSL .../bootstrap-server.sh | bash -s -- --admin-emails you@example.org --service
+```
+```powershell
+# Windows — irm | iex can't take named args; download then run instead
+iwr -useb .../bootstrap-server.ps1 -OutFile bootstrap-server.ps1
+.\bootstrap-server.ps1 -AdminEmails "you@example.org" -Service
+```
+
+Already have the repo cloned, or prefer to see every step yourself? Run the
+installer directly — this is exactly what the one-liner above calls after
+fetching the code and building the dashboard:
+
 ```bash
 git clone https://github.com/xdukunx/logix.git
 cd logix
+cd frontend && npm install && npm run build && cd ..   # optional — builds the React dashboard
 python3 install/setup_server.py --install-deps --service
 ```
 
-This is interactive: it asks for admin email(s), Google OAuth (optional),
-allowed origins; **generates a strong device API key**; writes `server/.env`;
-installs dependencies; and (with `--service`, run elevated) registers the
-server to start on every boot — systemd on Linux, launchd on macOS, Task
-Scheduler on Windows. At the end it prints the exact `LOGIX_SERVER_URL` /
-`LOGIX_SERVER_API_KEY` pair to give each device.
+Either way it's interactive: it asks for admin email(s), Google OAuth
+(optional), allowed origins; **generates a strong device API key**; writes
+`server/.env`; installs dependencies; and (with `--service`, run elevated)
+registers the server to start on every boot — systemd on Linux, launchd on
+macOS, Task Scheduler on Windows. At the end it prints the exact
+`LOGIX_SERVER_URL` / `LOGIX_SERVER_API_KEY` pair to give each device.
 
 Every value can also be passed as a flag (`--admin-emails`, `--ingest-key`,
-`--port`, …) for unattended setup — run with `--help` for the list.
-
-### Build the dashboard once
-
-The dashboard is a React app that must be built once (it's served by the
-Python server):
-
-```bash
-cd frontend
-npm install && npm run build     # produces frontend/dist/
-```
-
-If the server host has no Node.js, build `frontend/dist/` on another machine
-and copy it over. If `dist/` is absent, the server falls back to the legacy
-static dashboard automatically.
+`--port`, …) for unattended setup — run `setup_server.py --help` for the list.
+If the server host has no Node.js, the dashboard build is skipped and the
+server falls back to serving the legacy static UI automatically.
 
 ---
 
