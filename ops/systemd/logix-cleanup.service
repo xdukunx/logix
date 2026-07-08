@@ -1,0 +1,11 @@
+# Logix report cleanup (oneshot, triggered daily by logix-cleanup.timer).
+[Unit]
+Description=Logix generated-report cleanup
+After=network.target
+
+[Service]
+Type=oneshot
+User=logix
+WorkingDirectory=/opt/logix
+EnvironmentFile=-/opt/logix/server/.env
+ExecStart=/usr/bin/python3 /opt/logix/ops/cleanup_reports.py

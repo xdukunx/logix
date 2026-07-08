@@ -8,6 +8,10 @@ download fleet-wide reports.
 It's a small FastAPI app with **no Docker and no external database** — just
 Python + SQLite (the DB file is created automatically on first run).
 
+> **Running it in production?** After the setup below, wire up day-2 operations
+> — backups, monitoring/alerting, log handling, capacity limits — from the
+> **[Operations Runbook](RUNBOOK.md)**. System overview: **[Architecture](ARCHITECTURE.md)**.
+
 ---
 
 ## 1. One-command setup (recommended)
