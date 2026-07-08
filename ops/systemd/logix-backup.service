@@ -1,0 +1,14 @@
+# Logix daily DB backup (oneshot, triggered by logix-backup.timer).
+# Install: copy this + the .timer to /etc/systemd/system/, adjust the paths /
+# User below to match your deploy (HOSTING.md uses /opt/logix and user 'logix'),
+# then:  sudo systemctl daemon-reload && sudo systemctl enable --now logix-backup.timer
+[Unit]
+Description=Logix central database backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=logix
+WorkingDirectory=/opt/logix
+EnvironmentFile=-/opt/logix/server/.env
+ExecStart=/usr/bin/python3 /opt/logix/ops/backup_db.py

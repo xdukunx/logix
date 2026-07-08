@@ -1,0 +1,14 @@
+# Logix ops watchdog (oneshot, triggered every 5 min by logix-watchdog.timer).
+# Needs TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (the script reads server/.env
+# itself; EnvironmentFile below is belt-and-suspenders). Install like the
+# backup unit -- see ops/README.md / docs/RUNBOOK.md.
+[Unit]
+Description=Logix ops watchdog (health + error-spike + backup -> Telegram)
+After=network.target
+
+[Service]
+Type=oneshot
+User=logix
+WorkingDirectory=/opt/logix
+EnvironmentFile=-/opt/logix/server/.env
+ExecStart=/usr/bin/python3 /opt/logix/ops/watchdog.py

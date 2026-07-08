@@ -1,0 +1,10 @@
+# Runs the watchdog every 5 minutes (first run 2 min after boot).
+[Unit]
+Description=Run Logix ops watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

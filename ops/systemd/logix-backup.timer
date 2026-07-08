@@ -1,0 +1,11 @@
+# Runs logix-backup.service every day at 02:30. Persistent=true catches up a
+# missed run (e.g. the host was off) on next boot.
+[Unit]
+Description=Daily Logix database backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

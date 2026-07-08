@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import sqlite3
 import subprocess
 import secrets
@@ -7,6 +8,7 @@ import urllib.request
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
@@ -17,6 +19,50 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 app = FastAPI(title="Logix Central Admin Server")
+
+
+# --- Logging ----------------------------------------------------------------
+# Structured server logs so production failures leave a trace (the old
+# best-effort `except: pass` blocks were silent). Logs go to stdout -- captured
+# by journald under systemd -- AND to a rotating file the ops watchdog scans
+# for ERROR spikes. Level via LOGIX_LOG_LEVEL (default INFO). No PII is logged:
+# messages describe *what* failed, never the row contents.
+def _setup_logging() -> logging.Logger:
+    log_dir = Path(__file__).resolve().parent / "logs"
+    try:
+        log_dir.mkdir(exist_ok=True)
+    except Exception:
+        log_dir = None
+    level = getattr(logging, os.environ.get("LOGIX_LOG_LEVEL", "INFO").upper(), logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    lg = logging.getLogger("logix")
+    lg.setLevel(level)
+    lg.handlers.clear()
+    stream = logging.StreamHandler()
+    stream.setFormatter(fmt)
+    lg.addHandler(stream)
+    if log_dir is not None:
+        try:
+            fileh = RotatingFileHandler(log_dir / "logix.log", maxBytes=5_000_000,
+                                        backupCount=5, encoding="utf-8")
+            fileh.setFormatter(fmt)
+            lg.addHandler(fileh)
+        except Exception:
+            pass  # stdout logging still works even if the file handler can't open
+    lg.propagate = False
+    return lg
+
+
+logger = _setup_logging()
+
+
+# Log any unhandled exception with a traceback (HTTPException is routed to
+# FastAPI's own handler and is not caught here), then return a clean 500 that
+# leaks no internals to the client.
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # --- .env autoload -----------------------------------------------------------
@@ -977,6 +1023,7 @@ def startup_event():
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CONFIG, f, indent=4)
+    logger.info("Logix server started (dev_mode=%s, db=%s)", LOGIX_DEV_MODE, DB_PATH.name)
 
 
 # Google OAuth configuration variables
@@ -1156,7 +1203,7 @@ def get_config():
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            pass
+            logger.warning("Failed to read %s; serving defaults", CONFIG_PATH, exc_info=True)
     return DEFAULT_CONFIG
 
 
@@ -1187,7 +1234,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
         finally:
             conn.close()
     except Exception:
-        pass
+        logger.warning("heartbeat: upsert_device failed for %s", payload.hostname, exc_info=True)
 
     HEARTBEATS[payload.hostname] = {
         "status": payload.status.upper(),
@@ -1208,7 +1255,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
             finally:
                 conn.close()
         except Exception:
-            pass
+            logger.warning("heartbeat: apply_command_acks failed for %s", payload.hostname, exc_info=True)
 
     # Housekeeping: expire anything (this device's queue or any other's)
     # that has sat 'queued' past COMMAND_TTL_MINUTES -- see
@@ -1222,7 +1269,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
         finally:
             conn.close()
     except Exception:
-        pass
+        logger.warning("heartbeat: reconcile_expired_actions failed", exc_info=True)
 
     # Retrieve pending commands for this workstation -- anything past its
     # TTL was already purged from PENDING_COMMANDS above, so everything
@@ -1735,7 +1782,7 @@ def queue_command(email: str, hostname: str, command_type: str, param: str = "",
         finally:
             conn.close()
     except Exception:
-        pass
+        logger.warning("queue_command: audit write failed for %s %s", command_type, hostname, exc_info=True)
     return command_id
 
 
@@ -1784,7 +1831,7 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
             finally:
                 conn.close()
         except Exception:
-            pass
+            logger.warning("broadcast: audit write failed for ALL", exc_info=True)
         return {"status": "success", "detail": detail}
 
     enforce_command_policy(host, "BROADCAST", payload.reason)

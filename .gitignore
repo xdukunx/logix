@@ -40,6 +40,11 @@ output/
 *.log
 logs/
 
+# Local DB backups (contain the same PII as the DB — *.db already blocks these,
+# listed explicitly for clarity)
+backups/
+server/backups/
+
 # Google service-account credentials (for future GSheet sync)
 # NEVER commit these — they grant write access to the sheet.
 service_account.json
