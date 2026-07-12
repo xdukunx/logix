@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; background: #ddd6c8; color: #2b2621; -webkit-font-smoothing: antialiased; }
+  .serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  @keyframes lx-idle { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+  @keyframes lx-hb { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
+  .lx-shape { filter: drop-shadow(0 18px 40px rgba(0,0,0,.55)); }
+</style>
+</helmet>
+
+<div style="max-width: 1400px; margin: 0 auto; background:#f7f4ee; box-shadow:0 40px 120px -50px rgba(58,46,30,.6); border-left:1px solid #e7e0d2; border-right:1px solid #e7e0d2; padding:52px 56px 80px;">
+  <div style="margin-bottom:40px;padding-bottom:32px;border-bottom:2px solid #2b2621;">
+    <div style="display:flex;align-items:center;gap:11px;margin-bottom:20px;"><div class="mono" style="width:28px;height:28px;border-radius:6px;background:#2563eb;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:13px;">&gt;_</div><span style="font-size:14px;font-weight:700;letter-spacing:0.22em;color:#2b2621;">LOGIX</span><span style="margin-left:auto;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#a8a08e;">Client · Timer Widget</span></div>
+    <div class="serif" style="font-size:15px;font-style:italic;color:#b5622f;margin-bottom:12px;">Hours on screen, never distracting.</div>
+    <h1 class="serif" style="font-size:46px;font-weight:600;line-height:1.02;letter-spacing:-0.02em;margin:0 0 14px;color:#23201b;">An always&#8209;on&#8209;top timer, in three&nbsp;states.</h1>
+    <p style="font-size: 14px; color: #6b6456; margin: 0; max-width: 780px; line-height: 1.6;">Fixed width (260px), variable height. A non-rectangular shape drawn with a vector <span class="serif" style="font-style:italic;">Path</span> — a clipped tab notch top-right — on a <span class="serif" style="font-style:italic;">#0B1017</span> surface with a hairline accent stroke, draggable. The clock is the hero; everything else is quiet. Height animates between states; the Path + Clip regenerate per height so the outline never tears.</p>
+  </div>
+
+  <!-- ============ DESKTOP COMPOSITE ============ -->
+  <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #b5622f; margin-bottom: 14px;">Composited on a lab desktop — the three heights</div>
+  <div style="position: relative; border-radius: 14px; overflow: hidden; border: 1px solid #cbc2af; margin-bottom: 44px; height: 560px; background:
+    radial-gradient(1100px 700px at 22% 12%, #16233a, transparent 55%),
+    linear-gradient(160deg, #0c1424, #070b14 72%);">
+    <!-- fake app windows -->
+    <div style="position: absolute; left: 46px; top: 42px; width: 460px; height: 300px; border-radius: 10px; background: #0d1119; border: 1px solid #1c2432; box-shadow: 0 20px 50px rgba(0,0,0,.4); overflow: hidden;">
+      <div style="height: 30px; background: #12161f; border-bottom: 1px solid #1c2432; display: flex; align-items: center; gap: 6px; padding: 0 11px;"><span style="width: 10px; height: 10px; border-radius: 999px; background: #ef4d5a;"></span><span style="width: 10px; height: 10px; border-radius: 999px; background: #f5b942;"></span><span style="width: 10px; height: 10px; border-radius: 999px; background: #2fbf58;"></span><span class="mono" style="font-size: 11px; color: #56607a; margin-left: 8px;">gpu-a100 — ssh — dhana</span></div>
+      <div class="mono" style="padding: 12px 14px; font-size: 11.5px; line-height: 1.7; color: #7f8ba3;"><span style="color:#5fa9f6;">dhana@gpu-a100</span>:~$ python run_dft.py --batch cat-07<br>[ 12:41 ] loading basis set def2-TZVP…<br>[ 12:43 ] SCF cycle 7 · <span style="color:#63d68b;">converged</span><br><span style="color:#5fa9f6;">dhana@gpu-a100</span>:~$ <span style="color:#e8edf5;">_</span></div>
+    </div>
+    <div style="position: absolute; left: 250px; top: 250px; width: 420px; height: 250px; border-radius: 10px; background: #0d1017; border: 1px solid #1c2432; box-shadow: 0 20px 50px rgba(0,0,0,.45); overflow: hidden;">
+      <div style="height: 30px; background: #12161f; border-bottom: 1px solid #1c2432; display: flex; align-items: center; padding: 0 12px; font-size: 11px; color: #56607a;">Molecule Viewer — cat-07.xyz</div>
+      <div style="padding: 20px; display: flex; align-items: center; justify-content: center; height: calc(100% - 30px);"><div style="width: 120px; height: 120px; border-radius: 999px; background: radial-gradient(circle at 38% 32%, #6aa6ff, #24406e 70%); box-shadow: 0 0 40px rgba(37,99,235,.4);"></div></div>
+    </div>
+    <!-- taskbar -->
+    <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: rgba(8,11,18,.85); border-top: 1px solid #1c2432; display: flex; align-items: center; padding: 0 14px; gap: 14px;">
+      <span class="mono" style="width: 22px; height: 22px; border-radius: 5px; background: #2563eb; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; color: #fff;">&gt;_</span>
+      <span style="width: 22px; height: 22px; border-radius: 5px; background: #1c2432;"></span>
+      <span class="mono" style="margin-left: auto; font-size: 12px; color: #93a1b8;">14:32 · Rab 18/06</span>
+    </div>
+
+    <!-- ===== the three widgets ===== -->
+    <!-- COLLAPSED -->
+    <div style="position: absolute; right: 470px; top: 40px;">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #93a1b8; margin-bottom: 8px; text-align: center;">Collapsed</div>
+      <div class="lx-shape" style="width: 210px; background: #0b1017; border: 1px solid #223451; border-radius: 12px; clip-path: polygon(0 0, 74% 0, 80% 14px, 100% 14px, 100% 100%, 0 100%); padding: 15px 16px;">
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <span style="width: 9px; height: 9px; border-radius: 999px; background: #22c55e; animation: lx-idle 3.2s ease-in-out infinite;"></span>
+          <span style="display:inline-flex;align-items:center;gap:5px;background:#10233f;border:1px solid #24406e;border-radius:5px;padding:2px 7px;"><span class="mono" style="color: #4b8cf5; font-size: 11px; font-weight:700;">&gt;_</span><span style="font-size: 11px; font-weight: 700; color: #cfe0fb; letter-spacing:.04em;">SSH</span></span>
+          <span style="margin-left: auto; color: #3d4a5e;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"></path></svg></span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 5px; margin-top: 11px;">
+          <span class="mono" style="font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: .01em; color:#eef3fb;">02:14</span>
+          <span class="mono" style="font-size: 16px; color: #5b6b82;">41</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEFAULT -->
+    <div style="position: absolute; right: 210px; top: 40px;">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #93a1b8; margin-bottom: 8px; text-align: center;">Default</div>
+      <div class="lx-shape" style="width: 210px; background: #0b1017; border: 1px solid #223451; border-radius: 12px; clip-path: polygon(0 0, 74% 0, 80% 14px, 100% 14px, 100% 100%, 0 100%); padding: 15px 16px 16px;">
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <span style="width: 9px; height: 9px; border-radius: 999px; background: #22c55e; animation: lx-idle 3.2s ease-in-out infinite;"></span>
+          <span style="display:inline-flex;align-items:center;gap:5px;background:#10233f;border:1px solid #24406e;border-radius:5px;padding:2px 7px;"><span class="mono" style="color: #4b8cf5; font-size: 11px; font-weight:700;">&gt;_</span><span style="font-size: 11px; font-weight: 700; color: #cfe0fb; letter-spacing:.04em;">SSH</span></span>
+          <span style="margin-left: auto; color: #3d4a5e;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"></path></svg></span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 5px; margin-top: 11px;">
+          <span class="mono" style="font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: .01em; color:#eef3fb;">02:14</span>
+          <span class="mono" style="font-size: 16px; color: #5b6b82;">41</span>
+        </div>
+        <div style="position: relative; height: 2px; background: #161f2c; overflow: hidden; margin: 14px 0;"><span style="position: absolute; top: 0; left: 0; height: 100%; width: 30%; background: linear-gradient(90deg, transparent, #22c55e, transparent); animation: lx-hb 2.6s linear infinite;"></span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; gap: 10px;"><span class="mono" style="font-size: 10px; letter-spacing:.06em; text-transform:uppercase; color: #5b6b82; width: 62px; flex-shrink: 0;">Nama</span><span style="font-size: 12px; color: #e8eef7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Dhana Pratama</span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono" style="font-size: 10px; letter-spacing:.06em; text-transform:uppercase; color: #5b6b82; width: 62px; flex-shrink: 0;">Tujuan</span><span style="font-size: 12px; color: #e8eef7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Running Data</span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono" style="font-size: 10px; letter-spacing:.06em; text-transform:uppercase; color: #5b6b82; width: 62px; flex-shrink: 0;">Perangkat</span><span style="font-size: 12px; color: #e8eef7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">WS-07 · GPU-A100</span></div>
+        </div>
+        <div style="margin-top: 15px; border: 1px solid #223451; border-radius: 7px; padding: 9px; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #93a1b8; display: flex; align-items: center; justify-content: center; gap: 7px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>SELESAI</div>
+      </div>
+    </div>
+
+    <!-- EXPANDED -->
+    <div style="position: absolute; right: 40px; top: 40px;">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #93a1b8; margin-bottom: 8px; text-align: center;">Expanded · message</div>
+      <div class="lx-shape" style="width: 210px; background: #0b1017; border: 1px solid #223451; border-radius: 12px; clip-path: polygon(0 0, 74% 0, 80% 14px, 100% 14px, 100% 100%, 0 100%); padding: 15px 16px 16px;">
+        <div style="display: flex; align-items: center; gap: 9px;">
+          <span style="width: 9px; height: 9px; border-radius: 999px; background: #22c55e; animation: lx-idle 3.2s ease-in-out infinite;"></span>
+          <span style="display:inline-flex;align-items:center;gap:5px;background:#10233f;border:1px solid #24406e;border-radius:5px;padding:2px 7px;"><span class="mono" style="color: #4b8cf5; font-size: 11px; font-weight:700;">&gt;_</span><span style="font-size: 11px; font-weight: 700; color: #cfe0fb; letter-spacing:.04em;">SSH</span></span>
+          <span style="margin-left: auto; color: #3d4a5e;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"></path></svg></span>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 5px; margin-top: 11px;">
+          <span class="mono" style="font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: .01em; color:#eef3fb;">02:14</span>
+          <span class="mono" style="font-size: 16px; color: #5b6b82;">41</span>
+        </div>
+        <div style="position: relative; height: 2px; background: #161f2c; overflow: hidden; margin: 14px 0;"><span style="position: absolute; top: 0; left: 0; height: 100%; width: 30%; background: linear-gradient(90deg, transparent, #22c55e, transparent); animation: lx-hb 2.6s linear infinite;"></span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; gap: 10px;"><span class="mono" style="font-size: 10px; letter-spacing:.06em; text-transform:uppercase; color: #5b6b82; width: 62px; flex-shrink: 0;">Nama</span><span style="font-size: 12px; color: #e8eef7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Dhana Pratama</span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono" style="font-size: 10px; letter-spacing:.06em; text-transform:uppercase; color: #5b6b82; width: 62px; flex-shrink: 0;">Tujuan</span><span style="font-size: 12px; color: #e8eef7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Running Data</span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono" style="font-size: 10px; letter-spacing:.06em; text-transform:uppercase; color: #5b6b82; width: 62px; flex-shrink: 0;">Perangkat</span><span style="font-size: 12px; color: #e8eef7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">WS-07 · GPU-A100</span></div>
+        </div>
+        <!-- message: signal-bar style -->
+        <div style="margin-top: 14px; background: #0e1626; border: 1px solid #223451; border-left: 3px solid #3b82f6; border-radius: 7px; padding: 11px 12px;">
+          <div style="display: flex; align-items: center; gap: 7px; margin-bottom: 5px;"><span style="color:#4b8cf5;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg></span><span style="font-size: 11px; font-weight: 700; color:#9cc2f5;">Pesan dari Admin</span><span style="margin-left:auto; width: 6px; height: 6px; border-radius: 999px; background: #ef4444;"></span></div>
+          <div style="font-size: 12px; color: #cdd6e6; line-height: 1.45;">Mohon simpan pekerjaan — lab tutup 17.00.</div>
+        </div>
+        <div style="margin-top: 12px; border: 1px solid #223451; border-radius: 7px; padding: 9px; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #93a1b8; display: flex; align-items: center; justify-content: center; gap: 7px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>SELESAI</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SELESAI BUTTON STATES ============ -->
+  <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #b5622f; margin-bottom: 6px;">"SELESAI" — visible by default, two-step to prevent misclicks</div>
+  <p style="font-size: 13px; color: #6b6456; margin: 0 0 18px; max-width: 780px; line-height:1.6;">Present at all times (no hover-to-reveal). A first press arms it; a second confirming press (or ~1.5s hold) ends the session — then calls the existing <span class="serif" style="font-style:italic;">Close-LogbookSessionAndLock</span> path unchanged. Lock / sleep remain a pause, never a departure.</p>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 44px;">
+    <div class="plate" style="background: #0b1017; border: 1px solid #161f2c; border-radius: 12px; padding: 20px; box-shadow:0 24px 50px -30px rgba(58,46,30,.5);">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing:.1em; color: #5b6b82; margin-bottom: 14px;">DEFAULT</div>
+      <div style="border: 1px solid #223451; border-radius: 7px; padding: 11px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .08em; color: #93a1b8; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>SELESAI</div>
+      <div style="font-size: 11px; color: #5b6b82; margin-top: 12px; line-height: 1.5;">Calm outline. Clearly a control, low visual pull.</div>
+    </div>
+    <div class="plate" style="background: #0b1017; border: 1px solid #161f2c; border-radius: 12px; padding: 20px; box-shadow:0 24px 50px -30px rgba(58,46,30,.5);">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing:.1em; color: #fbbf24; margin-bottom: 14px;">HOVER</div>
+      <div style="border: 1px solid #7f5320; background: rgba(245,158,11,.08); border-radius: 7px; padding: 11px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .08em; color: #fbbf24; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>SELESAI</div>
+      <div style="font-size: 11px; color: #5b6b82; margin-top: 12px; line-height: 1.5;">Warms to amber — signals it does something before the arm step.</div>
+    </div>
+    <div class="plate" style="background: #0b1017; border: 1px solid #161f2c; border-radius: 12px; padding: 20px; box-shadow:0 24px 50px -30px rgba(58,46,30,.5);">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing:.1em; color: #f87171; margin-bottom: 14px;">ARMED · CONFIRM</div>
+      <div style="border: 1px solid #ef4444; background: #ef4444; border-radius: 7px; padding: 11px; text-align: center; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>Tekan lagi untuk selesai</div>
+      <div style="font-size: 11px; color: #5b6b82; margin-top: 12px; line-height: 1.5;">Second press within 3s ends &amp; locks. Auto-reverts if ignored.</div>
+    </div>
+    <div class="plate" style="background: #0b1017; border: 1px solid #161f2c; border-radius: 12px; padding: 20px; box-shadow:0 24px 50px -30px rgba(58,46,30,.5);">
+      <div class="mono" style="font-size: 10px; font-weight: 700; letter-spacing:.1em; color: #f87171; margin-bottom: 14px;">HOLD (alt)</div>
+      <div style="position: relative; border: 1px solid #ef4444; border-radius: 7px; padding: 11px; text-align: center; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; color: #fff; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 8px;"><span style="position:absolute; left:0; top:0; bottom:0; width: 62%; background: rgba(239,68,68,.55);"></span><span style="position: relative;">Tahan… 62%</span></div>
+      <div style="font-size: 11px; color: #5b6b82; margin-top: 12px; line-height: 1.5;">Alternative: hold ~1.5s, fill sweeps then fires.</div>
+    </div>
+  </div>
+
+  <!-- ============ SHAPE COHERENCE + IDLE ============ -->
+  <div style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px;">
+    <div class="plate" style="background: #0b1017; border: 1px solid #161f2c; border-radius: 12px; padding: 22px; box-shadow:0 24px 50px -30px rgba(58,46,30,.5);">
+      <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6b82; margin-bottom: 8px;">Shape stays coherent across heights</div>
+      <p style="font-size: 12.5px; color: #93a1b8; margin: 0 0 18px; line-height: 1.55;"><span class="mono" style="color:#7f90a8;">Get-LogbookTimerShapeData</span> returns a Path where the top edge (tab notch + corners) is constant and the bottom edge is pinned to the animating height — the WindowClip shares that geometry, so the outline never tears mid-animation.</p>
+      <div style="display: flex; align-items: flex-end; gap: 20px; justify-content: center; padding: 6px 0;">
+        <div style="text-align: center;"><div style="width: 92px; height: 78px; background: #0e1626; border: 1px solid #223451; border-radius: 10px; clip-path: polygon(0 0, 70% 0, 78% 12px, 100% 12px, 100% 100%, 0 100%);"></div><div class="mono" style="font-size: 10px; color: #5b6b82; margin-top: 8px;">H≈118</div></div>
+        <div style="text-align: center;"><div style="width: 92px; height: 150px; background: #0e1626; border: 1px solid #223451; border-radius: 10px; clip-path: polygon(0 0, 70% 0, 78% 12px, 100% 12px, 100% 100%, 0 100%);"></div><div class="mono" style="font-size: 10px; color: #5b6b82; margin-top: 8px;">H≈250</div></div>
+        <div style="text-align: center;"><div style="width: 92px; height: 210px; background: #0e1626; border: 1px solid #223451; border-radius: 10px; clip-path: polygon(0 0, 70% 0, 78% 12px, 100% 12px, 100% 100%, 0 100%);"></div><div class="mono" style="font-size: 10px; color: #5b6b82; margin-top: 8px;">H≈340</div></div>
+      </div>
+    </div>
+
+    <div class="plate" style="background: #0b1017; border: 1px solid #161f2c; border-radius: 12px; padding: 22px; box-shadow:0 24px 50px -30px rgba(58,46,30,.5);">
+      <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6b82; margin-bottom: 16px;">Idle pulse + accessibility</div>
+      <div style="display: flex; gap: 18px; align-items: center; margin-bottom: 16px;">
+        <div style="text-align: center;"><span style="display: inline-block; width: 16px; height: 16px; border-radius: 999px; background: #22c55e; animation: lx-idle 3.2s ease-in-out infinite;"></span></div>
+        <div style="font-size: 12.5px; color: #93a1b8; line-height: 1.55;">Slow, low-contrast breath on the status dot only — no color cycling, no flashing. It sits on a screen for hours. Opacity 1→0.45, scale 1→0.82.</div>
+      </div>
+      <div style="background: #0e1626; border: 1px solid #223451; border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 10px;">
+        <div style="flex: 1;"><div style="font-size: 12.5px; font-weight: 600; color: #e8eef7;">Nonaktifkan animasi</div><div class="mono" style="font-size: 11px; color: #5b6b82;">ui.reduce_motion · low-spec / a11y</div></div>
+        <div style="width: 38px; height: 22px; border-radius: 999px; background: #2563eb; position: relative; flex-shrink: 0;"><span style="position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 999px; background: #fff;"></span></div>
+      </div>
+      <div style="font-size: 11px; color: #5b6b82; margin-top: 10px; line-height: 1.5;">When on, all Width/Height/Opacity storyboards are skipped — the dot holds steady and states snap.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

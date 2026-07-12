@@ -1,0 +1,108 @@
+/*
+ * LogiX design tokens — the Logix-specific semantic layer.
+ *
+ * These are ADDITIVE, not overrides: base surface/text/border/accent live on
+ * Astryx's --color-* (configured in theme.ts). This file only adds what Astryx
+ * has no token for — the five station statuses, the three access-type tints,
+ * and the pulse/shimmer motion. Values are extracted from the Style Tile /
+ * build brief §1 and use light-dark() so they switch with <Theme mode>.
+ *
+ * Reference-only source of truth: docs/design/LogiX Style Tile.dc.html.
+ */
+
+:root {
+  /* ---- Brand extras (accent variants Astryx doesn't expose) ---- */
+  --lx-accent: #2563eb;
+  --lx-accent-hover: light-dark(#1d4ed8, #1e40af);
+  --lx-accent-weak: light-dark(#dbeafe, #1e3a8a);
+  --lx-text-muted: light-dark(#64748b, #94a3b8);
+
+  /* ---- Station status: base dot color / tint bg / label text ---- */
+  --lx-status-inuse: light-dark(#16a34a, #22c55e);
+  --lx-status-inuse-bg: light-dark(#dcfce7, rgba(34, 197, 94, 0.16));
+  --lx-status-inuse-fg: light-dark(#15803d, #4ade80);
+
+  --lx-status-locked: light-dark(#d97706, #f59e0b);
+  --lx-status-locked-bg: light-dark(#fef3c7, rgba(245, 158, 11, 0.16));
+  --lx-status-locked-fg: light-dark(#b45309, #fbbf24);
+
+  --lx-status-idle: light-dark(#64748b, #94a3b8);
+  --lx-status-idle-bg: light-dark(#e2e8f0, rgba(148, 163, 184, 0.16));
+  --lx-status-idle-fg: light-dark(#475569, #cbd5e1);
+
+  --lx-status-offline: light-dark(#9ca3af, #6b7280);
+  --lx-status-offline-bg: light-dark(#f1f5f9, rgba(107, 114, 128, 0.16));
+  --lx-status-offline-fg: light-dark(#6b7280, #9ca3af);
+
+  --lx-status-alert: light-dark(#dc2626, #ef4444);
+  --lx-status-alert-bg: light-dark(#fee2e2, rgba(239, 68, 68, 0.16));
+  --lx-status-alert-fg: light-dark(#b91c1c, #f87171);
+
+  /* ---- Access type: icon-square bg / icon color / pill bg / pill text ---- */
+  --lx-access-physical-icon-bg: light-dark(#eff6ff, rgba(37, 99, 235, 0.18));
+  --lx-access-physical-icon: light-dark(#2563eb, #60a5fa);
+  --lx-access-physical-badge-bg: light-dark(#dbeafe, rgba(37, 99, 235, 0.24));
+  --lx-access-physical-badge-fg: light-dark(#1d4ed8, #93c5fd);
+
+  --lx-access-ssh-icon-bg: light-dark(#f1f5f9, #1e293b);
+  --lx-access-ssh-icon: light-dark(#334155, #cbd5e1);
+  --lx-access-ssh-badge-bg: light-dark(#e2e8f0, rgba(148, 163, 184, 0.18));
+  --lx-access-ssh-badge-fg: light-dark(#334155, #cbd5e1);
+
+  --lx-access-anydesk-icon-bg: light-dark(#faf5ff, rgba(124, 58, 237, 0.20));
+  --lx-access-anydesk-icon: light-dark(#7c3aed, #a78bfa);
+  --lx-access-anydesk-badge-bg: light-dark(#f3e8ff, rgba(124, 58, 237, 0.24));
+  --lx-access-anydesk-badge-fg: light-dark(#7c3aed, #c4b5fd);
+
+  /* ---- Motion helpers ---- */
+  --lx-pulse-ring: light-dark(rgba(22, 163, 74, 0.45), rgba(34, 197, 94, 0.5));
+  --lx-skeleton-base: light-dark(#eef2f6, #1e293b);
+  --lx-skeleton-mid: light-dark(#e2e8f0, #334155);
+}
+
+/* Pulsing "in use" dot — halo ring, honoring reduced-motion. */
+.lx-pulse-dot {
+  border-radius: 50%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lx-pulse-dot {
+    animation: lx-pulse 2s infinite;
+  }
+}
+@keyframes lx-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--lx-pulse-ring);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(0, 0, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  }
+}
+
+/* Shimmering skeleton block. Falls back to a flat fill under reduced-motion. */
+.lx-skeleton {
+  background: var(--lx-skeleton-base);
+  border-radius: var(--radius-inner, 6px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lx-skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--lx-skeleton-base) 25%,
+      var(--lx-skeleton-mid) 37%,
+      var(--lx-skeleton-base) 63%
+    );
+    background-size: 400px 100%;
+    animation: lx-shimmer 1.4s infinite linear;
+  }
+}
+@keyframes lx-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}

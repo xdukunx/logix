@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #eef1f5; color: #0f172a; -webkit-font-smoothing: antialiased; }
+  a { color: #2563eb; text-decoration: none; }
+  a:hover { color: #1d4ed8; }
+  @keyframes lx-pulse-r { 0% { box-shadow: 0 0 0 0 rgba(220,38,38,.5); } 70% { box-shadow: 0 0 0 6px rgba(220,38,38,0); } 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); } }
+  @keyframes lx-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+</style>
+</helmet>
+
+<div style="max-width: 1520px; margin: 0 auto; padding: 48px 40px 80px;">
+
+  <!-- =================== 1. LOGIN =================== -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">01 — Login</div>
+  <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 22px;">Sign in · light &amp; dark</h2>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 56px;">
+    <!-- LOGIN LIGHT -->
+    <div style="background: #f1f5f9; border: 1px solid #dbe1ea; border-radius: 14px; padding: 44px 32px; display: flex; align-items: center; justify-content: center;">
+      <div style="width: 380px; max-width: 100%; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 12px 40px rgba(15,23,42,.1); padding: 34px 32px;">
+        <div style="display: flex; flex-direction: column; align-items: center; text-align: center;">
+          <svg width="72" height="58" viewBox="0 0 72 58" style="margin-bottom: 14px;"><defs><pattern id="mL" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#dbeafe" stroke-width="4"></line></pattern></defs><rect x="1" y="1" width="70" height="56" rx="12" fill="url(#mL)" stroke="#cbd5e1" stroke-dasharray="4 4"></rect><text x="36" y="32" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#64748b">mascot</text></svg>
+          <div style="font-size: 30px; font-weight: 800; letter-spacing: 0.2em; color: #0f172a;">LOGI<span style="color: #2563eb;">X</span></div>
+          <div style="font-size: 14px; color: #64748b; margin-top: 4px;">Lab Access Logbook</div>
+        </div>
+        <div style="display: flex; background: #f1f5f9; border-radius: 8px; padding: 3px; margin: 22px 0;">
+          <button style="flex: 1; border: none; border-radius: 6px; padding: 7px; font-size: 13px; font-weight: 700; background: #fff; color: #0f172a; box-shadow: 0 1px 2px rgba(15,23,42,.12); cursor: pointer; font-family: inherit;">ID</button>
+          <button style="flex: 1; border: none; border-radius: 6px; padding: 7px; font-size: 13px; font-weight: 600; background: transparent; color: #64748b; cursor: pointer; font-family: inherit;">EN</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 22px;">
+          <div style="display: flex; gap: 10px; align-items: flex-start;"><span style="width: 20px; height: 20px; border-radius: 5px; background: #dcfce7; color: #16a34a; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><span style="font-size: 13px; color: #334155; line-height: 1.45;">Lihat siapa memakai tiap stasiun — <strong>fisik, SSH, atau AnyDesk</strong>.</span></div>
+          <div style="display: flex; gap: 10px; align-items: flex-start;"><span style="width: 20px; height: 20px; border-radius: 5px; background: #dcfce7; color: #16a34a; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><span style="font-size: 13px; color: #334155; line-height: 1.45;">Laporan kehadiran &amp; penggunaan otomatis, adil, transparan.</span></div>
+        </div>
+        <button style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; background: #fff; color: #334155; border: 1px solid #d8dfe8; border-radius: 6px; padding: 11px; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(15,23,42,.06); font-family: inherit;" style-hover="border-color: #94a3b8; background: #f8fafc;">
+          <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"></path><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"></path><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"></path><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"></path></svg>
+          Masuk dengan Google
+        </button>
+        <div style="display: flex; align-items: center; gap: 6px; justify-content: center; margin-top: 16px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg><span style="font-size: 11px; color: #94a3b8; line-height: 1.4; text-align: center;">Kami mencatat siapa, cara, dan kapan — bukan keystroke atau isi layar.</span></div>
+      </div>
+    </div>
+    <!-- LOGIN DARK -->
+    <div style="background: #0b1120; border: 1px solid #1e293b; border-radius: 14px; padding: 44px 32px; display: flex; align-items: center; justify-content: center;">
+      <div style="width: 380px; max-width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.6); padding: 34px 32px;">
+        <div style="display: flex; flex-direction: column; align-items: center; text-align: center;">
+          <svg width="72" height="58" viewBox="0 0 72 58" style="margin-bottom: 14px;"><defs><pattern id="mD" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#1e3a5f" stroke-width="4"></line></pattern></defs><rect x="1" y="1" width="70" height="56" rx="12" fill="url(#mD)" stroke="#334155" stroke-dasharray="4 4"></rect><text x="36" y="32" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#94a3b8">mascot</text></svg>
+          <div style="font-size: 30px; font-weight: 800; letter-spacing: 0.2em; color: #f1f5f9;">LOGI<span style="color: #3b82f6;">X</span></div>
+          <div style="font-size: 14px; color: #94a3b8; margin-top: 4px;">Lab Access Logbook</div>
+        </div>
+        <div style="display: flex; background: #0f172a; border-radius: 8px; padding: 3px; margin: 22px 0;">
+          <button style="flex: 1; border: none; border-radius: 6px; padding: 7px; font-size: 13px; font-weight: 700; background: #334155; color: #f1f5f9; cursor: pointer; font-family: inherit;">ID</button>
+          <button style="flex: 1; border: none; border-radius: 6px; padding: 7px; font-size: 13px; font-weight: 600; background: transparent; color: #94a3b8; cursor: pointer; font-family: inherit;">EN</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 22px;">
+          <div style="display: flex; gap: 10px; align-items: flex-start;"><span style="width: 20px; height: 20px; border-radius: 5px; background: rgba(34,197,94,.16); color: #4ade80; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><span style="font-size: 13px; color: #cbd5e1; line-height: 1.45;">Lihat siapa memakai tiap stasiun — <strong style="color:#f1f5f9;">fisik, SSH, atau AnyDesk</strong>.</span></div>
+          <div style="display: flex; gap: 10px; align-items: flex-start;"><span style="width: 20px; height: 20px; border-radius: 5px; background: rgba(34,197,94,.16); color: #4ade80; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><span style="font-size: 13px; color: #cbd5e1; line-height: 1.45;">Laporan kehadiran &amp; penggunaan otomatis, adil, transparan.</span></div>
+        </div>
+        <button style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; background: #fff; color: #1f2937; border: 1px solid #fff; border-radius: 6px; padding: 11px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;" style-hover="background: #f1f5f9;">
+          <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"></path><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"></path><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"></path><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"></path></svg>
+          Masuk dengan Google
+        </button>
+        <div style="display: flex; align-items: center; gap: 6px; justify-content: center; margin-top: 16px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg><span style="font-size: 11px; color: #64748b; line-height: 1.4; text-align: center;">Kami mencatat siapa, cara, dan kapan — bukan keystroke atau isi layar.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== 2. APP SHELL =================== -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">02 — App Shell</div>
+  <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 22px;">Authenticated frame · light &amp; dark</h2>
+
+  <!-- SHELL LIGHT -->
+  <div style="border: 1px solid #dbe1ea; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 28px rgba(15,23,42,.08); margin-bottom: 20px; display: flex; height: 560px; background: #f8fafc;">
+    <!-- sidenav -->
+    <div style="width: 232px; background: #fff; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column;">
+      <div style="padding: 18px 18px; border-bottom: 1px solid #eef1f5; display: flex; align-items: center; gap: 9px;">
+        <div style="width: 28px; height: 28px; border-radius: 7px; background: #2563eb; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9l3 3-3 3"></path><line x1="12.5" y1="15" x2="16" y2="15"></line></svg></div>
+        <span style="font-size: 17px; font-weight: 800; letter-spacing: 0.14em; color: #0f172a;">LOGI<span style="color: #2563eb;">X</span></span>
+      </div>
+      <div style="padding: 12px 10px; display: flex; flex-direction: column; gap: 3px; flex: 1;">
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; background: #eff6ff; color: #1d4ed8; font-size: 14px; font-weight: 600;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>Monitoring</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8"></path></svg>Layar</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg>Devices</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg>Analytics</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.4-2.6H9.9l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.4 2.6h4.2l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"></path></svg>Settings</div>
+      </div>
+      <div style="padding: 12px; border-top: 1px solid #eef1f5;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #f0fdf4; border-radius: 6px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #16a34a;"></span><span style="font-size: 12px; font-weight: 600; color: #15803d;">Server Terhubung</span></div>
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <div style="flex:1; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: #fef2f2; border-radius: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #dc2626; animation: lx-pulse-r 1.5s infinite;"></span><span style="font-size: 10px; font-weight: 600; color: #b91c1c;">Terputus</span></div>
+          <div style="flex:1; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: #fffbeb; border-radius: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #d97706;"></span><span style="font-size: 10px; font-weight: 600; color: #b45309;">Memeriksa…</span></div>
+        </div>
+      </div>
+    </div>
+    <!-- main -->
+    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+      <div style="height: 60px; border-bottom: 1px solid #e2e8f0; background: #fff; display: flex; align-items: center; padding: 0 22px; gap: 14px;">
+        <div><div style="font-size: 15px; font-weight: 700; color: #0f172a;">Monitoring</div><div style="font-size: 12px; color: #94a3b8;">Lab Kimia Komputasi · FTMM</div></div>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+          <button style="display: flex; align-items: center; gap: 7px; background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 4 5-4M5 21h14"></path></svg>Unduh Laporan</button>
+          <button style="position: relative; width: 36px; height: 36px; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; display: flex; align-items: center; justify-content: center; color: #475569; cursor: pointer;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span style="position: absolute; top: -4px; right: -4px; background: #dc2626; color: #fff; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 999px; display: flex; align-items: center; justify-content: center; padding: 0 4px; border: 2px solid #fff;">3</span></button>
+          <button style="width: 36px; height: 36px; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; display: flex; align-items: center; justify-content: center; color: #475569; cursor: pointer;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"></path></svg></button>
+          <button style="display: flex; align-items: center; gap: 7px; background: #fff; color: #b91c1c; border: 1px solid #fecaca; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path></svg>Keluar</button>
+        </div>
+      </div>
+      <div style="flex: 1; padding: 24px; overflow: hidden; background: #f8fafc;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px;">
+          <div><h1 style="font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0;">Stasiun Aktif</h1><p style="font-size: 13px; color: #64748b; margin: 4px 0 0;">7 dari 12 stasiun sedang digunakan · diperbarui 12 dtk lalu</p></div>
+          <div style="display: flex; gap: 8px;"><span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a;"></span>7 aktif</span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; background: #f1f5f9; color: #6b7280; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #9ca3af;"></span>5 offline</span></div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; border-left: 3px solid #16a34a;"><div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 14px; font-weight: 700;">WS-07</span><span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #16a34a;"></span>Aktif</span></div><div style="font-size: 12px; color: #64748b; margin-top: 9px; font-family: ui-monospace, monospace;"><span style="color:#334155;">&gt;_</span> SSH · A. Rahmawati</div></div>
+          <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; border-left: 3px solid #d97706;"><div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 14px; font-weight: 700;">WS-03</span><span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #d97706;"></span>Terkunci</span></div><div style="font-size: 12px; color: #64748b; margin-top: 9px;">⌨ Fisik · B. Santoso</div></div>
+          <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; border-left: 3px solid #9ca3af;"><div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 14px; font-weight: 700; color: #94a3b8;">WS-11</span><span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: #f1f5f9; color: #6b7280; font-size: 11px; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #9ca3af;"></span>Offline</span></div><div style="font-size: 12px; color: #94a3b8; margin-top: 9px;">Tidak ada heartbeat</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHELL DARK -->
+  <div style="border: 1px solid #1e293b; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,.4); margin-bottom: 56px; display: flex; height: 560px; background: #0b1120;">
+    <div style="width: 232px; background: #0f172a; border-right: 1px solid #1e293b; display: flex; flex-direction: column;">
+      <div style="padding: 18px 18px; border-bottom: 1px solid #1e293b; display: flex; align-items: center; gap: 9px;">
+        <div style="width: 28px; height: 28px; border-radius: 7px; background: #2563eb; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9l3 3-3 3"></path><line x1="12.5" y1="15" x2="16" y2="15"></line></svg></div>
+        <span style="font-size: 17px; font-weight: 800; letter-spacing: 0.14em; color: #f1f5f9;">LOGI<span style="color: #3b82f6;">X</span></span>
+      </div>
+      <div style="padding: 12px 10px; display: flex; flex-direction: column; gap: 3px; flex: 1;">
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; background: rgba(37,99,235,.18); color: #60a5fa; font-size: 14px; font-weight: 600;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>Monitoring</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8"></path></svg>Layar</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg>Devices</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg>Analytics</div>
+        <div style="display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 14px; font-weight: 500;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.4-2.6H9.9l-.4 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.4 2.6h4.2l.4-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"></path></svg>Settings</div>
+      </div>
+      <div style="padding: 12px; border-top: 1px solid #1e293b;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(34,197,94,.12); border-radius: 6px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span><span style="font-size: 12px; font-weight: 600; color: #4ade80;">Server Terhubung</span></div>
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <div style="flex:1; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: rgba(239,68,68,.12); border-radius: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #ef4444; animation: lx-pulse-r 1.5s infinite;"></span><span style="font-size: 10px; font-weight: 600; color: #f87171;">Terputus</span></div>
+          <div style="flex:1; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: rgba(245,158,11,.12); border-radius: 6px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #f59e0b;"></span><span style="font-size: 10px; font-weight: 600; color: #fbbf24;">Memeriksa…</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+      <div style="height: 60px; border-bottom: 1px solid #1e293b; background: #0f172a; display: flex; align-items: center; padding: 0 22px; gap: 14px;">
+        <div><div style="font-size: 15px; font-weight: 700; color: #f1f5f9;">Monitoring</div><div style="font-size: 12px; color: #64748b;">Lab Kimia Komputasi · FTMM</div></div>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+          <button style="display: flex; align-items: center; gap: 7px; background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 11l5 4 5-4M5 21h14"></path></svg>Unduh Laporan</button>
+          <button style="position: relative; width: 36px; height: 36px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; display: flex; align-items: center; justify-content: center; color: #cbd5e1; cursor: pointer;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg><span style="position: absolute; top: -4px; right: -4px; background: #ef4444; color: #fff; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; border-radius: 999px; display: flex; align-items: center; justify-content: center; padding: 0 4px; border: 2px solid #0f172a;">3</span></button>
+          <button style="width: 36px; height: 36px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; display: flex; align-items: center; justify-content: center; color: #fbbf24; cursor: pointer;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button>
+          <button style="display: flex; align-items: center; gap: 7px; background: #1e293b; color: #f87171; border: 1px solid rgba(239,68,68,.4); border-radius: 6px; padding: 8px 12px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path></svg>Keluar</button>
+        </div>
+      </div>
+      <div style="flex: 1; padding: 24px; overflow: hidden; background: #0b1120;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 18px;">
+          <div><h1 style="font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0; color: #f1f5f9;">Stasiun Aktif</h1><p style="font-size: 13px; color: #94a3b8; margin: 4px 0 0;">7 dari 12 stasiun sedang digunakan · diperbarui 12 dtk lalu</p></div>
+          <div style="display: flex; gap: 8px;"><span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e;"></span>7 aktif</span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; background: rgba(107,114,128,.16); color: #9ca3af; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #6b7280;"></span>5 offline</span></div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; border-left: 3px solid #22c55e;"><div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 14px; font-weight: 700; color: #f1f5f9;">WS-07</span><span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 11px; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span>Aktif</span></div><div style="font-size: 12px; color: #94a3b8; margin-top: 9px; font-family: ui-monospace, monospace;"><span style="color:#cbd5e1;">&gt;_</span> SSH · A. Rahmawati</div></div>
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; border-left: 3px solid #f59e0b;"><div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 14px; font-weight: 700; color: #f1f5f9;">WS-03</span><span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: rgba(245,158,11,.16); color: #fbbf24; font-size: 11px; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #f59e0b;"></span>Terkunci</span></div><div style="font-size: 12px; color: #94a3b8; margin-top: 9px;">⌨ Fisik · B. Santoso</div></div>
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px; border-left: 3px solid #6b7280;"><div style="display: flex; justify-content: space-between; align-items: center;"><span style="font-size: 14px; font-weight: 700; color: #64748b;">WS-11</span><span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: rgba(107,114,128,.16); color: #9ca3af; font-size: 11px; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #6b7280;"></span>Offline</span></div><div style="font-size: 12px; color: #64748b; margin-top: 9px;">Tidak ada heartbeat</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== 3. GLOBAL STATES =================== -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">03 — Global States</div>
+  <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 22px;">Loading · empty · error · toasts</h2>
+
+  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+
+    <!-- skeleton -->
+    <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 20px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; margin-bottom: 14px;">Skeleton — card grid</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+        <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px;"><div style="height: 12px; width: 60%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div><div style="height: 22px; width: 45%; border-radius: 999px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 12px;"></div><div style="height: 10px; width: 90%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite;"></div></div>
+        <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px;"><div style="height: 12px; width: 60%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div><div style="height: 22px; width: 45%; border-radius: 999px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 12px;"></div><div style="height: 10px; width: 90%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite;"></div></div>
+        <div style="border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px;"><div style="height: 12px; width: 60%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div><div style="height: 22px; width: 45%; border-radius: 999px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 12px;"></div><div style="height: 10px; width: 90%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite;"></div></div>
+      </div>
+    </div>
+
+    <!-- empty (dark) -->
+    <div style="background: #0b1120; border: 1px solid #1e293b; border-radius: 12px; padding: 20px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8; margin-bottom: 14px;">Empty — dark</div>
+      <div style="background: #1e293b; border: 1px dashed #334155; border-radius: 10px; padding: 30px; text-align: center;">
+        <svg width="84" height="66" viewBox="0 0 84 66" style="margin-bottom: 12px;"><defs><pattern id="eD" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#1e3a5f" stroke-width="4"></line></pattern></defs><rect x="1" y="1" width="82" height="64" rx="12" fill="url(#eD)" stroke="#334155" stroke-dasharray="4 4"></rect><text x="42" y="37" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#94a3b8">mascot</text></svg>
+        <div style="font-size: 16px; font-weight: 700; color: #f1f5f9;">No Active Devices</div>
+        <div style="font-size: 13px; color: #94a3b8; margin-top: 5px; line-height: 1.5;">Belum ada stasiun yang aktif. Logi menunggu sesi pertama hari ini.</div>
+      </div>
+    </div>
+
+    <!-- error -->
+    <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 20px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; margin-bottom: 14px;">Error — retry</div>
+      <div style="background: #fff; border: 1px solid #fecaca; border-radius: 10px; padding: 30px; text-align: center;">
+        <div style="width: 46px; height: 46px; border-radius: 12px; background: #fee2e2; color: #dc2626; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg></div>
+        <div style="font-size: 16px; font-weight: 700; color: #0f172a;">Gagal memuat data</div>
+        <div style="font-size: 13px; color: #64748b; margin-top: 5px; line-height: 1.5;">Tidak dapat terhubung ke server monitoring.</div>
+        <button style="margin-top: 16px; display: inline-flex; align-items: center; gap: 7px; background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg>Coba Lagi</button>
+      </div>
+    </div>
+
+    <!-- toasts -->
+    <div style="background: #f1f5f9; border: 1px solid #dbe1ea; border-radius: 12px; padding: 20px;">
+      <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; margin-bottom: 14px;">Toasts — success &amp; error</div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 11px; background: #fff; border: 1px solid #e2e8f0; border-left: 3px solid #16a34a; border-radius: 8px; padding: 13px 15px; box-shadow: 0 4px 14px rgba(15,23,42,.08);"><span style="width: 22px; height: 22px; border-radius: 50%; background: #dcfce7; color: #16a34a; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><div style="flex: 1;"><div style="font-size: 13px; font-weight: 600;">Laporan berhasil diunduh</div><div style="font-size: 12px; color: #64748b;">kehadiran-juli.csv · filter privasi diterapkan</div></div><span style="color: #94a3b8; font-size: 18px; cursor: pointer; line-height: 1;">×</span></div>
+        <div style="display: flex; align-items: center; gap: 11px; background: #fff; border: 1px solid #fecaca; border-left: 3px solid #dc2626; border-radius: 8px; padding: 13px 15px; box-shadow: 0 4px 14px rgba(15,23,42,.08);"><span style="width: 22px; height: 22px; border-radius: 50%; background: #fee2e2; color: #dc2626; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></span><div style="flex: 1;"><div style="font-size: 13px; font-weight: 600;">Koneksi ke server terputus</div><div style="font-size: 12px; color: #64748b;">Mencoba menyambung ulang…</div></div><span style="color: #94a3b8; font-size: 18px; cursor: pointer; line-height: 1;">×</span></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

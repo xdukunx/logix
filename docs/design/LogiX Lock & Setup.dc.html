@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; background: #ddd6c8; color: #e8edf5; -webkit-font-smoothing: antialiased; }
+  .serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif; }
+  @keyframes lx-idle { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
+</style>
+</helmet>
+
+<div style="max-width: 1420px; margin: 0 auto; background:#f7f4ee; box-shadow:0 40px 120px -50px rgba(58,46,30,.6); border-left:1px solid #e7e0d2; border-right:1px solid #e7e0d2; padding:52px 56px 80px;">
+  <div style="margin-bottom:40px;padding-bottom:32px;border-bottom:2px solid #2b2621;">
+    <div style="display:flex;align-items:center;gap:11px;margin-bottom:20px;"><div style="width:28px;height:28px;border-radius:6px;background:#2563eb;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-family:ui-monospace,Consolas,monospace;font-size:13px;">&gt;_</div><span style="font-size:14px;font-weight:700;letter-spacing:0.22em;color:#2b2621;">LOGIX</span><span style="margin-left:auto;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#a8a08e;">Client · Lock &amp; Setup</span></div>
+    <div class="serif" style="font-size:15px;font-style:italic;color:#b5622f;margin-bottom:12px;">Paused, never punitive.</div>
+    <h1 class="serif" style="font-size:46px;font-weight:600;line-height:1.02;letter-spacing:-0.02em;margin:0 0 14px;color:#23201b;">Locked, and first&#8209;run.</h1>
+    <p style="font-size: 14px; color: #6b6456; margin: 0; max-width: 820px;">WPF-buildable, dark, config-driven colors, Indonesian, Segoe UI + Consolas. The lock overlay reads "in use, paused" — never punitive. The wizard enrolls a machine with a single-use invite code.</p>
+  </div>
+
+  <!-- ============ SURFACE A — LOCK OVERLAY ============ -->
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"><span style="width: 22px; height: 22px; border-radius: 6px; background: #3a2f12; color: #fbbf24; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">A</span><span style="font-size: 13px; font-weight: 700; color: #b5622f;">Lock overlay · fullscreen, calm, session paused</span></div>
+
+  <div style="position: relative; border-radius: 16px; overflow: hidden; border: 1px solid #1c2637; margin-bottom: 46px; min-height: 520px; display: flex; align-items: center; justify-content: center; background:
+    radial-gradient(900px 560px at 50% 30%, #12233f, transparent 60%),
+    linear-gradient(160deg, #0b1526, #070b14 72%);">
+    <!-- subtle amber top band signals 'locked' calmly -->
+    <div style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg,#b4791a,#f59e0b,#b4791a);"></div>
+
+    <!-- top-left brand -->
+    <div style="position: absolute; top: 26px; left: 30px; display: flex; align-items: center; gap: 10px;">
+      <span style="width: 30px; height: 30px; border-radius: 8px; background: #0f1a30; border: 1px dashed #2f5aa0; color: #7fb0ff; display: inline-flex; align-items: center; justify-content: center; font-size: 8px; font-family: Consolas, monospace;">mascot</span>
+      <span style="font-size: 15px; font-weight: 700; letter-spacing: 0.14em;">LOGI<span style="color:#4b8cf5;">X</span></span>
+    </div>
+    <!-- top-right clock -->
+    <div style="position: absolute; top: 26px; right: 30px; font-family: Consolas, monospace; font-size: 13px; color: #8b98af;">14:41 · Rabu, 18 Jun 2026</div>
+
+    <!-- center card -->
+    <div style="width: 500px; max-width: 90%; text-align: center; padding: 20px;">
+      <!-- lock glyph, amber not red -->
+      <div style="width: 76px; height: 76px; border-radius: 20px; background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.4); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 22px;">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path><circle cx="12" cy="15.5" r="1.2" fill="#fbbf24" stroke="none"></circle></svg>
+      </div>
+      <div style="font-size: 26px; font-weight: 700; letter-spacing: -0.01em;">Workstation dikunci oleh admin lab</div>
+      <div style="font-size: 15px; color: #9aa7bd; line-height: 1.55; margin-top: 10px;">Sesi Anda <strong style="color:#cdd6e6;">dijeda</strong>, bukan diakhiri. Semua pekerjaan &amp; waktu sesi tetap tersimpan.</div>
+
+      <!-- paused session pill with running elapsed -->
+      <div style="display: inline-flex; align-items: center; gap: 14px; background: #0b1220; border: 1px solid #24304a; border-radius: 12px; padding: 14px 20px; margin-top: 22px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="width: 9px; height: 9px; border-radius: 999px; background: #f59e0b; animation: lx-idle 3.2s ease-in-out infinite;"></span>
+          <span style="font-size: 12px; font-weight: 600; color: #fbbf24; letter-spacing: .04em;">DIJEDA</span>
+        </div>
+        <span style="width: 1px; height: 26px; background: #24304a;"></span>
+        <div style="text-align: left;">
+          <div style="font-size: 11px; color: #6b7a94;">Waktu sesi berjalan</div>
+          <div style="font-family: Consolas, monospace; font-size: 22px; font-weight: 700; line-height: 1.1; color: #e8edf5;">02:21:07</div>
+        </div>
+        <span style="width: 1px; height: 26px; background: #24304a;"></span>
+        <div style="text-align: left;">
+          <div style="font-size: 11px; color: #6b7a94;">Pengguna</div>
+          <div style="font-size: 14px; font-weight: 600; color: #cdd6e6;">Dhana Pratama</div>
+        </div>
+      </div>
+
+      <!-- admin reason -->
+      <div style="background: #0d1830; border: 1px solid #24406e; border-radius: 10px; padding: 13px 16px; margin-top: 18px; text-align: left; display: flex; gap: 11px; align-items: flex-start;">
+        <span style="color:#4b8cf5; margin-top: 1px; display:inline-flex;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg></span>
+        <div><div style="font-size: 11px; font-weight: 700; color: #7fb0ff; letter-spacing: .04em; text-transform: uppercase;">Alasan dari admin</div><div style="font-size: 13.5px; color: #cfe0fb; line-height: 1.5; margin-top: 3px;">Pemeliharaan singkat GPU driver. Mohon tunggu ±10 menit, sesi Anda akan dibuka kembali.</div></div>
+      </div>
+
+      <!-- unlock instruction -->
+      <div style="margin-top: 22px; font-size: 14px; color: #cdd6e6;">Masuk kembali untuk melanjutkan sesi</div>
+      <div style="display: inline-flex; align-items: center; gap: 9px; background: #2563eb; border-radius: 10px; padding: 13px 26px; margin-top: 12px; font-size: 15px; font-weight: 700; color: #fff;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 7.5-2"></path></svg>
+        Buka &amp; Lanjutkan
+      </div>
+      <div style="font-size: 12px; color: #6b7a94; margin-top: 14px;">Perangkat tetap menyala · sesi tidak dihentikan · lock = jeda, bukan keluar</div>
+    </div>
+  </div>
+
+  <!-- ============ SURFACE B — SETUP WIZARD ============ -->
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;"><span style="width: 22px; height: 22px; border-radius: 6px; background: #16324f; color: #7fb0ff; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">B</span><span style="font-size: 13px; font-weight: 700; color: #b5622f;">Setup / enrollment wizard · first-run, admin-operated</span></div>
+
+  <!-- shared frame style: 3 steps + success side by side -->
+  <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+
+    <!-- STEP 1 WELCOME -->
+    <div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6b7a94; margin-bottom: 10px;">Langkah 1 · Selamat datang</div>
+      <div style="background: #0b0f19; border: 1px solid #1c2637; border-radius: 16px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,.4);">
+        <!-- progress -->
+        <div style="display: flex; gap: 6px; padding: 16px 20px 0;"><span style="flex:1; height: 4px; border-radius: 999px; background: #2563eb;"></span><span style="flex:1; height: 4px; border-radius: 999px; background: #1c2637;"></span><span style="flex:1; height: 4px; border-radius: 999px; background: #1c2637;"></span></div>
+        <div style="padding: 34px 28px 26px; text-align: center;">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 18px;">
+            <span style="width: 54px; height: 54px; border-radius: 13px; background: #0f1a30; border: 1px dashed #2f5aa0; color: #7fb0ff; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-family: Consolas, monospace;">mascot</span>
+            <span style="width: 54px; height: 54px; border-radius: 13px; background: #0f1a30; border: 1px solid #24406e; color: #4b8cf5; display: inline-flex; align-items: center; justify-content: center; font-family: Consolas, monospace; font-size: 22px; font-weight: 800;">&gt;_</span>
+          </div>
+          <div style="font-size: 24px; font-weight: 700; letter-spacing: 0.1em;">LOGI<span style="color:#4b8cf5;">X</span></div>
+          <div style="font-size: 14px; color: #9aa7bd; line-height: 1.55; margin-top: 12px; max-width: 320px; margin-left: auto; margin-right: auto;">Daftarkan komputer ini ke server lab agar sesi &amp; kehadiran tercatat otomatis. Butuh <strong style="color:#cdd6e6;">kode undangan</strong> dari admin.</div>
+          <div style="background: #2563eb; border-radius: 10px; padding: 13px; text-align: center; font-size: 15px; font-weight: 700; color: #fff; margin-top: 24px; display:flex; align-items:center; justify-content:center; gap:6px;">Mulai<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+          <div style="font-size: 12px; color: #6b7a94; border-bottom: 1px dotted #2f3d55; display: inline-block; margin-top: 16px; padding-bottom: 1px;">Lewati (mode lokal saja)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2 CODE -->
+    <div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6b7a94; margin-bottom: 10px;">Langkah 2 · Kode undangan</div>
+      <div style="background: #0b0f19; border: 1px solid #1c2637; border-radius: 16px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,.4);">
+        <div style="display: flex; gap: 6px; padding: 16px 20px 0;"><span style="flex:1; height: 4px; border-radius: 999px; background: #2563eb;"></span><span style="flex:1; height: 4px; border-radius: 999px; background: #2563eb;"></span><span style="flex:1; height: 4px; border-radius: 999px; background: #1c2637;"></span></div>
+        <div style="padding: 26px 28px;">
+          <div style="font-size: 18px; font-weight: 700;">Masukkan kode undangan</div>
+          <div style="font-size: 13px; color: #9aa7bd; margin-top: 5px; line-height: 1.5;">Minta kode dari admin lab. Berlaku 15 menit &amp; hanya sekali pakai.</div>
+          <!-- segmented input, focused group 2 -->
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 20px; justify-content: center;">
+            <div style="width: 96px; text-align: center; font-family: Consolas, monospace; font-size: 22px; font-weight: 700; letter-spacing: .18em; color: #e8edf5; background: #070c17; border: 1px solid #2b3a55; border-radius: 8px; padding: 12px 0;">7K2P</div>
+            <span style="color: #56688a; font-weight: 700;">–</span>
+            <div style="width: 96px; text-align: center; font-family: Consolas, monospace; font-size: 22px; font-weight: 700; letter-spacing: .18em; color: #e8edf5; background: #070c17; border: 2px solid #2563eb; border-radius: 8px; padding: 11px 0; box-shadow: 0 0 0 3px rgba(37,99,235,.22);">9QXR</div>
+            <span style="color: #56688a; font-weight: 700;">–</span>
+            <div style="width: 96px; text-align: center; font-family: Consolas, monospace; font-size: 22px; font-weight: 700; letter-spacing: .18em; color: #56688a; background: #070c17; border: 1px solid #2b3a55; border-radius: 8px; padding: 12px 0;">4M1D</div>
+          </div>
+          <!-- validity hint (checking) -->
+          <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; font-size: 12.5px; color: #7fb0ff;">
+            <span style="width: 13px; height: 13px; border: 2px solid #24406e; border-top-color: #4b8cf5; border-radius: 999px; display: inline-block; animation: lx-idle 1s linear infinite;"></span>Memeriksa kode… · kedaluwarsa dalam <span style="font-family: Consolas, monospace;">12:48</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 22px;">
+            <div style="flex: 1; border: 1px solid #2b3a55; border-radius: 9px; padding: 11px; text-align: center; font-size: 13px; font-weight: 600; color: #9aa7bd;">Tempel dari clipboard</div>
+            <div style="flex: 1; background: #2563eb; border-radius: 9px; padding: 11px; text-align: center; font-size: 13px; font-weight: 700; color: #fff; display:flex; align-items:center; justify-content:center; gap:6px;">Verifikasi<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></div>
+          </div>
+        </div>
+      </div>
+      <!-- error states row -->
+      <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+        <div style="display: flex; align-items: center; gap: 9px; background: #150c0e; border: 1px solid #3a1414; border-left: 3px solid #ef4444; border-radius: 8px; padding: 9px 13px;"><span style="color:#f87171; display:inline-flex;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span><span style="font-size: 12.5px; color: #fca5a5;"><strong>Kode salah.</strong> Periksa kembali 12 karakter.</span></div>
+        <div style="display: flex; align-items: center; gap: 9px; background: #150f06; border: 1px solid #3a2f14; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 9px 13px;"><span style="color:#fbbf24; display:inline-flex;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4l3 2"></path></svg></span><span style="font-size: 12.5px; color: #fcd9a0;"><strong>Kode kedaluwarsa.</strong> Minta kode baru dari admin.</span></div>
+        <div style="display: flex; align-items: center; gap: 9px; background: #0b1017; border: 1px solid #223451; border-left: 3px solid #5b6b82; border-radius: 8px; padding: 9px 13px;"><span style="color:#9aa7bd; display:inline-flex;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64M12 2v10"></path></svg></span><span style="font-size: 12.5px; color: #c3cdde;"><strong>Server tak terjangkau.</strong> Periksa jaringan, lalu coba lagi.</span></div>
+      </div>
+    </div>
+
+    <!-- STEP 3 CONFIRM -->
+    <div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6b7a94; margin-bottom: 10px;">Langkah 3 · Konfirmasi</div>
+      <div style="background: #0b0f19; border: 1px solid #1c2637; border-radius: 16px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,.4);">
+        <div style="display: flex; gap: 6px; padding: 16px 20px 0;"><span style="flex:1; height: 4px; border-radius: 999px; background: #2563eb;"></span><span style="flex:1; height: 4px; border-radius: 999px; background: #2563eb;"></span><span style="flex:1; height: 4px; border-radius: 999px; background: #2563eb;"></span></div>
+        <div style="padding: 24px 28px;">
+          <div style="font-size: 18px; font-weight: 700;">Konfirmasi perangkat</div>
+          <div style="font-size: 13px; color: #9aa7bd; margin-top: 5px;">Kode valid. Perangkat dikenali sebagai:</div>
+          <!-- resolved device -->
+          <div style="background: #0d1830; border: 1px solid #24406e; border-radius: 10px; padding: 14px 16px; margin-top: 14px; display: flex; align-items: center; gap: 12px;">
+            <span style="width: 40px; height: 40px; border-radius: 9px; background: #12233f; color: #4b8cf5; display: flex; align-items: center; justify-content: center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span>
+            <div style="flex:1;"><div style="font-size: 15px; font-weight: 700; color: #eaf1fb;">WS-07 · GPU-A100</div><div style="font-size: 12px; color: #8b98af; font-family: Consolas, monospace;">DESKTOP-4F8KQ2</div></div>
+            <span style="font-size: 11px; font-weight: 700; color: #7fb0ff; background: rgba(37,99,235,.16); padding: 5px 10px; border-radius: 999px;">lab_workstation</span>
+          </div>
+          <!-- privacy summary two column -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px;">
+            <div style="background: rgba(34,197,94,.07); border: 1px solid rgba(34,197,94,.3); border-radius: 9px; padding: 12px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 8px;"><span style="width:14px;height:14px;border-radius:999px;background:#22c55e;color:#052e16;display:inline-flex;align-items:center;justify-content:center;display:inline-flex;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span>Dicatat</div>
+              <div style="font-size: 11.5px; color: #bbf7d0; line-height: 1.65;">Nama &amp; NIM · tipe akses · waktu sesi · cuplikan atas permintaan (dgn notifikasi)</div>
+            </div>
+            <div style="background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.3); border-radius: 9px; padding: 12px;">
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #f87171; margin-bottom: 8px;"><span style="width:14px;height:14px;border-radius:999px;background:#ef4444;color:#fff;display:inline-flex;align-items:center;justify-content:center;display:inline-flex;"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></span>Tidak dicatat</div>
+              <div style="font-size: 11.5px; color: #fecaca; line-height: 1.65;">Ketikan · isi layar diam-diam · file pribadi · mikrofon / kamera</div>
+            </div>
+          </div>
+          <div style="background: #2563eb; border-radius: 10px; padding: 13px; text-align: center; font-size: 15px; font-weight: 700; color: #fff; margin-top: 16px;">Selesaikan Pengaturan</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SUCCESS -->
+    <div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6b7a94; margin-bottom: 10px;">Selesai · berhasil terdaftar</div>
+      <div style="background: #0b1512; border: 1px solid #1f6b57; border-radius: 16px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,.4); height: calc(100% - 27px);">
+        <div style="height: 4px; background: linear-gradient(90deg,#14b8a6,#5eead4);"></div>
+        <div style="padding: 40px 28px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 300px;">
+          <div style="width: 72px; height: 72px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px;"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></div>
+          <div style="font-size: 22px; font-weight: 700; color: #99f6e4;">Perangkat berhasil terdaftar</div>
+          <div style="font-size: 14px; color: #8fb9ad; line-height: 1.55; margin-top: 10px; max-width: 320px;">WS-07 · GPU-A100 kini terhubung ke server lab. Popup masuk akan muncul saat sesi berikutnya dimulai.</div>
+          <div style="display: inline-flex; align-items: center; gap: 8px; background: #0e2a24; border: 1px solid #1f6b57; border-radius: 999px; padding: 7px 14px; margin-top: 18px;"><span style="width: 8px; height: 8px; border-radius: 999px; background: #22c55e;"></span><span style="font-size: 12px; font-weight: 600; color: #5eead4;">Server Terhubung</span></div>
+          <div style="background: #14b8a6; border-radius: 10px; padding: 12px 30px; text-align: center; font-size: 14px; font-weight: 700; color: #052e26; margin-top: 24px;">Tutup</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- skip / local mode explainer -->
+  <div style="background: #0b0f19; border: 1px solid #24304a; border-radius: 12px; padding: 16px 18px; margin-top: 20px; display: flex; gap: 12px; align-items: flex-start; max-width: 760px;">
+    <span style="width: 30px; height: 30px; border-radius: 8px; background: #12161f; border: 1px solid #2b3a55; color: #9aa7bd; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M9 12h6"></path></svg></span>
+    <div><div style="font-size: 13.5px; font-weight: 700; color: #cdd6e6;">Lewati — mode lokal saja</div><div style="font-size: 12.5px; color: #8b98af; line-height: 1.55; margin-top: 3px;">Perangkat tetap bisa mencatat sesi, tetapi <strong style="color:#aab6c9;">semua data tersimpan di mesin ini</strong> dan tidak dikirim ke server. Tidak ada pemantauan jarak jauh, laporan pusat, atau pesan admin. Bisa didaftarkan kapan saja nanti dari Pengaturan.</div></div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

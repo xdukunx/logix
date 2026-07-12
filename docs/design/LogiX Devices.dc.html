@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #eef1f5; color: #0f172a; -webkit-font-smoothing: antialiased; }
+</style>
+</helmet>
+
+<div style="max-width: 1520px; margin: 0 auto; padding: 40px;">
+
+  <!-- ================= 1. DEVICES LIST ================= -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 12px;">01 — Devices List</div>
+
+  <!-- LIGHT -->
+  <div style="background: #f8fafc; border: 1px solid #dbe1ea; border-radius: 14px; padding: 24px 26px; margin-bottom: 20px;">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap;">
+      <div><h1 style="font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0;">Devices</h1><p style="font-size: 13px; color: #64748b; margin: 4px 0 0;">14 perangkat terdaftar · 8 online</p></div>
+      <div style="margin-left: auto; display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #d8dfe8; border-radius: 6px; padding: 8px 12px; width: 240px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input placeholder="Cari nama / hostname…" style="border: none; outline: none; font-size: 13px; font-family: inherit; width: 100%; color: #0f172a; background: transparent;"></div>
+        <button style="display: inline-flex; align-items: center; gap: 8px; background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Daftarkan Perangkat</button>
+      </div>
+    </div>
+
+    <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;">
+      <!-- header row -->
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 11px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #94a3b8;">
+        <span>Perangkat</span><span>Kategori</span><span>Sinkronisasi</span><span>Terakhir</span><span>Privasi</span>
+      </div>
+      <!-- rows -->
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span><div><div style="font-size: 14px; font-weight: 700;">WS-07 · GPU-A100</div><div style="font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;">gpu-a100.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #475569;">lab_workstation</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a;"></span>online</span></span>
+        <span style="font-size: 13px; color: #64748b;">baru saja</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #16a34a; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg>Aktif</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #faf5ff; color: #7c3aed; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg></span><div><div style="font-size: 14px; font-weight: 700;">Laptop-Pinjam-01</div><div style="font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;">loan-01.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #475569;">loaned_laptop</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #fef3c7; color: #b45309; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #d97706;"></span>stale</span></span>
+        <span style="font-size: 13px; color: #64748b;">12m lalu</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #16a34a; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg>Aktif</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #f1f5f9; color: #334155; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8"></path></svg></span><div><div style="font-size: 14px; font-weight: 700;">Server-Sim-Main</div><div style="font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;">sim-main.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #475569;">server</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a;"></span>online</span></span>
+        <span style="font-size: 13px; color: #64748b;">baru saja</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #94a3b8; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"></path></svg>Headless</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #f1f5f9; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #f1f5f9; color: #64748b; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span><div><div style="font-size: 14px; font-weight: 700;">WS-11 · Desk-J</div><div style="font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;">desk-j.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #475569;">lab_workstation</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #f1f5f9; color: #6b7280; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #9ca3af;"></span>offline</span></span>
+        <span style="font-size: 13px; color: #64748b;">3j lalu</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #16a34a; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg>Aktif</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #f1f5f9; color: #64748b; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg></span><div><div style="font-size: 14px; font-weight: 700;">HP-Lab-Android</div><div style="font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;">belum tersambung</div></div></div>
+        <span style="font-size: 13px; color: #475569;">mobile_device</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #eef2f6; color: #475569; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1;"></span>never_seen</span></span>
+        <span style="font-size: 13px; color: #cbd5e1;">—</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #94a3b8; font-weight: 600;">—</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- DARK -->
+  <div style="background: #0b1120; border: 1px solid #1e293b; border-radius: 14px; padding: 24px 26px; margin-bottom: 44px;">
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap;">
+      <div><h1 style="font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0; color: #f1f5f9;">Devices</h1><p style="font-size: 13px; color: #94a3b8; margin: 4px 0 0;">14 perangkat terdaftar · 8 online</p></div>
+      <div style="margin-left: auto; display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 8px 12px; width: 240px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg><input placeholder="Cari nama / hostname…" style="border: none; outline: none; font-size: 13px; font-family: inherit; width: 100%; color: #f1f5f9; background: transparent;"></div>
+        <button style="display: inline-flex; align-items: center; gap: 8px; background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Daftarkan Perangkat</button>
+      </div>
+    </div>
+    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; overflow: hidden;">
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 11px 18px; background: #0f172a; border-bottom: 1px solid #334155; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b;">
+        <span>Perangkat</span><span>Kategori</span><span>Sinkronisasi</span><span>Terakhir</span><span>Privasi</span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #0f172a; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: rgba(37,99,235,.2); color: #60a5fa; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span><div><div style="font-size: 14px; font-weight: 700; color: #f1f5f9;">WS-07 · GPU-A100</div><div style="font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;">gpu-a100.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #cbd5e1;">lab_workstation</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e;"></span>online</span></span>
+        <span style="font-size: 13px; color: #94a3b8;">baru saja</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #4ade80; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg>Aktif</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #0f172a; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: rgba(124,58,237,.22); color: #c4b5fd; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg></span><div><div style="font-size: 14px; font-weight: 700; color: #f1f5f9;">Laptop-Pinjam-01</div><div style="font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;">loan-01.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #cbd5e1;">loaned_laptop</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(245,158,11,.16); color: #fbbf24; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #f59e0b;"></span>stale</span></span>
+        <span style="font-size: 13px; color: #94a3b8;">12m lalu</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #4ade80; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg>Aktif</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #0f172a; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #334155; color: #cbd5e1; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8"></path></svg></span><div><div style="font-size: 14px; font-weight: 700; color: #f1f5f9;">Server-Sim-Main</div><div style="font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;">sim-main.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #cbd5e1;">server</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e;"></span>online</span></span>
+        <span style="font-size: 13px; color: #94a3b8;">baru saja</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #64748b; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"></path></svg>Headless</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #0f172a; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #334155; color: #94a3b8; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span><div><div style="font-size: 14px; font-weight: 700; color: #f1f5f9;">WS-11 · Desk-J</div><div style="font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;">desk-j.ftmm.lab</div></div></div>
+        <span style="font-size: 13px; color: #cbd5e1;">lab_workstation</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(107,114,128,.16); color: #9ca3af; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #6b7280;"></span>offline</span></span>
+        <span style="font-size: 13px; color: #94a3b8;">3j lalu</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #4ade80; font-weight: 600;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path></svg>Aktif</span></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 2.2fr 1.4fr 1fr 1.2fr 1fr; gap: 12px; padding: 14px 18px; align-items: center; cursor: pointer;">
+        <div style="display: flex; align-items: center; gap: 11px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: #334155; color: #94a3b8; display: flex; align-items: center; justify-content: center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"></rect><line x1="12" y1="18" x2="12" y2="18"></line></svg></span><div><div style="font-size: 14px; font-weight: 700; color: #f1f5f9;">HP-Lab-Android</div><div style="font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;">belum tersambung</div></div></div>
+        <span style="font-size: 13px; color: #cbd5e1;">mobile_device</span>
+        <span><span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(148,163,184,.14); color: #94a3b8; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #475569;"></span>never_seen</span></span>
+        <span style="font-size: 13px; color: #475569;">—</span>
+        <span style="font-size: 12px; color: #64748b;">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 2. ENROLL DIALOG ================= -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 12px;">02 — Enroll Dialog</div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 44px;">
+    <!-- L: form step -->
+    <div style="background: rgba(15,23,42,.28); border-radius: 14px; padding: 30px; display: flex; align-items: center; justify-content: center;">
+      <div style="width: 420px; max-width: 100%; background: #fff; border-radius: 12px; box-shadow: 0 20px 50px rgba(15,23,42,.28); overflow: hidden;">
+        <div style="padding: 20px 22px 0; display: flex; align-items: center; gap: 10px;"><span style="width: 34px; height: 34px; border-radius: 8px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg></span><div style="font-size: 17px; font-weight: 700;">Daftarkan Perangkat</div></div>
+        <div style="padding: 18px 22px;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 8px;">Kategori</label>
+          <div style="display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px;">
+            <span style="padding: 6px 12px; border-radius: 999px; background: #2563eb; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;">lab_workstation</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer;">office_workstation</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer;">loaned_laptop</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer;">mobile_device</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer;">server</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 600; cursor: pointer;">custom</span>
+          </div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 6px;">Nama tampilan <span style="color:#94a3b8; font-weight:500;">· opsional</span></label>
+          <input placeholder="mis. WS-13 · GPU-B" style="width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; font-size: 14px; font-family: inherit; color: #0f172a; margin-bottom: 12px; box-sizing: border-box;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 6px;">Catatan <span style="color:#94a3b8; font-weight:500;">· opsional</span></label>
+          <input placeholder="mis. Node baru ruang server" style="width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; font-size: 14px; font-family: inherit; color: #0f172a; box-sizing: border-box;">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 4px 22px 20px;">
+          <button style="background: #fff; color: #334155; border: 1px solid #d8dfe8; border-radius: 6px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;">Batal</button>
+          <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;">Buat Kode</button>
+        </div>
+      </div>
+    </div>
+    <!-- D: generated code step -->
+    <div style="background: rgba(0,0,0,.55); border-radius: 14px; padding: 30px; display: flex; align-items: center; justify-content: center;">
+      <div style="width: 420px; max-width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.7); overflow: hidden;">
+        <div style="padding: 20px 22px 0; display: flex; align-items: center; gap: 10px;"><span style="width: 34px; height: 34px; border-radius: 8px; background: rgba(34,197,94,.16); color: #4ade80; display: flex; align-items: center; justify-content: center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><div><div style="font-size: 17px; font-weight: 700; color: #f1f5f9;">Kode Undangan Dibuat</div><div style="font-size: 12px; color: #94a3b8;">lab_workstation · WS-13 · GPU-B</div></div></div>
+        <div style="padding: 18px 22px;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 8px;">Kode sekali pakai</label>
+          <div style="display: flex; gap: 8px; align-items: stretch;">
+            <div style="flex: 1; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 26px; font-weight: 700; letter-spacing: 0.12em; color: #f1f5f9; text-align: center;">7XK2-9QF4</div>
+            <button style="background: #2563eb; color: #fff; border: none; border-radius: 8px; padding: 0 18px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 7px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>Salin</button>
+          </div>
+          <!-- copied confirm -->
+          <div style="display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; background: rgba(34,197,94,.14); color: #4ade80; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>Kode disalin</div>
+          <!-- countdown -->
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 16px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 13px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2 2M9 2h6"></path></svg>
+            <span style="font-size: 13px; color: #cbd5e1;">Kedaluwarsa dalam <strong style="color:#fbbf24; font-family: ui-monospace, monospace;">14:38</strong></span>
+          </div>
+          <!-- out-of-band warning -->
+          <div style="display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.35); border-radius: 8px; padding: 11px 13px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:1px;"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>
+            <div style="font-size: 12.5px; color: #fcd34d; line-height: 1.5;">Kode ini <strong>hanya ditampilkan sekali</strong>. Sampaikan langsung ke teknisi perangkat (tatap muka / telepon) — jangan lewat chat publik.</div>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 4px 22px 20px;">
+          <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;">Selesai</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 3. DEVICE DETAIL DRAWER ================= -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 12px;">03 — Device Detail (drawer)</div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+    <!-- LIGHT drawer -->
+    <div style="background: rgba(15,23,42,.2); border-radius: 14px; padding: 20px; display: flex; justify-content: flex-end;">
+      <div style="width: 460px; max-width: 100%; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 20px 50px rgba(15,23,42,.2); overflow: hidden;">
+        <div style="padding: 18px 20px; border-bottom: 1px solid #eef1f5; display: flex; align-items: center; gap: 11px;">
+          <span style="width: 38px; height: 38px; border-radius: 9px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span>
+          <div style="flex:1;"><div style="font-size: 17px; font-weight: 800;">WS-07 · GPU-A100</div><div style="font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;">gpu-a100.ftmm.lab</div></div>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a;"></span>online</span>
+        </div>
+        <div style="padding: 16px 20px; max-height: 520px; overflow: auto;">
+          <!-- meta + policy -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+            <div><div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Kategori</div><div style="font-size: 13px; font-weight: 600; margin-top: 2px;">lab_workstation</div></div>
+            <div><div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Didaftarkan</div><div style="font-size: 13px; font-weight: 600; margin-top: 2px;">2 Jul 2026</div></div>
+          </div>
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 11px 13px; margin-bottom: 18px; display: flex; gap: 9px; align-items: flex-start;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:1px;"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path></svg>
+            <div style="font-size: 12.5px; color: #1e40af; line-height: 1.5;"><strong>Kebijakan privasi:</strong> Cuplikan memberi tahu pengguna. Tanpa perekaman keystroke. Log penuh &amp; dapat diaudit.</div>
+          </div>
+
+          <!-- sync health -->
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 10px;">Kesehatan Sinkronisasi (7 hari)</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px;">
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #15803d;">312</div><div style="font-size: 10px; color: #16a34a; font-weight: 600;">online</div></div>
+            <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #b45309;">4</div><div style="font-size: 10px; color: #d97706; font-weight: 600;">stale</div></div>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #6b7280;">2</div><div style="font-size: 10px; color: #94a3b8; font-weight: 600;">offline</div></div>
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #b91c1c;">1</div><div style="font-size: 10px; color: #dc2626; font-weight: 600;">failed</div></div>
+          </div>
+
+          <!-- audit list -->
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 10px;">Aksi Terbaru</div>
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f8fafc; border: 1px solid #eef1f5; border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600;">screenshot</div><div style="font-size: 11px; color: #94a3b8;">14:32:07 · oleh admin</div></div><span style="padding: 2px 9px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700;">done</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f8fafc; border: 1px solid #eef1f5; border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600;">lock</div><div style="font-size: 11px; color: #94a3b8;">13:58:22 · oleh admin</div></div><span style="padding: 2px 9px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 11px; font-weight: 700;">queued</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600;">restart</div><div style="font-size: 11px; color: #b91c1c;">11:04:10 · timeout agen</div></div><span style="padding: 2px 9px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 700;">failed</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f8fafc; border: 1px solid #eef1f5; border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600;">message</div><div style="font-size: 11px; color: #94a3b8;">10:12:45 · kedaluwarsa</div></div><span style="padding: 2px 9px; border-radius: 999px; background: #f1f5f9; color: #6b7280; font-size: 11px; font-weight: 700;">expired</span></div>
+          </div>
+
+          <!-- latest screenshot -->
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin-bottom: 10px;">Cuplikan Terakhir</div>
+          <div style="aspect-ratio: 16/9; border-radius: 8px; background: linear-gradient(135deg,#1e293b,#0f172a); display: flex; align-items: center; justify-content: center; margin-bottom: 4px;"><span style="font-family: ui-monospace, monospace; font-size: 12px; color: #475569;">screenshot · 14:32:07</span></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid #eef1f5;">
+          <button style="background: #fff; color: #334155; border: 1px solid #d8dfe8; border-radius: 6px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;">Tutup</button>
+          <button style="display: inline-flex; align-items: center; gap: 7px; background: #fff; color: #b91c1c; border: 1px solid #fecaca; border-radius: 6px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>Cabut Akses</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DARK drawer + revoke confirm overlay -->
+    <div style="background: rgba(0,0,0,.4); border-radius: 14px; padding: 20px; display: flex; justify-content: flex-end; position: relative;">
+      <div style="width: 460px; max-width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.7); overflow: hidden;">
+        <div style="padding: 18px 20px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 11px;">
+          <span style="width: 38px; height: 38px; border-radius: 9px; background: rgba(37,99,235,.2); color: #60a5fa; display: flex; align-items: center; justify-content: center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg></span>
+          <div style="flex:1;"><div style="font-size: 17px; font-weight: 800; color: #f1f5f9;">WS-07 · GPU-A100</div><div style="font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;">gpu-a100.ftmm.lab</div></div>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 12px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e;"></span>online</span>
+        </div>
+        <div style="padding: 16px 20px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+            <div><div style="font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Kategori</div><div style="font-size: 13px; font-weight: 600; margin-top: 2px; color: #f1f5f9;">lab_workstation</div></div>
+            <div><div style="font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Didaftarkan</div><div style="font-size: 13px; font-weight: 600; margin-top: 2px; color: #f1f5f9;">2 Jul 2026</div></div>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #94a3b8; margin-bottom: 10px;">Kesehatan Sinkronisasi (7 hari)</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 20px;">
+            <div style="background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #4ade80;">312</div><div style="font-size: 10px; color: #4ade80; font-weight: 600;">online</div></div>
+            <div style="background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.3); border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #fbbf24;">4</div><div style="font-size: 10px; color: #fbbf24; font-weight: 600;">stale</div></div>
+            <div style="background: rgba(148,163,184,.12); border: 1px solid rgba(148,163,184,.3); border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #94a3b8;">2</div><div style="font-size: 10px; color: #94a3b8; font-weight: 600;">offline</div></div>
+            <div style="background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3); border-radius: 8px; padding: 10px; text-align: center;"><div style="font-size: 20px; font-weight: 800; color: #f87171;">1</div><div style="font-size: 10px; color: #f87171; font-weight: 600;">failed</div></div>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #94a3b8; margin-bottom: 10px;">Aksi Terbaru</div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #f1f5f9;">screenshot</div><div style="font-size: 11px; color: #64748b;">14:32:07 · oleh admin</div></div><span style="padding: 2px 9px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 11px; font-weight: 700;">done</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #f1f5f9;">lock</div><div style="font-size: 11px; color: #64748b;">13:58:22 · oleh admin</div></div><span style="padding: 2px 9px; border-radius: 999px; background: rgba(37,99,235,.2); color: #93c5fd; font-size: 11px; font-weight: 700;">queued</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); border-radius: 8px;"><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #f1f5f9;">restart</div><div style="font-size: 11px; color: #f87171;">11:04:10 · timeout agen</div></div><span style="padding: 2px 9px; border-radius: 999px; background: rgba(239,68,68,.18); color: #f87171; font-size: 11px; font-weight: 700;">failed</span></div>
+          </div>
+        </div>
+      </div>
+      <!-- revoke confirm overlay -->
+      <div style="position: absolute; inset: 0; background: rgba(2,6,23,.72); border-radius: 14px; display: flex; align-items: center; justify-content: center; padding: 24px;">
+        <div style="width: 360px; max-width: 100%; background: #1e293b; border: 1px solid #334155; border-top: 4px solid #dc2626; border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.8); overflow: hidden;">
+          <div style="padding: 20px 22px 0; display: flex; align-items: center; gap: 11px;"><span style="width: 36px; height: 36px; border-radius: 9px; background: rgba(239,68,68,.18); color: #f87171; display: flex; align-items: center; justify-content: center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></span><div style="font-size: 16px; font-weight: 700; color: #f1f5f9;">Cabut akses WS-07?</div></div>
+          <div style="padding: 12px 22px 18px;"><p style="font-size: 13px; color: #cbd5e1; line-height: 1.5; margin: 0 0 12px;">Perangkat berhenti melaporkan seketika dan harus didaftarkan ulang dengan kode baru untuk tersambung kembali.</p>
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #cbd5e1; cursor: pointer;"><span style="width: 18px; height: 18px; border: 1.5px solid #ef4444; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; background: #dc2626;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span>Saya paham konsekuensinya.</label>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 2px 22px 20px;">
+            <button style="background: transparent; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;">Batal</button>
+            <button style="background: #dc2626; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 12px rgba(220,38,38,.5); font-family: inherit;">Cabut Akses</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -37,16 +37,39 @@ $messageText = $window.FindName('MessageText')
 $messageIconBadge = $window.FindName('MessageIconBadge')
 $messageIcon = $window.FindName('MessageIcon')
 $messageTitle = $window.FindName('MessageTitle')
-$exitBtn = $window.FindName('ExitBtn')
+$selesaiBtn = $window.FindName('SelesaiBtn')
 
-$exitBtn.Add_Click({
-    # No confirmation prompt (product decision): END ends the session and locks
-    # immediately. Close-LogbookSessionAndLock also spawns the next sign-in form
-    # so a new session reliably starts when the user returns.
-    try { Close-LogbookSessionAndLock } catch { Write-LogbookError "END button failed: $($_.Exception.Message)" }
-    $script:allowClose = $true
-    $timer.Stop()
-    $window.Close()
+# SELESAI is a two-step control (design: LogiX Timer Widget). First press ARMS
+# it (turns red, "Tekan lagi untuk selesai"); a confirming second press within
+# ~3s ends the session via the unchanged Close-LogbookSessionAndLock path. If
+# ignored, the clock tick auto-reverts it. Lock/sleep remain a pause, not a
+# departure -- only this deliberate two-step ends a session from the widget.
+$script:selesaiArmed = $false
+$script:selesaiArmTick = -1
+$brushConv = New-Object System.Windows.Media.BrushConverter
+$theme = Get-LogbookTheme $cfg
+function Reset-LogbookSelesai {
+    $script:selesaiArmed = $false
+    $selesaiBtn.Content = (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
+    $selesaiBtn.Background = [System.Windows.Media.Brushes]::Transparent
+    $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.border)
+    $selesaiBtn.Foreground = $brushConv.ConvertFromString($theme.muted)
+}
+$selesaiBtn.Add_Click({
+    if (-not $script:selesaiArmed) {
+        $script:selesaiArmed = $true
+        $script:selesaiArmTick = $script:tick
+        $selesaiBtn.Content = (Get-LogbookText $cfg 'timerEndArmed' 'Tekan lagi untuk selesai')
+        $red = $brushConv.ConvertFromString($theme.signalCritical)
+        $selesaiBtn.Background = $red
+        $selesaiBtn.BorderBrush = $red
+        $selesaiBtn.Foreground = $brushConv.ConvertFromString('#FFFFFF')
+    } else {
+        try { Close-LogbookSessionAndLock } catch { Write-LogbookError "SELESAI failed: $($_.Exception.Message)" }
+        $script:allowClose = $true
+        $timer.Stop()
+        $window.Close()
+    }
 })
 
 # Smooth breathing pulse instead of a discrete character swap.
@@ -72,10 +95,11 @@ function Sync-LogbookTimerShape {
 # the XML-structural tests. These constants trade a little visual slack
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
-$script:HEIGHT_COLLAPSED = 120   # status + timer only
-$script:HEIGHT_EXPANDED  = 205   # + nama/tujuan/device + accent bar (measured
-                                 # ~85 at the narrow width; 190 clipped the
-                                 # accent bar's bottom margin)
+$script:HEIGHT_COLLAPSED = 120   # status + timer only (not used at rest now that
+                                 # info+SELESAI stay visible; kept for safety)
+$script:HEIGHT_EXPANDED  = 252   # + nama/tujuan/device + accent bar + the
+                                 # always-visible two-step SELESAI button
+                                 # (~46px). Tune visually via preview_client.ps1.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default
@@ -149,17 +173,10 @@ function Update-LogbookTimerSize {
 # just the clock, letting the user focus on time, not data. The window
 # then animates to the matching size (narrow clock-only at rest).
 function Update-LogbookInfoVisibility {
-    $elapsedSec = ((Get-Date) - $start).TotalSeconds
-    $shouldShow = $script:isHovering -or ($elapsedSec -le 10)
-    $isShown = $infoSection.Visibility -eq 'Visible'
-    if ($shouldShow -ne $isShown) {
-        $infoSection.Visibility = if ($shouldShow) { 'Visible' } else { 'Collapsed' }
-    }
-    # The END button only appears while the pointer is over the widget -- NOT
-    # during the first-10s info reveal -- so the resting widget is just the
-    # status + clock, and ending a session is a deliberate hover-then-click.
-    $exitVisible = if ($script:isHovering) { 'Visible' } else { 'Collapsed' }
-    if ($exitBtn.Visibility -ne $exitVisible) { $exitBtn.Visibility = $exitVisible }
+    # Info + the always-visible SELESAI button stay shown (design's resting
+    # "Default" state) -- SELESAI must be present at all times, no hover-to-
+    # reveal. The widget still grows for an incoming message (Expanded).
+    if ($infoSection.Visibility -ne 'Visible') { $infoSection.Visibility = 'Visible' }
     Update-LogbookTimerSize
 }
 $window.Add_MouseEnter({ $script:isHovering = $true; Update-LogbookInfoVisibility })
@@ -171,9 +188,14 @@ $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
 # always reads as urgent red regardless of the faculty's chosen brand accent;
 # anything else (Direction Message and future reasons) uses the configured
 # accent color instead.
+# Three notification temperatures (design: LogiX Notifications). Emergency is
+# always urgent red; a Screen View Notice uses its own calm privacy signal
+# (never alarm-red); everything else uses the configured brand accent.
 function Get-LogbookMessageBorderColor([string]$Reason, $Cfg) {
-    if ($Reason -eq 'Emergency Alert') { return '#EF4444' }
-    return [string]$Cfg.branding.colors.accent
+    $th = Get-LogbookTheme $Cfg
+    if ($Reason -eq 'Emergency Alert') { return $th.signalCritical }
+    if ($Reason -eq 'Screen View Notice') { return $th.signalNotice }
+    return $th.accent
 }
 
 function Set-LogbookMessageContent($Msg) {
@@ -185,13 +207,47 @@ function Set-LogbookMessageContent($Msg) {
     $messageIconBadge.Background = $brush
     $messageTitle.Foreground = $brush
     if ($Msg.reason -eq 'Emergency Alert') {
-        $messageTitle.Text = 'Emergency Alert'
+        $messageTitle.Text = (Get-LogbookText $cfg 'emergencyTitle' 'Peringatan Sistem')
         $messageIcon.Text = '!'
+    } elseif ($Msg.reason -eq 'Screen View Notice') {
+        # Variant 2 -- privacy notice: dignified, calm teal, the privacy promise
+        # made visible. allow_reply is false, so no reply box is offered.
+        $messageTitle.Text = (Get-LogbookText $cfg 'noticePrivacyTitle' 'Pemberitahuan Privasi')
+        $messageIcon.Text = 'i'
     } else {
-        $messageTitle.Text = 'Pesan dari Admin'
+        $messageTitle.Text = (Get-LogbookText $cfg 'msgFromAdmin' 'Pesan dari Admin')
         $messageIcon.Text = 'i'
     }
     $messageText.Text = [string]$Msg.text
+}
+
+# Variant 3 -- emergency escapes the widget to a centered, dimmed overlay with
+# a live 30->0 DispatcherTimer countdown, so a pending shutdown is unmissable.
+function Show-LogbookEmergencyOverlay([int]$Seconds = 30) {
+    try {
+        $ow = [Windows.Markup.XamlReader]::Load(
+            (New-Object System.Xml.XmlNodeReader ([xml](Build-LogbookEmergencyOverlayXaml $cfg))))
+        $ow.Topmost = $true
+        $count = $ow.FindName('CountNumber')
+        $ring = $ow.FindName('Ring')
+        $script:emgRemaining = $Seconds
+        $count.Text = [string]$Seconds
+        $pa = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.3, [TimeSpan]::FromSeconds(0.6))
+        $pa.AutoReverse = $true
+        $pa.RepeatBehavior = [System.Windows.Media.Animation.RepeatBehavior]::Forever
+        $ring.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $pa)
+        $et = New-Object Windows.Threading.DispatcherTimer
+        $et.Interval = [TimeSpan]::FromSeconds(1)
+        $et.Add_Tick({
+            $script:emgRemaining -= 1
+            if ($script:emgRemaining -le 0) { $count.Text = '0'; $et.Stop(); $ow.Close(); return }
+            $count.Text = [string]$script:emgRemaining
+        })
+        $ow.FindName('SavedBtn').Add_Click({ $et.Stop(); $ow.Close() })
+        $ow.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape' -or $e.SystemKey -eq 'F4') { $e.Handled = $true } })
+        $et.Start()
+        [void]$ow.Show()
+    } catch { Write-LogbookError "Emergency overlay failed: $($_.Exception.Message)" }
 }
 
 function Show-LogbookPendingMessage {
@@ -201,6 +257,13 @@ function Show-LogbookPendingMessage {
         $receivedAt = [datetime]$msg.received_at
         if (((Get-Date) - $receivedAt).TotalMinutes -gt 5) {
             Remove-Item $msgPath -Force -ErrorAction SilentlyContinue
+            return
+        }
+        # Variant 3: emergencies escape to the centered overlay instead of the
+        # inline widget message -- too important to live in a corner.
+        if ([string]$msg.reason -eq 'Emergency Alert') {
+            Remove-Item $msgPath -Force -ErrorAction SilentlyContinue
+            Show-LogbookEmergencyOverlay 30
             return
         }
         Set-LogbookMessageContent $msg
@@ -255,6 +318,9 @@ $timer.Add_Tick({
     $clockMain.Text = ('{0:00}:{1:00}' -f [math]::Floor($elapsed.TotalHours), $elapsed.Minutes)
     $clockSeconds.Text = ('{0:00}' -f $elapsed.Seconds)
     $script:tick += 1
+
+    # Auto-revert an armed SELESAI that wasn't confirmed within ~3s.
+    if ($script:selesaiArmed -and ($script:tick - $script:selesaiArmTick) -ge 3) { Reset-LogbookSelesai }
 
     Update-LogbookInfoVisibility
     Show-LogbookPendingMessage

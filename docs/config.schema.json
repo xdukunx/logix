@@ -19,11 +19,27 @@
         "subtitle": { "type": "string" },
         "colors": {
           "type": "object",
+          "description": "Client & dashboard palette. The client (Windows popup/timer) resolves these via Get-LogbookTheme with the deep-navy Client Foundation defaults; a lab re-themes by overriding any key.",
           "properties": {
-            "primary": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
-            "accent":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
-            "muted":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
-            "text":    { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+            "primary":         { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Elevated surface (cards / inputs)." },
+            "accent":          { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Brand blue (#2563EB by default)." },
+            "muted":           { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Muted text." },
+            "text":            { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Primary text." },
+            "surface":         { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Deepest surface (fullscreen popup)." },
+            "surfaceWidget":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Corner timer widget surface." },
+            "surfaceElevated": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Raised panels / inputs." },
+            "border":          { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "1px hairline border." }
+          },
+          "additionalProperties": false
+        },
+        "signals": {
+          "type": "object",
+          "description": "Solid status-bar signal colours -- status is a colored edge on a calm surface, never a tinted card.",
+          "properties": {
+            "normal":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Session running (green)." },
+            "notice":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Privacy / screenshot (calm blue, never red)." },
+            "warning":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Attention (amber)." },
+            "critical": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Power countdown / urgent (red)." }
           },
           "additionalProperties": false
         }

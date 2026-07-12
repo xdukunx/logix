@@ -8,7 +8,6 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Dialog } from "@astryxdesign/core/Dialog";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Grid } from "@astryxdesign/core/Grid";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Table } from "@astryxdesign/core/Table";
@@ -18,6 +17,7 @@ import {
   ClockIcon,
   QueueListIcon,
   ServerStackIcon,
+  ShieldCheckIcon,
   SignalIcon,
   SignalSlashIcon,
 } from "@heroicons/react/24/outline";
@@ -25,6 +25,12 @@ import {
 import { fetchWithAuth, getJson, postEmpty, sendJson } from "../api";
 import EnrollDialog from "../components/EnrollDialog";
 import StatCard from "../components/StatCard";
+import ConfirmModal from "../components/modals/ConfirmModal";
+import RenameModal from "../components/modals/RenameModal";
+import ScreenshotRequestModal from "../components/modals/ScreenshotRequestModal";
+import EmptyState from "../components/states/EmptyState";
+import ErrorState from "../components/states/ErrorState";
+import { SkeletonGrid } from "../components/states/Skeleton";
 import type { CommandStatus, Device, DeviceDetail, DeviceScreenshot, SyncStatus } from "../types";
 import { formatDateTime, timeAgo, usePolling } from "../util";
 
@@ -62,6 +68,10 @@ export default function Devices() {
   const [detail, setDetail] = useState<DeviceDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [screenshot, setScreenshot] = useState<DeviceScreenshot | null>(null);
+  // Action modals (replace native prompt()/confirm()).
+  const [isRenameOpen, setRenameOpen] = useState(false);
+  const [isScreenshotOpen, setScreenshotOpen] = useState(false);
+  const [isRevokeOpen, setRevokeOpen] = useState(false);
 
   const notify = useCallback(
     (message: string, isError = false) =>
@@ -113,60 +123,62 @@ export default function Devices() {
     if (detailId) loadDetail(detailId);
   }, [detailId, loadDetail]);
 
-  const renameDevice = (hostname: string, currentName: string | null) => {
-    const name = prompt(`Nama baru untuk ${hostname}:`, currentName || "");
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) {
-      notify("Nama tidak boleh kosong.", true);
-      return;
+  const submitRename = async (display_name: string) => {
+    if (!detail) return;
+    try {
+      await sendJson(
+        "/api/devices/rename",
+        "PUT",
+        { hostname: detail.device.hostname, display_name },
+        "Gagal mengubah nama device",
+      );
+      notify(`Device diganti nama menjadi "${display_name}"`);
+      if (detailId) loadDetail(detailId);
+      refresh();
+    } catch (err) {
+      notify((err as Error).message, true);
     }
-    sendJson("/api/devices/rename", "PUT", { hostname, display_name: trimmed }, "Gagal mengubah nama device")
-      .then(() => {
-        notify(`Device diganti nama menjadi "${trimmed}"`);
-        if (detailId) loadDetail(detailId);
-        refresh();
-      })
-      .catch((err) => notify(err.message, true));
   };
 
-  const revokeDevice = (deviceId: string, hostname: string) => {
-    if (!confirm(`Cabut API key untuk ${hostname}? Device ini tidak akan bisa mengirim heartbeat sampai didaftarkan ulang.`)) return;
-    postEmpty(`/api/devices/${deviceId}/revoke`, "Gagal mencabut API key device")
-      .then(() => {
-        notify(`API key untuk ${hostname} telah dicabut.`);
-        loadDetail(deviceId);
-        refresh();
-      })
-      .catch((err) => notify(err.message, true));
+  const submitRevoke = async () => {
+    if (!detailId || !detail) return;
+    try {
+      await postEmpty(`/api/devices/${detailId}/revoke`, "Gagal mencabut API key device");
+      notify(`API key untuk ${detail.device.hostname} telah dicabut.`);
+      loadDetail(detailId);
+      refresh();
+    } catch (err) {
+      notify((err as Error).message, true);
+    }
   };
 
-  const requestScreenshot = (hostname: string) => {
-    const reason = prompt(`Alasan mengambil screenshot ${hostname} (kebijakan device dapat mewajibkan ini):`, "");
-    if (reason === null) return;
+  const submitScreenshot = async (reason: string) => {
+    if (!detail) return;
+    const hostname = detail.device.hostname;
     const prevAt = screenshot?.captured_at ?? "";
-    sendJson("/api/control/screenshot", "POST", { hostname, reason: reason.trim() }, "Gagal meminta screenshot")
-      .then(async () => {
-        notify("Permintaan screenshot dikirim. Menunggu device merespons...");
-        // Poll for the new capture so it appears here without reopening.
-        if (!detailId) return;
-        for (let i = 0; i < 12; i++) {
-          await new Promise((r) => setTimeout(r, 1500));
-          try {
-            const res = await fetchWithAuth(`/api/devices/${detailId}/screenshot`);
-            if (res.ok) {
-              const shot: DeviceScreenshot = await res.json();
-              if (shot.captured_at !== prevAt) {
-                setScreenshot(shot);
-                return;
-              }
+    try {
+      await sendJson("/api/control/screenshot", "POST", { hostname, reason }, "Gagal meminta screenshot");
+      notify("Permintaan screenshot dikirim. Menunggu device merespons...");
+      // Poll for the new capture so it appears here without reopening.
+      if (!detailId) return;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const res = await fetchWithAuth(`/api/devices/${detailId}/screenshot`);
+          if (res.ok) {
+            const shot: DeviceScreenshot = await res.json();
+            if (shot.captured_at !== prevAt) {
+              setScreenshot(shot);
+              return;
             }
-          } catch {
-            /* keep polling */
           }
+        } catch {
+          /* keep polling */
         }
-      })
-      .catch((err) => notify(err.message, true));
+      }
+    } catch (err) {
+      notify((err as Error).message, true);
+    }
   };
 
   const retryAction = (deviceId: string, actionId: number) => {
@@ -189,8 +201,13 @@ export default function Devices() {
 
   return (
     <VStack gap={6}>
-      <HStack gap={3} align="center" justify="between">
-        <Heading level={3}>Devices</Heading>
+      <HStack gap={3} align="center" justify="between" wrap="wrap">
+        <VStack gap={1}>
+          <Heading level={3}>Devices</Heading>
+          <Text type="supporting" color="secondary">
+            {counts.total} perangkat terdaftar · {counts.online} online
+          </Text>
+        </VStack>
         <EnrollDialog onEnrolled={refresh} />
       </HStack>
 
@@ -203,14 +220,13 @@ export default function Devices() {
       </Grid>
 
       {error ? (
-        <EmptyState title="Terjadi Kesalahan" description={error} />
+        <ErrorState description={error} onRetry={refresh} />
       ) : devices === null ? (
-        <Text type="body">Memuat data devices...</Text>
+        <SkeletonGrid count={3} />
       ) : devices.length === 0 ? (
         <EmptyState
-          icon={<ServerStackIcon style={{ width: 40, height: 40 }} />}
-          title="No Devices Yet"
-          description="Devices will appear here once they send their first heartbeat."
+          title="Belum ada perangkat"
+          description="Perangkat muncul di sini setelah mengirim heartbeat pertama. Daftarkan satu untuk mulai."
         />
       ) : (
         <Table<Device>
@@ -259,9 +275,9 @@ export default function Devices() {
           </Heading>
 
           {detailError ? (
-            <EmptyState title="Terjadi Kesalahan" description={detailError} />
+            <ErrorState description={detailError} onRetry={() => detailId && loadDetail(detailId)} />
           ) : !detail ? (
-            <Text type="body">Memuat detail device...</Text>
+            <Text type="body">Memuat detail device…</Text>
           ) : (
             <>
               <Grid columns={3} gap={4}>
@@ -293,6 +309,14 @@ export default function Devices() {
                   <Text type="body"><strong>{(detail.device.privacy_mode as string) || "-"}</strong></Text>
                 </VStack>
               </Grid>
+
+              <HStack gap={2} align="start" style={{ background: "var(--lx-accent-weak)", border: "1px solid var(--color-border)", borderRadius: 8, padding: "11px 13px" }}>
+                <ShieldCheckIcon style={{ width: 18, height: 18, color: "var(--lx-accent)", flexShrink: 0, marginTop: 1 }} />
+                <Text type="supporting">
+                  Kebijakan privasi: cuplikan memberi tahu pengguna. Tanpa perekaman keystroke. Log
+                  penuh &amp; dapat diaudit.
+                </Text>
+              </HStack>
 
               <VStack gap={2}>
                 <Heading level={6}>Sync Health</Heading>
@@ -377,27 +401,46 @@ export default function Devices() {
               )}
 
               <HStack gap={2}>
-                <Button
-                  label="Rename"
-                  size="sm"
-                  onClick={() => renameDevice(detail.device.hostname, detail.device.display_name as string | null)}
-                />
-                <Button
-                  label="Ambil Screenshot"
-                  size="sm"
-                  onClick={() => requestScreenshot(detail.device.hostname)}
-                />
+                <Button label="Rename" size="sm" onClick={() => setRenameOpen(true)} />
+                <Button label="Ambil Screenshot" size="sm" onClick={() => setScreenshotOpen(true)} />
                 <Button
                   label="Revoke API Key"
                   size="sm"
                   variant="destructive"
-                  onClick={() => detailId && revokeDevice(detailId, detail.device.hostname)}
+                  onClick={() => setRevokeOpen(true)}
                 />
               </HStack>
             </>
           )}
         </VStack>
       </Dialog>
+
+      {detail && (
+        <>
+          <RenameModal
+            isOpen={isRenameOpen}
+            onClose={() => setRenameOpen(false)}
+            hostname={detail.device.hostname}
+            currentName={(detail.device.display_name as string) || detail.device.hostname}
+            onSubmit={submitRename}
+          />
+          <ScreenshotRequestModal
+            isOpen={isScreenshotOpen}
+            onClose={() => setScreenshotOpen(false)}
+            deviceLabel={(detail.device.display_name as string) || detail.device.hostname}
+            onSubmit={submitScreenshot}
+          />
+          <ConfirmModal
+            isOpen={isRevokeOpen}
+            onClose={() => setRevokeOpen(false)}
+            title={`Cabut API key ${detail.device.hostname}?`}
+            subtitle="Revoke API Key"
+            body="Device ini tidak akan bisa mengirim heartbeat sampai didaftarkan ulang."
+            confirmLabel="Cabut API Key"
+            onConfirm={submitRevoke}
+          />
+        </>
+      )}
     </VStack>
   );
 }

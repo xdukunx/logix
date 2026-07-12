@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #eef1f5; color: #0f172a; -webkit-font-smoothing: antialiased; }
+</style>
+</helmet>
+
+<div style="max-width: 1520px; margin: 0 auto; padding: 40px;">
+
+  <!-- ============ shared macro-ish: we render Light then Dark ============ -->
+
+  <!-- ==================== LIGHT ==================== -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 12px;">Settings — Light</div>
+  <div style="background: #f4f6f9; border: 1px solid #dbe1ea; border-radius: 16px; padding: 26px 28px; margin-bottom: 44px;">
+
+    <!-- sticky header -->
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 22px;">
+      <div><h1 style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 0;">Pengaturan</h1><p style="font-size: 13px; color: #64748b; margin: 4px 0 0;">Konfigurasi LogiX · <span style="font-family: ui-monospace, monospace;">LogixConfig</span></p></div>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+        <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #b45309; background: #fef3c7; padding: 4px 11px; border-radius: 999px; font-weight: 600;"><span style="width:7px;height:7px;border-radius:50%;background:#d97706;"></span>3 perubahan belum disimpan</span>
+        <button style="background: #fff; color: #334155; border: 1px solid #d8dfe8; border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;">Atur Ulang</button>
+        <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;">Simpan Perubahan</button>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start;">
+      <!-- section nav -->
+      <div style="position: sticky; top: 20px; display: flex; flex-direction: column; gap: 2px;">
+        <div style="padding: 9px 12px; border-radius: 6px; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600;">Branding</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 13px; font-weight: 500;">Tipe Akses &amp; Tujuan</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 13px; font-weight: 500;">Perangkat</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 13px; font-weight: 500;">Laporan</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #475569; font-size: 13px; font-weight: 500;">Privasi</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0;">
+
+        <!-- 1 BRANDING -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px;">Branding</div>
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 20px;">Tampilan logo, judul, dan warna pada halaman masuk &amp; header.</div>
+          <div style="display: grid; grid-template-columns: 1fr 300px; gap: 24px;">
+            <div style="display: flex; flex-direction: column; gap: 14px;">
+              <div><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Teks Logo</label><input value="LOGIX" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;font-size:14px;font-family:inherit;color:#0f172a;"></div>
+              <div><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Judul</label><input value="LogiX" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;font-size:14px;font-family:inherit;color:#0f172a;"></div>
+              <div><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Subjudul</label><input value="Lab Access Logbook" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;font-size:14px;font-family:inherit;color:#0f172a;"></div>
+              <div style="display:flex;gap:14px;">
+                <div style="flex:1;"><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Warna Primer</label><div style="display:flex;align-items:center;gap:8px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;"><span style="width:22px;height:22px;border-radius:5px;background:#2563eb;"></span><span style="font-size:13px;font-family:ui-monospace,monospace;color:#334155;">#2563EB</span></div></div>
+                <div style="flex:1;"><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Warna Aksen</label><div style="display:flex;align-items:center;gap:8px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;"><span style="width:22px;height:22px;border-radius:5px;background:#16a34a;"></span><span style="font-size:13px;font-family:ui-monospace,monospace;color:#334155;">#16A34A</span></div></div>
+              </div>
+            </div>
+            <!-- LIVE PREVIEW -->
+            <div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;">Pratinjau Langsung</div>
+              <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;padding:20px;display:flex;align-items:center;justify-content:center;">
+                <div style="width:100%;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.1);padding:22px 20px;text-align:center;">
+                  <div style="width:44px;height:44px;border-radius:10px;background:#2563eb;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9l3 3-3 3"></path><line x1="12.5" y1="15" x2="16" y2="15"></line></svg></div>
+                  <div style="font-size:22px;font-weight:800;letter-spacing:0.18em;">LOGI<span style="color:#2563eb;">X</span></div>
+                  <div style="font-size:12px;color:#64748b;margin-top:3px;">Lab Access Logbook</div>
+                  <button style="width:100%;margin-top:14px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:8px;font-size:13px;font-weight:600;font-family:inherit;">Masuk dengan Google</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 ACCESS TYPES & PURPOSES -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px;">Tipe Akses &amp; Tujuan</div>
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 20px;">Kelola opsi <span style="font-family:ui-monospace,monospace;">accessTypes</span> dan dropdown <span style="font-family:ui-monospace,monospace;">purposes</span>.</div>
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:8px;">Tipe Akses</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:13px;font-weight:600;">Fisik <span style="width:16px;height:16px;border-radius:50%;background:rgba(29,78,216,.18);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#e2e8f0;color:#334155;font-size:13px;font-weight:600;font-family:ui-monospace,monospace;">SSH <span style="width:16px;height:16px;border-radius:50%;background:rgba(51,65,85,.18);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f3e8ff;color:#7c3aed;font-size:13px;font-weight:600;">AnyDesk <span style="width:16px;height:16px;border-radius:50%;background:rgba(124,58,237,.18);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">×</span></span>
+              <button style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:#fff;border:1px dashed #cbd5e1;color:#64748b;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Tambah</button>
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:8px;">Tujuan (dropdown)</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">Simulasi DFT <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">Analisis Data <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">Molecular Dynamics <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">Penulisan <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <button style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:#fff;border:1px dashed #cbd5e1;color:#64748b;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Tambah</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3 DEVICES -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px;">Perangkat</div>
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 20px;">Kategori perangkat &amp; pola penamaan otomatis.</div>
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:8px;">Kategori Perangkat (<span style="font-family:ui-monospace,monospace;">device_types</span>)</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">lab_workstation <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">office_workstation <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">loaned_laptop <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#f1f5f9;color:#334155;font-size:13px;font-weight:600;">server <span style="cursor:pointer;color:#94a3b8;">×</span></span>
+              <button style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:#fff;border:1px dashed #cbd5e1;color:#64748b;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Tambah</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Pola Penamaan</label><input value="WS-{n} · {label}" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;font-size:14px;font-family:ui-monospace,monospace;color:#0f172a;"></div>
+            <div><label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Contoh hasil</label><div style="border:1px solid #eef1f5;background:#f8fafc;border-radius:6px;padding:9px 12px;font-size:14px;font-family:ui-monospace,monospace;color:#64748b;">WS-07 · GPU-A100</div></div>
+          </div>
+        </div>
+
+        <!-- 4 REPORTS -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px;">Laporan</div>
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 18px;">Isi default file ekspor.</div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f1f5f9;"><div><div style="font-size:14px;font-weight:600;">Sertakan branding</div><div style="font-size:12px;color:#94a3b8;">Logo &amp; judul di kop laporan</div></div><div style="width:40px;height:23px;border-radius:999px;background:#2563eb;position:relative;cursor:pointer;"><span style="position:absolute;top:2px;right:2px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);"></span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f1f5f9;"><div><div style="font-size:14px;font-weight:600;">Ringkasan tujuan</div><div style="font-size:12px;color:#94a3b8;">Rekap sesi per tujuan</div></div><div style="width:40px;height:23px;border-radius:999px;background:#2563eb;position:relative;cursor:pointer;"><span style="position:absolute;top:2px;right:2px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);"></span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f1f5f9;"><div><div style="font-size:14px;font-weight:600;">Ringkasan perangkat</div><div style="font-size:12px;color:#94a3b8;">Jam per workstation</div></div><div style="width:40px;height:23px;border-radius:999px;background:#cbd5e1;position:relative;cursor:pointer;"><span style="position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);"></span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 2px;"><div><div style="font-size:14px;font-weight:600;">Cakupan default</div><div style="font-size:12px;color:#94a3b8;">Rentang saat membuka ekspor</div></div>
+              <div style="display:flex;background:#f1f5f9;border-radius:8px;padding:3px;"><button style="border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;background:transparent;color:#64748b;cursor:pointer;font-family:inherit;">7 hari</button><button style="border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;background:#fff;color:#0f172a;box-shadow:0 1px 2px rgba(15,23,42,.12);cursor:pointer;font-family:inherit;">30 hari</button><button style="border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;background:transparent;color:#64748b;cursor:pointer;font-family:inherit;">Bulan ini</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5 PRIVACY -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 22px 24px;">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:3px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path></svg><div style="font-size: 16px; font-weight: 700;">Privasi</div></div>
+          <div style="font-size: 13px; color: #64748b; margin-bottom: 18px;">Teks pemberitahuan yang dilihat pengguna, dan apa yang dicatat — transparan.</div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#64748b;margin-bottom:6px;">Teks Pemberitahuan Privasi</label>
+          <textarea style="width:100%;min-height:64px;border:1px solid #e2e8f0;border-radius:8px;padding:11px 13px;font-size:14px;font-family:inherit;color:#0f172a;resize:vertical;margin-bottom:18px;">LogiX mencatat siapa, cara, dan kapan perangkat lab digunakan untuk keperluan kehadiran dan penggunaan yang adil. Cuplikan layar selalu memberi tahu Anda.</textarea>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;">
+              <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#15803d;margin-bottom:12px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>Yang dicatat</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#166534;">
+                <div style="display:flex;gap:8px;"><span style="color:#16a34a;">•</span>Identitas pengguna (nama / NIM)</div>
+                <div style="display:flex;gap:8px;"><span style="color:#16a34a;">•</span>Tipe akses (fisik / SSH / AnyDesk)</div>
+                <div style="display:flex;gap:8px;"><span style="color:#16a34a;">•</span>Waktu mulai &amp; selesai sesi</div>
+                <div style="display:flex;gap:8px;"><span style="color:#16a34a;">•</span>Cuplikan atas permintaan (dgn notifikasi)</div>
+              </div>
+            </div>
+            <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;">
+              <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#b91c1c;margin-bottom:12px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>Yang TIDAK dicatat</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#991b1b;">
+                <div style="display:flex;gap:8px;"><span style="color:#dc2626;">•</span>Ketikan / keystroke</div>
+                <div style="display:flex;gap:8px;"><span style="color:#dc2626;">•</span>Isi layar secara diam-diam</div>
+                <div style="display:flex;gap:8px;"><span style="color:#dc2626;">•</span>File pribadi &amp; riwayat browsing</div>
+                <div style="display:flex;gap:8px;"><span style="color:#dc2626;">•</span>Mikrofon / kamera</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- toast -->
+    <div style="display:flex;justify-content:center;margin-top:22px;">
+      <div style="display:inline-flex;align-items:center;gap:11px;background:#fff;border:1px solid #e2e8f0;border-left:3px solid #16a34a;border-radius:8px;padding:12px 16px;box-shadow:0 8px 24px rgba(15,23,42,.12);"><span style="width:22px;height:22px;border-radius:50%;background:#dcfce7;color:#16a34a;display:flex;align-items:center;justify-content:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><span style="font-size:13px;font-weight:600;">Perubahan disimpan</span></div>
+    </div>
+
+  </div>
+
+  <!-- ==================== DARK ==================== -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 12px;">Settings — Dark</div>
+  <div style="background: #0b1120; border: 1px solid #1e293b; border-radius: 16px; padding: 26px 28px;">
+
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 22px;">
+      <div><h1 style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 0; color:#f1f5f9;">Pengaturan</h1><p style="font-size: 13px; color: #94a3b8; margin: 4px 0 0;">Konfigurasi LogiX · <span style="font-family: ui-monospace, monospace;">LogixConfig</span></p></div>
+      <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+        <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #fbbf24; background: rgba(245,158,11,.16); padding: 4px 11px; border-radius: 999px; font-weight: 600;"><span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;"></span>3 perubahan belum disimpan</span>
+        <button style="background: transparent; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;">Atur Ulang</button>
+        <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;">Simpan Perubahan</button>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start;">
+      <div style="position: sticky; top: 20px; display: flex; flex-direction: column; gap: 2px;">
+        <div style="padding: 9px 12px; border-radius: 6px; background: rgba(37,99,235,.18); color: #60a5fa; font-size: 13px; font-weight: 600;">Branding</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 13px; font-weight: 500;">Tipe Akses &amp; Tujuan</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 13px; font-weight: 500;">Perangkat</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 13px; font-weight: 500;">Laporan</div>
+        <div style="padding: 9px 12px; border-radius: 6px; color: #94a3b8; font-size: 13px; font-weight: 500;">Privasi</div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px; min-width: 0;">
+
+        <!-- branding -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px; color:#f1f5f9;">Branding</div>
+          <div style="font-size: 13px; color: #94a3b8; margin-bottom: 20px;">Tampilan logo, judul, dan warna pada halaman masuk &amp; header.</div>
+          <div style="display: grid; grid-template-columns: 1fr 300px; gap: 24px;">
+            <div style="display: flex; flex-direction: column; gap: 14px;">
+              <div><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Teks Logo</label><input value="LOGIX" style="width:100%;border:1px solid #334155;background:#0f172a;border-radius:6px;padding:9px 12px;font-size:14px;font-family:inherit;color:#f1f5f9;"></div>
+              <div><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Judul</label><input value="LogiX" style="width:100%;border:1px solid #334155;background:#0f172a;border-radius:6px;padding:9px 12px;font-size:14px;font-family:inherit;color:#f1f5f9;"></div>
+              <div><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Subjudul</label><input value="Lab Access Logbook" style="width:100%;border:1px solid #334155;background:#0f172a;border-radius:6px;padding:9px 12px;font-size:14px;font-family:inherit;color:#f1f5f9;"></div>
+              <div style="display:flex;gap:14px;">
+                <div style="flex:1;"><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Warna Primer</label><div style="display:flex;align-items:center;gap:8px;border:1px solid #334155;background:#0f172a;border-radius:6px;padding:6px 10px;"><span style="width:22px;height:22px;border-radius:5px;background:#3b82f6;"></span><span style="font-size:13px;font-family:ui-monospace,monospace;color:#cbd5e1;">#2563EB</span></div></div>
+                <div style="flex:1;"><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Warna Aksen</label><div style="display:flex;align-items:center;gap:8px;border:1px solid #334155;background:#0f172a;border-radius:6px;padding:6px 10px;"><span style="width:22px;height:22px;border-radius:5px;background:#22c55e;"></span><span style="font-size:13px;font-family:ui-monospace,monospace;color:#cbd5e1;">#16A34A</span></div></div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Pratinjau Langsung</div>
+              <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:20px;display:flex;align-items:center;justify-content:center;">
+                <div style="width:100%;background:#1e293b;border:1px solid #334155;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);padding:22px 20px;text-align:center;">
+                  <div style="width:44px;height:44px;border-radius:10px;background:#2563eb;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9l3 3-3 3"></path><line x1="12.5" y1="15" x2="16" y2="15"></line></svg></div>
+                  <div style="font-size:22px;font-weight:800;letter-spacing:0.18em;color:#f1f5f9;">LOGI<span style="color:#3b82f6;">X</span></div>
+                  <div style="font-size:12px;color:#94a3b8;margin-top:3px;">Lab Access Logbook</div>
+                  <button style="width:100%;margin-top:14px;background:#fff;color:#1f2937;border:none;border-radius:6px;padding:8px;font-size:13px;font-weight:600;font-family:inherit;">Masuk dengan Google</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- access types -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px; color:#f1f5f9;">Tipe Akses &amp; Tujuan</div>
+          <div style="font-size: 13px; color: #94a3b8; margin-bottom: 20px;">Kelola opsi <span style="font-family:ui-monospace,monospace;">accessTypes</span> dan dropdown <span style="font-family:ui-monospace,monospace;">purposes</span>.</div>
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:8px;">Tipe Akses</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:rgba(37,99,235,.22);color:#93c5fd;font-size:13px;font-weight:600;">Fisik <span style="width:16px;height:16px;border-radius:50%;background:rgba(147,197,253,.2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#334155;color:#e2e8f0;font-size:13px;font-weight:600;font-family:ui-monospace,monospace;">SSH <span style="width:16px;height:16px;border-radius:50%;background:rgba(226,232,240,.15);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:rgba(124,58,237,.25);color:#c4b5fd;font-size:13px;font-weight:600;">AnyDesk <span style="width:16px;height:16px;border-radius:50%;background:rgba(196,181,253,.2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;">×</span></span>
+              <button style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:transparent;border:1px dashed #475569;color:#94a3b8;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Tambah</button>
+            </div>
+          </div>
+          <div>
+            <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:8px;">Tujuan (dropdown)</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">Simulasi DFT <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">Analisis Data <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">Molecular Dynamics <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">Penulisan <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <button style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:transparent;border:1px dashed #475569;color:#94a3b8;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Tambah</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- devices -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px; color:#f1f5f9;">Perangkat</div>
+          <div style="font-size: 13px; color: #94a3b8; margin-bottom: 20px;">Kategori perangkat &amp; pola penamaan otomatis.</div>
+          <div style="margin-bottom:18px;">
+            <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:8px;">Kategori Perangkat (<span style="font-family:ui-monospace,monospace;">device_types</span>)</label>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">lab_workstation <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">office_workstation <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">loaned_laptop <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <span style="display:inline-flex;align-items:center;gap:7px;padding:6px 8px 6px 12px;border-radius:999px;background:#0f172a;color:#cbd5e1;font-size:13px;font-weight:600;">server <span style="cursor:pointer;color:#64748b;">×</span></span>
+              <button style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;background:transparent;border:1px dashed #475569;color:#94a3b8;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Tambah</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Pola Penamaan</label><input value="WS-{n} · {label}" style="width:100%;border:1px solid #334155;background:#0f172a;border-radius:6px;padding:9px 12px;font-size:14px;font-family:ui-monospace,monospace;color:#f1f5f9;"></div>
+            <div><label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Contoh hasil</label><div style="border:1px solid #334155;background:#0f172a;border-radius:6px;padding:9px 12px;font-size:14px;font-family:ui-monospace,monospace;color:#94a3b8;">WS-07 · GPU-A100</div></div>
+          </div>
+        </div>
+
+        <!-- reports -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 22px 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 3px; color:#f1f5f9;">Laporan</div>
+          <div style="font-size: 13px; color: #94a3b8; margin-bottom: 18px;">Isi default file ekspor.</div>
+          <div style="display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #0f172a;"><div><div style="font-size:14px;font-weight:600;color:#f1f5f9;">Sertakan branding</div><div style="font-size:12px;color:#64748b;">Logo &amp; judul di kop laporan</div></div><div style="width:40px;height:23px;border-radius:999px;background:#2563eb;position:relative;cursor:pointer;"><span style="position:absolute;top:2px;right:2px;width:19px;height:19px;border-radius:50%;background:#fff;"></span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #0f172a;"><div><div style="font-size:14px;font-weight:600;color:#f1f5f9;">Ringkasan tujuan</div><div style="font-size:12px;color:#64748b;">Rekap sesi per tujuan</div></div><div style="width:40px;height:23px;border-radius:999px;background:#2563eb;position:relative;cursor:pointer;"><span style="position:absolute;top:2px;right:2px;width:19px;height:19px;border-radius:50%;background:#fff;"></span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #0f172a;"><div><div style="font-size:14px;font-weight:600;color:#f1f5f9;">Ringkasan perangkat</div><div style="font-size:12px;color:#64748b;">Jam per workstation</div></div><div style="width:40px;height:23px;border-radius:999px;background:#334155;position:relative;cursor:pointer;"><span style="position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#94a3b8;"></span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0 2px;"><div><div style="font-size:14px;font-weight:600;color:#f1f5f9;">Cakupan default</div><div style="font-size:12px;color:#64748b;">Rentang saat membuka ekspor</div></div>
+              <div style="display:flex;background:#0f172a;border-radius:8px;padding:3px;"><button style="border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;background:transparent;color:#94a3b8;cursor:pointer;font-family:inherit;">7 hari</button><button style="border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:700;background:#334155;color:#f1f5f9;cursor:pointer;font-family:inherit;">30 hari</button><button style="border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;background:transparent;color:#94a3b8;cursor:pointer;font-family:inherit;">Bulan ini</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- privacy -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 22px 24px;">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:3px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path></svg><div style="font-size: 16px; font-weight: 700; color:#f1f5f9;">Privasi</div></div>
+          <div style="font-size: 13px; color: #94a3b8; margin-bottom: 18px;">Teks pemberitahuan yang dilihat pengguna, dan apa yang dicatat — transparan.</div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:6px;">Teks Pemberitahuan Privasi</label>
+          <textarea style="width:100%;min-height:64px;border:1px solid #334155;background:#0f172a;border-radius:8px;padding:11px 13px;font-size:14px;font-family:inherit;color:#f1f5f9;resize:vertical;margin-bottom:18px;">LogiX mencatat siapa, cara, dan kapan perangkat lab digunakan untuk keperluan kehadiran dan penggunaan yang adil. Cuplikan layar selalu memberi tahu Anda.</textarea>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:10px;padding:16px;">
+              <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#4ade80;margin-bottom:12px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>Yang dicatat</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#bbf7d0;">
+                <div style="display:flex;gap:8px;"><span style="color:#4ade80;">•</span>Identitas pengguna (nama / NIM)</div>
+                <div style="display:flex;gap:8px;"><span style="color:#4ade80;">•</span>Tipe akses (fisik / SSH / AnyDesk)</div>
+                <div style="display:flex;gap:8px;"><span style="color:#4ade80;">•</span>Waktu mulai &amp; selesai sesi</div>
+                <div style="display:flex;gap:8px;"><span style="color:#4ade80;">•</span>Cuplikan atas permintaan (dgn notifikasi)</div>
+              </div>
+            </div>
+            <div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:10px;padding:16px;">
+              <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#f87171;margin-bottom:12px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>Yang TIDAK dicatat</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#fecaca;">
+                <div style="display:flex;gap:8px;"><span style="color:#f87171;">•</span>Ketikan / keystroke</div>
+                <div style="display:flex;gap:8px;"><span style="color:#f87171;">•</span>Isi layar secara diam-diam</div>
+                <div style="display:flex;gap:8px;"><span style="color:#f87171;">•</span>File pribadi &amp; riwayat browsing</div>
+                <div style="display:flex;gap:8px;"><span style="color:#f87171;">•</span>Mikrofon / kamera</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:center;margin-top:22px;">
+      <div style="display:inline-flex;align-items:center;gap:11px;background:#1e293b;border:1px solid #334155;border-left:3px solid #22c55e;border-radius:8px;padding:12px 16px;box-shadow:0 8px 24px rgba(0,0,0,.5);"><span style="width:22px;height:22px;border-radius:50%;background:rgba(34,197,94,.16);color:#4ade80;display:flex;align-items:center;justify-content:center;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></span><span style="font-size:13px;font-weight:600;color:#f1f5f9;">Perubahan disimpan</span></div>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #eef1f5; color: #0f172a; -webkit-font-smoothing: antialiased; }
+  a { color: #2563eb; text-decoration: none; }
+  a:hover { color: #1d4ed8; }
+  @keyframes lx-pulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,.45); } 70% { box-shadow: 0 0 0 6px rgba(22,163,74,0); } 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); } }
+  @keyframes lx-pulse-d { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.5); } 70% { box-shadow: 0 0 0 6px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
+  @keyframes lx-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+</style>
+</helmet>
+
+<div style="max-width: 1480px; margin: 0 auto; padding: 56px 40px 80px;">
+
+  <!-- ============ HEADER ============ -->
+  <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; flex-wrap: wrap; border-bottom: 1px solid #dbe1ea; padding-bottom: 28px;">
+    <div style="max-width: 640px;">
+      <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 22px;">
+        <div style="width: 30px; height: 30px; border-radius: 8px; background: #2563eb; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(37,99,235,.35);">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9l3 3-3 3"></path><line x1="12.5" y1="15" x2="16" y2="15"></line></svg>
+        </div>
+        <span style="font-size: 26px; font-weight: 800; letter-spacing: 0.2em; color: #0f172a;">LOGI<span style="color: #2563eb;">X</span></span>
+      </div>
+      <h1 style="font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 12px;">Design Foundation</h1>
+      <p style="font-size: 15px; line-height: 1.55; color: #475569; margin: 0;">The visual system for a privacy-first lab access log. Friendly-but-serious research tooling — trustworthy, calm, information-dense, and honest about what it does and doesn't track.</p>
+    </div>
+    <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 18px 20px; max-width: 320px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #2563eb; margin-bottom: 8px;">Personality</div>
+      <p style="font-size: 13px; line-height: 1.5; color: #334155; margin: 0;">Reassuring, not surveilling. Every screen makes it clear <strong>who, how, and when</strong> — with privacy shown in the open, never buried. Precise like a lab instrument; warm like a good colleague.</p>
+    </div>
+  </div>
+
+  <!-- ============ COLOR SYSTEM ============ -->
+  <div style="margin-top: 52px;">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">01 — Color System</div>
+    <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px;">Brand, neutrals & semantic status</h2>
+
+    <!-- brand + radius row -->
+    <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 28px;">
+      <div style="flex: 1; min-width: 220px; background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 18px;">
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 14px;">Brand Accent</div>
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <div style="width: 72px; height: 72px; border-radius: 6px; background: #2563eb; box-shadow: 0 4px 12px rgba(37,99,235,.3);"></div>
+          <div>
+            <div style="font-size: 15px; font-weight: 700;">Blue 600</div>
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: #64748b;">#2563EB</div>
+            <div style="display: flex; gap: 6px; margin-top: 10px;">
+              <div style="width: 26px; height: 26px; border-radius: 5px; background: #dbeafe;"></div>
+              <div style="width: 26px; height: 26px; border-radius: 5px; background: #93c5fd;"></div>
+              <div style="width: 26px; height: 26px; border-radius: 5px; background: #3b82f6;"></div>
+              <div style="width: 26px; height: 26px; border-radius: 5px; background: #1d4ed8;"></div>
+              <div style="width: 26px; height: 26px; border-radius: 5px; background: #1e3a8a;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="flex: 1; min-width: 220px; background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 14px;">Corner Radius</div>
+        <div style="display: flex; align-items: flex-end; gap: 18px;">
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; border: 2px solid #2563eb; border-radius: 6px;"></div><div style="font-size: 11px; color: #64748b; margin-top: 8px;">base · 6px</div></div>
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; border: 2px solid #cbd5e1; border-radius: 12px;"></div><div style="font-size: 11px; color: #64748b; margin-top: 8px;">card · 12px</div></div>
+          <div style="text-align: center;"><div style="width: 56px; height: 56px; border: 2px solid #cbd5e1; border-radius: 999px;"></div><div style="font-size: 11px; color: #64748b; margin-top: 8px;">pill</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- light + dark neutral palettes side by side -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px;">
+      <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 18px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;"><span style="width: 14px; height: 14px; border-radius: 4px; background: #f8fafc; border: 1px solid #cbd5e1;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b;">Light — Cool Slate</span></div>
+        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;">
+          <div><div style="height: 44px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0;"></div><div style="font-size: 10px; color: #94a3b8; margin-top: 5px; font-family: ui-monospace, monospace;">bg</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #ffffff; border: 1px solid #e2e8f0;"></div><div style="font-size: 10px; color: #94a3b8; margin-top: 5px; font-family: ui-monospace, monospace;">surf</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #e2e8f0;"></div><div style="font-size: 10px; color: #94a3b8; margin-top: 5px; font-family: ui-monospace, monospace;">200</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #94a3b8;"></div><div style="font-size: 10px; color: #94a3b8; margin-top: 5px; font-family: ui-monospace, monospace;">400</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #475569;"></div><div style="font-size: 10px; color: #94a3b8; margin-top: 5px; font-family: ui-monospace, monospace;">600</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #0f172a;"></div><div style="font-size: 10px; color: #94a3b8; margin-top: 5px; font-family: ui-monospace, monospace;">text</div></div>
+        </div>
+      </div>
+      <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 18px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;"><span style="width: 14px; height: 14px; border-radius: 4px; background: #0b1120; border: 1px solid #334155;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8;">Dark — First-class</span></div>
+        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;">
+          <div><div style="height: 44px; border-radius: 6px; background: #0b1120; border: 1px solid #1e293b;"></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; font-family: ui-monospace, monospace;">bg</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #1e293b; border: 1px solid #334155;"></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; font-family: ui-monospace, monospace;">surf</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #334155;"></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; font-family: ui-monospace, monospace;">700</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #64748b;"></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; font-family: ui-monospace, monospace;">500</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #cbd5e1;"></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; font-family: ui-monospace, monospace;">300</div></div>
+          <div><div style="height: 44px; border-radius: 6px; background: #f1f5f9;"></div><div style="font-size: 10px; color: #64748b; margin-top: 5px; font-family: ui-monospace, monospace;">text</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- semantic status swatches -->
+    <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 20px;">
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 16px;">Semantic Station Status</div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px;">
+        <div>
+          <div style="height: 52px; border-radius: 6px; background: #16a34a; display: flex; align-items: center; padding: 0 12px; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #fff;"></span><span style="color: #fff; font-weight: 700; font-size: 13px;">In use</span></div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 7px; line-height: 1.4;">Active session at keyboard or remote. <span style="font-family: ui-monospace, monospace;">#16A34A</span></div>
+        </div>
+        <div>
+          <div style="height: 52px; border-radius: 6px; background: #d97706; display: flex; align-items: center; padding: 0 12px; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #fff;"></span><span style="color: #fff; font-weight: 700; font-size: 13px;">Locked</span></div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 7px; line-height: 1.4;">Signed in but screen locked. <span style="font-family: ui-monospace, monospace;">#D97706</span></div>
+        </div>
+        <div>
+          <div style="height: 52px; border-radius: 6px; background: #64748b; display: flex; align-items: center; padding: 0 12px; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #fff;"></span><span style="color: #fff; font-weight: 700; font-size: 13px;">Idle</span></div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 7px; line-height: 1.4;">No input, session open. <span style="font-family: ui-monospace, monospace;">#64748B</span></div>
+        </div>
+        <div>
+          <div style="height: 52px; border-radius: 6px; background: #9ca3af; display: flex; align-items: center; padding: 0 12px; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #fff;"></span><span style="color: #fff; font-weight: 700; font-size: 13px;">Offline</span></div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 7px; line-height: 1.4;">Stale — no heartbeat. <span style="font-family: ui-monospace, monospace;">#9CA3AF</span></div>
+        </div>
+        <div>
+          <div style="height: 52px; border-radius: 6px; background: #dc2626; display: flex; align-items: center; padding: 0 12px; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: #fff;"></span><span style="color: #fff; font-weight: 700; font-size: 13px;">Alert</span></div>
+          <div style="font-size: 11px; color: #64748b; margin-top: 7px; line-height: 1.4;">Critical / anomaly. <span style="font-family: ui-monospace, monospace;">#DC2626</span></div>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: #94a3b8; margin-top: 16px; padding-top: 14px; border-top: 1px solid #eef1f5;">Dark-mode equivalents brighten one step for contrast on dark surfaces: <span style="font-family: ui-monospace, monospace; color: #22c55e;">#22C55E</span> · <span style="font-family: ui-monospace, monospace; color: #f59e0b;">#F59E0B</span> · <span style="font-family: ui-monospace, monospace; color: #94a3b8;">#94A3B8</span> · <span style="font-family: ui-monospace, monospace; color: #6b7280;">#6B7280</span> · <span style="font-family: ui-monospace, monospace; color: #ef4444;">#EF4444</span></div>
+    </div>
+  </div>
+
+  <!-- ============ ACCESS-TYPE ICONOGRAPHY ============ -->
+  <div style="margin-top: 52px;">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">02 — Access-Type Iconography</div>
+    <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px;">How the session happened</h2>
+    <p style="font-size: 14px; color: #475569; margin: 0 0 24px; max-width: 640px;">The core differentiator. One consistent 24px stroke set, always paired with a tinted badge and a label — never a bare icon. Same glyphs read in light and dark.</p>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+      <!-- Physical -->
+      <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 22px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px;">
+          <div style="width: 46px; height: 46px; border-radius: 10px; background: #eff6ff; display: flex; align-items: center; justify-content: center; color: #2563eb;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><line x1="6" y1="10" x2="6" y2="10"></line><line x1="10" y1="10" x2="10" y2="10"></line><line x1="14" y1="10" x2="14" y2="10"></line><line x1="18" y1="10" x2="18" y2="10"></line><line x1="8" y1="14.5" x2="16" y2="14.5"></line></svg>
+          </div>
+          <div><div style="font-size: 16px; font-weight: 700;">Physical</div><div style="font-size: 12px; color: #64748b;">At the keyboard</div></div>
+        </div>
+        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 12px; font-weight: 700;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><line x1="8" y1="14.5" x2="16" y2="14.5"></line></svg>
+          On-site
+        </span>
+      </div>
+      <!-- SSH -->
+      <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 22px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px;">
+          <div style="width: 46px; height: 46px; border-radius: 10px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; color: #334155;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 9l3 3-3 3"></path><line x1="12.5" y1="15" x2="16" y2="15"></line></svg>
+          </div>
+          <div><div style="font-size: 16px; font-weight: 700;">SSH</div><div style="font-size: 12px; color: #64748b;">Terminal session</div></div>
+        </div>
+        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #e2e8f0; color: #334155; font-size: 12px; font-weight: 700; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">&gt;_ remote shell</span>
+      </div>
+      <!-- AnyDesk -->
+      <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 22px;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px;">
+          <div style="width: 46px; height: 46px; border-radius: 10px; background: #faf5ff; display: flex; align-items: center; justify-content: center; color: #7c3aed;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M9 20h6"></path><path d="M12 17v3"></path><path d="M9 8.5l4.5 1.8-1.9 0.9 1.2 2.3"></path></svg>
+          </div>
+          <div><div style="font-size: 16px; font-weight: 700;">AnyDesk</div><div style="font-size: 12px; color: #64748b;">Remote desktop</div></div>
+        </div>
+        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #f3e8ff; color: #7c3aed; font-size: 12px; font-weight: 700;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M9 8.5l4.5 1.8-1.9 0.9 1.2 2.3"></path></svg>
+          Screen shared
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ TYPOGRAPHY ============ -->
+  <div style="margin-top: 52px;">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">03 — Typography</div>
+    <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px;">System stack — no webfonts</h2>
+    <p style="font-size: 14px; color: #475569; margin: 0 0 24px; max-width: 640px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">-apple-system, "Segoe UI", Roboto, Helvetica, Arial · mono: ui-monospace, Menlo, Consolas</p>
+
+    <div style="display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start;">
+      <div style="background: #fff; border: 1px solid #dbe1ea; border-radius: 12px; padding: 28px 30px;">
+        <div style="display: flex; align-items: baseline; gap: 14px; padding: 10px 0; border-bottom: 1px solid #eef1f5;"><span style="font-size: 34px; font-weight: 800; letter-spacing: -0.02em;">Lab access at a glance</span><span style="font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace; margin-left: auto;">H1 · 34/800</span></div>
+        <div style="display: flex; align-items: baseline; gap: 14px; padding: 10px 0; border-bottom: 1px solid #eef1f5;"><span style="font-size: 24px; font-weight: 700; letter-spacing: -0.01em;">Workstation activity</span><span style="font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace; margin-left: auto;">H2 · 24/700</span></div>
+        <div style="display: flex; align-items: baseline; gap: 14px; padding: 10px 0; border-bottom: 1px solid #eef1f5;"><span style="font-size: 18px; font-weight: 600;">Session details</span><span style="font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace; margin-left: auto;">H3 · 18/600</span></div>
+        <div style="display: flex; align-items: baseline; gap: 14px; padding: 12px 0; border-bottom: 1px solid #eef1f5;"><span style="font-size: 15px; line-height: 1.55; color: #334155; max-width: 460px;">Body text stays at 15px with generous line height so dense tables and long audit notes remain calm and readable on wall displays.</span><span style="font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace; margin-left: auto; white-space: nowrap;">Body · 15/1.55</span></div>
+        <div style="display: flex; align-items: baseline; gap: 14px; padding: 12px 0;"><span style="font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Last heartbeat · 2 min ago</span><span style="font-size: 11px; color: #94a3b8; font-family: ui-monospace, monospace; margin-left: auto;">Caption · 12</span></div>
+      </div>
+      <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 28px 30px; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center; min-height: 200px;">
+        <div style="font-size: 40px; font-weight: 800; letter-spacing: 0.22em; color: #f1f5f9;">LOGI<span style="color: #3b82f6;">X</span></div>
+        <div style="font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; color: #64748b;">Wordmark · +0.22em tracking</div>
+        <div style="width: 100%; height: 1px; background: #1e293b;"></div>
+        <div style="font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5;">Weight and tracking carry the identity — no display face required.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ COMPONENTS ============ -->
+  <div style="margin-top: 52px;">
+    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">04 — Components</div>
+    <h2 style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 24px;">The kit — light &amp; dark, side by side</h2>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+      <!-- ============ LIGHT PANEL ============ -->
+      <div style="background: #f8fafc; border: 1px solid #dbe1ea; border-radius: 14px; padding: 24px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 20px;"><span style="width: 12px; height: 12px; border-radius: 4px; background: #fff; border: 1px solid #cbd5e1;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b;">Light</span></div>
+
+        <!-- buttons -->
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px;">
+          <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(37,99,235,.35); font-family: inherit;" style-hover="background: #1d4ed8;">View sessions</button>
+          <button style="background: #fff; color: #334155; border: 1px solid #d8dfe8; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;" style-hover="border-color: #94a3b8; background: #f8fafc;">Export report</button>
+        </div>
+
+        <!-- status badges + dots -->
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px;">
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #16a34a; animation: lx-pulse 2s infinite;"></span>In use</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #fef3c7; color: #b45309; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #d97706;"></span>Locked</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #64748b;"></span>Idle</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #f1f5f9; color: #6b7280; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #9ca3af;"></span>Offline</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #dc2626;"></span>Alert</span>
+        </div>
+
+        <!-- KPI tiles -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px;">
+            <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b;">Active now</div>
+            <div style="font-size: 30px; font-weight: 800; letter-spacing: -0.02em; margin-top: 4px;">7<span style="font-size: 15px; font-weight: 600; color: #94a3b8;">/12</span></div>
+            <div style="font-size: 12px; color: #16a34a; font-weight: 600; margin-top: 2px;">▲ 2 vs. yesterday</div>
+          </div>
+          <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px;">
+            <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b;">Hours logged</div>
+            <div style="font-size: 30px; font-weight: 800; letter-spacing: -0.02em; margin-top: 4px;">148<span style="font-size: 15px; font-weight: 600; color: #94a3b8;">h</span></div>
+            <div style="font-size: 12px; color: #64748b; font-weight: 600; margin-top: 2px;">this week</div>
+          </div>
+        </div>
+
+        <!-- station status card -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 16px; border-left: 3px solid #16a34a;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 9px;"><span style="font-size: 15px; font-weight: 700;">WS-07 · GPU-A100</span></div>
+            <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #16a34a;"></span>In use</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 34px; height: 34px; border-radius: 8px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px;">AR</div>
+            <div style="flex: 1;">
+              <div style="font-size: 14px; font-weight: 600;">A. Rahmawati</div>
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #64748b; font-family: ui-monospace, monospace;"><span style="color: #334155;">&gt;_</span> SSH · since 09:14 · 2h 41m</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- toast -->
+        <div style="display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; box-shadow: 0 4px 14px rgba(15,23,42,.08); margin-bottom: 16px;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #16a34a; flex-shrink: 0;"></span>
+          <div style="flex: 1;"><div style="font-size: 13px; font-weight: 600;">Report exported</div><div style="font-size: 12px; color: #64748b;">attendance-jul.csv · privacy filters applied</div></div>
+          <span style="color: #94a3b8; font-size: 18px; cursor: pointer; line-height: 1;">×</span>
+        </div>
+
+        <!-- skeleton -->
+        <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+          <div style="height: 12px; width: 55%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div>
+          <div style="height: 12px; width: 85%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div>
+          <div style="height: 12px; width: 40%; border-radius: 4px; background: linear-gradient(90deg,#eef2f6 25%,#e2e8f0 37%,#eef2f6 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite;"></div>
+        </div>
+
+        <!-- modal shell -->
+        <div style="border-radius: 10px; background: rgba(15,23,42,.06); padding: 18px;">
+          <div style="background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 12px 32px rgba(15,23,42,.12); overflow: hidden;">
+            <div style="padding: 16px 18px 0;"><div style="font-size: 15px; font-weight: 700;">End session on WS-07?</div><div style="font-size: 13px; color: #64748b; line-height: 1.5; margin-top: 6px;">This logs a session close at the current time. The user is notified.</div></div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 16px 18px;">
+              <button style="background: #fff; color: #334155; border: 1px solid #d8dfe8; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;">Cancel</button>
+              <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;">End session</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- empty state -->
+        <div style="background: #fff; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 26px; text-align: center; margin-top: 16px;">
+          <svg width="80" height="64" viewBox="0 0 80 64" style="margin-bottom: 12px;"><defs><pattern id="lxs" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#dbeafe" stroke-width="4"></line></pattern></defs><rect x="1" y="1" width="78" height="62" rx="10" fill="url(#lxs)" stroke="#cbd5e1" stroke-dasharray="4 4"></rect><text x="40" y="36" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#64748b">mascot</text></svg>
+          <div style="font-size: 15px; font-weight: 700;">No sessions yet today</div>
+          <div style="font-size: 13px; color: #64748b; margin-top: 4px; line-height: 1.5;">Logi the fox is keeping watch. Activity appears the moment someone signs in.</div>
+        </div>
+      </div>
+
+      <!-- ============ DARK PANEL ============ -->
+      <div style="background: #0b1120; border: 1px solid #1e293b; border-radius: 14px; padding: 24px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 20px;"><span style="width: 12px; height: 12px; border-radius: 4px; background: #1e293b; border: 1px solid #334155;"></span><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #94a3b8;">Dark</span></div>
+
+        <!-- buttons -->
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px;">
+          <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.4); font-family: inherit;" style-hover="background: #3b82f6;">View sessions</button>
+          <button style="background: transparent; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;" style-hover="border-color: #475569; background: #1e293b;">Export report</button>
+        </div>
+
+        <!-- status badges + dots -->
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px;">
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: lx-pulse-d 2s infinite;"></span>In use</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: rgba(245,158,11,.16); color: #fbbf24; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b;"></span>Locked</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: rgba(148,163,184,.16); color: #cbd5e1; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;"></span>Idle</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: rgba(107,114,128,.16); color: #9ca3af; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6b7280;"></span>Offline</span>
+          <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: rgba(239,68,68,.16); color: #f87171; font-size: 12px; font-weight: 700;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444;"></span>Alert</span>
+        </div>
+
+        <!-- KPI tiles -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px;">
+            <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #94a3b8;">Active now</div>
+            <div style="font-size: 30px; font-weight: 800; letter-spacing: -0.02em; margin-top: 4px; color: #f1f5f9;">7<span style="font-size: 15px; font-weight: 600; color: #64748b;">/12</span></div>
+            <div style="font-size: 12px; color: #4ade80; font-weight: 600; margin-top: 2px;">▲ 2 vs. yesterday</div>
+          </div>
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px;">
+            <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #94a3b8;">Hours logged</div>
+            <div style="font-size: 30px; font-weight: 800; letter-spacing: -0.02em; margin-top: 4px; color: #f1f5f9;">148<span style="font-size: 15px; font-weight: 600; color: #64748b;">h</span></div>
+            <div style="font-size: 12px; color: #94a3b8; font-weight: 600; margin-top: 2px;">this week</div>
+          </div>
+        </div>
+
+        <!-- station status card -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; margin-bottom: 16px; border-left: 3px solid #22c55e;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 9px;"><span style="font-size: 15px; font-weight: 700; color: #f1f5f9;">WS-07 · GPU-A100</span></div>
+            <span style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; font-size: 11px; font-weight: 700;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #22c55e;"></span>In use</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 34px; height: 34px; border-radius: 8px; background: rgba(37,99,235,.2); color: #60a5fa; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px;">AR</div>
+            <div style="flex: 1;">
+              <div style="font-size: 14px; font-weight: 600; color: #f1f5f9;">A. Rahmawati</div>
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; font-family: ui-monospace, monospace;"><span style="color: #cbd5e1;">&gt;_</span> SSH · since 09:14 · 2h 41m</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- toast -->
+        <div style="display: flex; align-items: center; gap: 10px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.5); margin-bottom: 16px;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; flex-shrink: 0;"></span>
+          <div style="flex: 1;"><div style="font-size: 13px; font-weight: 600; color: #f1f5f9;">Report exported</div><div style="font-size: 12px; color: #94a3b8;">attendance-jul.csv · privacy filters applied</div></div>
+          <span style="color: #64748b; font-size: 18px; cursor: pointer; line-height: 1;">×</span>
+        </div>
+
+        <!-- skeleton -->
+        <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+          <div style="height: 12px; width: 55%; border-radius: 4px; background: linear-gradient(90deg,#243043 25%,#334155 37%,#243043 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div>
+          <div style="height: 12px; width: 85%; border-radius: 4px; background: linear-gradient(90deg,#243043 25%,#334155 37%,#243043 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite; margin-bottom: 10px;"></div>
+          <div style="height: 12px; width: 40%; border-radius: 4px; background: linear-gradient(90deg,#243043 25%,#334155 37%,#243043 63%); background-size: 400px 100%; animation: lx-shimmer 1.4s infinite;"></div>
+        </div>
+
+        <!-- modal shell -->
+        <div style="border-radius: 10px; background: rgba(0,0,0,.35); padding: 18px;">
+          <div style="background: #1e293b; border: 1px solid #334155; border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.6); overflow: hidden;">
+            <div style="padding: 16px 18px 0;"><div style="font-size: 15px; font-weight: 700; color: #f1f5f9;">End session on WS-07?</div><div style="font-size: 13px; color: #94a3b8; line-height: 1.5; margin-top: 6px;">This logs a session close at the current time. The user is notified.</div></div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 16px 18px;">
+              <button style="background: transparent; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;">Cancel</button>
+              <button style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;">End session</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- empty state -->
+        <div style="background: #1e293b; border: 1px dashed #334155; border-radius: 10px; padding: 26px; text-align: center; margin-top: 16px;">
+          <svg width="80" height="64" viewBox="0 0 80 64" style="margin-bottom: 12px;"><defs><pattern id="lxsd" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="#1e3a5f" stroke-width="4"></line></pattern></defs><rect x="1" y="1" width="78" height="62" rx="10" fill="url(#lxsd)" stroke="#334155" stroke-dasharray="4 4"></rect><text x="40" y="36" text-anchor="middle" font-family="ui-monospace, monospace" font-size="9" fill="#94a3b8">mascot</text></svg>
+          <div style="font-size: 15px; font-weight: 700; color: #f1f5f9;">No sessions yet today</div>
+          <div style="font-size: 13px; color: #94a3b8; margin-top: 4px; line-height: 1.5;">Logi the fox is keeping watch. Activity appears the moment someone signs in.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ PRIVACY FOOTER ============ -->
+  <div style="margin-top: 40px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 20px 22px; display: flex; align-items: flex-start; gap: 14px;">
+    <div style="width: 34px; height: 34px; border-radius: 8px; background: #2563eb; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"></path><path d="M9 12l2 2 4-4"></path></svg>
+    </div>
+    <div>
+      <div style="font-size: 14px; font-weight: 700; color: #1e3a8a;">Privacy is a feature, shown in the open</div>
+      <div style="font-size: 13px; color: #1e40af; line-height: 1.55; margin-top: 3px; max-width: 780px;">LogiX logs <strong>who, how, and when</strong> — never keystrokes, screen contents, or files. Every export states which privacy filters are applied. This is attendance and fair-usage accounting, not surveillance.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -384,7 +384,29 @@ function Get-LogbookDefaultConfig {
             logoPath = 'C:\Program Files\Logix\logo.png'
             title    = 'Report Logbook'
             subtitle = 'Computational Workstation'
-            colors   = @{ primary = '#073763'; accent = '#741B47'; muted = '#C0C0C0'; text = '#FFFFFF' }
+            # LogiX Client Foundation palette (docs/design/LogiX Client
+            # Foundation.dc.html): "Blue is the direction; everything else is a
+            # theme." Accent #2563EB on a deep-navy surface ramp. Maroon retired.
+            # A lab re-themes by overriding any of these in config -- absent keys
+            # fall back to these defaults via Get-LogbookTheme.
+            colors   = @{
+                primary         = '#0E1626'  # elevated surface (cards / inputs)
+                accent          = '#2563EB'  # brand blue
+                muted           = '#93A1B8'  # muted text / hairline captions
+                text            = '#EEF3FB'  # primary text
+                surface         = '#070C15'  # deepest surface (fullscreen popup)
+                surfaceWidget   = '#0B1017'  # corner timer widget surface
+                surfaceElevated = '#0E1626'  # raised panels / inputs
+                border          = '#223451'  # 1px hairline border
+            }
+            # Solid "signal bar" colors -- status is a colored edge on a calm
+            # surface, never a tinted card. Normal/Notice/Warning/Critical.
+            signals  = @{
+                normal   = '#22C55E'  # session running
+                notice   = '#3B82F6'  # privacy / screenshot (calm, never red)
+                warning  = '#F59E0B'  # attention
+                critical = '#EF4444'  # power countdown / urgent
+            }
         }
         text = @{
             intro          = 'Isi data penggunaan workstation sebelum memulai sesi.'
@@ -398,7 +420,79 @@ function Get-LogbookDefaultConfig {
             hint           = 'Mohon isi data dengan benar dan selengkap mungkin, apabila ada error atau kesalahan, segera hubungi admin.'
             hintIncomplete = 'Lengkapi Nama, NIM/ID, tipe akses, tujuan, dan keterangan.'
             hintReady      = 'Siap disimpan. Nama, NIM, tujuan, dan keterangan akan dikirim ke SQLite.'
+            # --- Client Copy Deck (docs/design/LogiX Copy Deck.dc.html) ---
+            # Returning-user fast path (C8.1)
+            welcomeBack      = 'Lanjutkan sesi Anda'
+            continueAs       = 'Lanjut sebagai {0}'
+            notYou           = 'Bukan saya / ganti data'
+            whatsRecorded    = 'Apa yang dicatat?'
+            privacyOneLiner  = 'Siapa, cara & kapan — bukan ketikan.'
+            # Timer widget (C8.2)
+            timerEnd         = 'SELESAI'
+            timerEndArmed    = 'Tekan lagi untuk selesai'
+            timerNama        = 'Nama'
+            timerTujuan      = 'Tujuan'
+            timerPerangkat   = 'Perangkat'
+            # Notifications (C8.3)
+            msgFromAdmin     = 'Pesan dari Admin'
+            msgReply         = 'Balas'
+            msgClose         = 'Tutup'
+            noticePrivacyTitle = 'Pemberitahuan Privasi'
+            noticeScreenshot = 'Admin baru saja mengambil tangkapan layar perangkat ini untuk keperluan pemantauan.'
+            noticeAlwaysTold = 'Anda selalu diberi tahu — tidak pernah diam-diam.'
+            noticeAck        = 'Mengerti'
+            emergencyTitle   = 'Peringatan Sistem'
+            emergencyBody    = 'Perangkat ini akan dimatikan oleh admin. Simpan pekerjaan Anda sekarang.'
+            emergencySaved   = 'Saya sudah menyimpan'
+            # Lock overlay (C8.4)
+            lockTitle        = 'Workstation dikunci oleh admin lab'
+            lockPausedNote   = 'Sesi Anda dijeda, bukan diakhiri. Semua pekerjaan & waktu sesi tetap tersimpan.'
+            lockPausedBadge  = 'DIJEDA'
+            lockElapsedLabel = 'Waktu sesi berjalan'
+            lockUserLabel    = 'Pengguna'
+            lockReasonLabel  = 'Alasan dari admin'
+            lockUnlockHint   = 'Masuk kembali untuk melanjutkan sesi'
+            lockUnlockBtn    = 'Buka & Lanjutkan'
+            # Setup wizard (C8.4)
+            setupWelcomeBody = 'Daftarkan komputer ini ke server lab agar sesi & kehadiran tercatat otomatis. Butuh kode undangan dari admin.'
+            setupStart       = 'Mulai'
+            setupSkip        = 'Lewati (mode lokal saja)'
+            setupCodeTitle   = 'Masukkan kode undangan'
+            setupCodeHint    = 'Minta kode dari admin lab. Berlaku 15 menit & hanya sekali pakai.'
+            setupVerify      = 'Verifikasi'
+            setupConfirmTitle = 'Konfirmasi perangkat'
+            setupFinish      = 'Selesaikan Pengaturan'
+            # English locale (future). Get-LogbookText falls back to the ID
+            # string above for any key missing here, so 'en' is safe to grow
+            # incrementally.
+            en = @{
+                intro          = 'Fill in your session details to start using this workstation.'
+                submit         = 'Start Session'
+                hintIncomplete = 'Please complete name, ID, access type, purpose, and notes.'
+                hintReady      = 'Ready to save.'
+                welcomeBack    = 'Continue your session'
+                continueAs     = 'Continue as {0}'
+                notYou         = 'Not you / change details'
+                whatsRecorded  = "What's recorded?"
+                timerEnd       = 'END'
+                timerEndArmed  = 'Press again to end'
+                timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
+                msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'
+                noticePrivacyTitle = 'Privacy Notice'
+                noticeAlwaysTold = 'You are always notified — never silently.'
+                noticeAck      = 'Got it'
+                emergencyTitle = 'System Alert'
+                emergencySaved = 'I have saved'
+                lockTitle      = 'Workstation locked by the lab admin'
+                lockPausedBadge = 'PAUSED'
+                lockUnlockBtn  = 'Unlock & Resume'
+                setupStart     = 'Start'; setupVerify = 'Verify'; setupFinish = 'Finish Setup'
+            }
         }
+        # UI language for client surfaces. 'id' (default) or 'en'. Resolved by
+        # Get-LogbookText, which falls back to the ID string for any key the
+        # chosen locale hasn't translated yet.
+        locale         = 'id'
         accessTypes    = @('Physical', 'AnyDesk')
         purposes       = @('Visualisasi Data', 'Running Data', 'Maintenance')
         requiredFields = @('nama', 'nim', 'access', 'purpose', 'keterangan')
@@ -792,14 +886,70 @@ function ConvertTo-LogbookXmlText([string]$s) {
     return ($s -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;')
 }
 
+function Get-LogbookText($cfg, [string]$Key, [string]$Fallback = '') {
+    # Resolve a client UI string by key, honoring $cfg.locale ('id' default,
+    # 'en' optional). Falls back to the ID string for any key the chosen
+    # locale hasn't translated, then to $Fallback. Optional -f args are
+    # applied by the caller (these are format templates, e.g. 'Lanjut sebagai {0}').
+    $t = $cfg.text
+    $locale = [string]$cfg.locale
+    if ($locale -eq 'en' -and $t -and $t.en) {
+        $en = $t.en
+        if ($en.Contains($Key) -and -not [string]::IsNullOrWhiteSpace([string]$en[$Key])) {
+            return [string]$en[$Key]
+        }
+    }
+    if ($t -and $t.Contains($Key) -and -not [string]::IsNullOrWhiteSpace([string]$t[$Key])) {
+        return [string]$t[$Key]
+    }
+    return $Fallback
+}
+
+function Get-LogbookTheme($cfg) {
+    # Resolve the full client palette from config, with the Client Foundation
+    # defaults as fallbacks. Backward-compatible: a config that only sets the
+    # legacy four colours (primary/accent/muted/text) still renders -- the
+    # surface ramp and signal colours derive from sensible defaults. Every
+    # value is a #RRGGBB string ready to drop straight into XAML.
+    $c = $cfg.branding.colors
+    $s = $cfg.branding.signals
+    $val = {
+        param($map, $key, $fallback)
+        if ($map -and $map.Contains($key) -and -not [string]::IsNullOrWhiteSpace([string]$map[$key])) {
+            return [string]$map[$key]
+        }
+        return $fallback
+    }
+    $accent          = & $val $c 'accent'          '#2563EB'
+    $text            = & $val $c 'text'            '#EEF3FB'
+    $muted           = & $val $c 'muted'           '#93A1B8'
+    $surfaceElevated = & $val $c 'surfaceElevated' (& $val $c 'primary' '#0E1626')
+    return @{
+        accent          = $accent
+        text            = $text
+        muted           = $muted
+        surface         = & $val $c 'surface'       '#070C15'
+        surfaceWidget   = & $val $c 'surfaceWidget' '#0B1017'
+        surfaceElevated = $surfaceElevated
+        border          = & $val $c 'border'        '#223451'
+        signalNormal    = & $val $s 'normal'        '#22C55E'
+        signalNotice    = & $val $s 'notice'        '#3B82F6'
+        signalWarning   = & $val $s 'warning'       '#F59E0B'
+        signalCritical  = & $val $s 'critical'      '#EF4444'
+    }
+}
+
 function Build-LogbookPopupXaml($cfg) {
     # Render the popup XAML from config. Pure string building (no WPF), so it is
     # unit-testable by parsing the result as [xml].
-    $primary = [string]$cfg.branding.colors.primary
-    $accent  = [string]$cfg.branding.colors.accent
-    $muted   = [string]$cfg.branding.colors.muted
-    $text    = [string]$cfg.branding.colors.text
-    $overlay = "#B0" + $accent.TrimStart('#')
+    $theme   = Get-LogbookTheme $cfg
+    $accent  = $theme.accent
+    $muted   = $theme.muted            # muted TEXT
+    $text    = $theme.text
+    $primary = $theme.surfaceElevated  # card / input surface
+    $surface = $theme.surface          # deepest fullscreen surface
+    $border  = $theme.border           # hairline BORDER
+    $overlay = '#D8' + $surface.TrimStart('#')  # deep translucent scrim over blur
 
     $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
     $title    = ConvertTo-LogbookXmlText ([string]$cfg.branding.title)
@@ -821,8 +971,8 @@ function Build-LogbookPopupXaml($cfg) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="False" Background="$accent"
-        FontFamily="Poppins, Montserrat, Segoe UI">
+        Topmost="True" ShowInTaskbar="False" Background="$surface"
+        FontFamily="Segoe UI">
   <Window.Resources>
     <SolidColorBrush x:Key="PrussianBlue" Color="$primary" />
     <SolidColorBrush x:Key="Silver" Color="$muted" />
@@ -830,7 +980,7 @@ function Build-LogbookPopupXaml($cfg) {
     <SolidColorBrush x:Key="WhiteBrush" Color="$text" />
 
     <Style x:Key="LabelTextStyle" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="FontSize" Value="13" />
       <Setter Property="Foreground" Value="$text" />
@@ -840,7 +990,7 @@ function Build-LogbookPopupXaml($cfg) {
     <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
       <Setter Property="Height" Value="44" />
       <Setter Property="Padding" Value="12,8" />
-      <Setter Property="FontFamily" Value="Montserrat, Poppins, Segoe UI" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
       <Setter Property="FontSize" Value="14" />
       <Setter Property="FontWeight" Value="Medium" />
       <Setter Property="BorderBrush" Value="$muted" />
@@ -853,7 +1003,7 @@ function Build-LogbookPopupXaml($cfg) {
     </Style>
 
     <Style x:Key="ReadableComboBoxItemStyle" TargetType="ComboBoxItem">
-      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
       <Setter Property="FontSize" Value="14" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Background" Value="$text" />
@@ -867,7 +1017,7 @@ function Build-LogbookPopupXaml($cfg) {
     <Style x:Key="ReadableComboBoxStyle" TargetType="ComboBox">
       <Setter Property="Height" Value="44" />
       <Setter Property="Padding" Value="8,6" />
-      <Setter Property="FontFamily" Value="Poppins, Montserrat, Segoe UI" />
+      <Setter Property="FontFamily" Value="Segoe UI" />
       <Setter Property="FontSize" Value="14" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Background" Value="$text" />
@@ -885,7 +1035,7 @@ function Build-LogbookPopupXaml($cfg) {
     </Image>
     <Rectangle Fill="$overlay" />
 
-    <Border Width="790" CornerRadius="18" BorderBrush="$muted" BorderThickness="1" Background="$primary"
+    <Border Width="790" CornerRadius="18" BorderBrush="$border" BorderThickness="1" Background="$primary"
             HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True">
       <Border.Effect><DropShadowEffect BlurRadius="32" ShadowDepth="0" Opacity="0.42" Color="$accent" /></Border.Effect>
       <Grid>
@@ -902,19 +1052,19 @@ function Build-LogbookPopupXaml($cfg) {
           <StackPanel HorizontalAlignment="Center">
             <Image Name="MascotImage" Height="132" MaxWidth="240" Stretch="Uniform" HorizontalAlignment="Center"
                    SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" Margin="0,0,0,12" />
-            <TextBlock Name="LogoText" Text="$logoText" FontFamily="Poppins, Montserrat, Segoe UI Semibold" FontSize="30"
+            <TextBlock Name="LogoText" Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="30"
                        FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
-            <TextBlock Text="$title" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="20" FontWeight="SemiBold"
+            <TextBlock Text="$title" FontFamily="Segoe UI" FontSize="20" FontWeight="SemiBold"
                        Foreground="$text" HorizontalAlignment="Center" Margin="0,4,0,0" />
-            <TextBlock Text="$subtitle" FontFamily="Montserrat, Poppins, Segoe UI" FontSize="13" Foreground="$muted"
+            <TextBlock Text="$subtitle" FontFamily="Segoe UI" FontSize="13" Foreground="$muted"
                        HorizontalAlignment="Center" Margin="0,2,0,0" />
           </StackPanel>
         </Border>
 
         <StackPanel Grid.Row="1" Margin="36,28,36,34">
-          <TextBlock Text="$tIntro" FontFamily="Poppins, Montserrat, Segoe UI" FontSize="12.5"
+          <TextBlock Text="$tIntro" FontFamily="Segoe UI" FontSize="12.5"
                      FontWeight="SemiBold" Foreground="$text" Margin="0,0,0,7" />
-          <TextBlock Name="StartTimeText" Text="$tStart" FontFamily="Montserrat, Poppins, Segoe UI"
+          <TextBlock Name="StartTimeText" Text="$tStart" FontFamily="Segoe UI"
                      FontSize="12" Foreground="$muted" Margin="0,0,0,18" />
 
           <Grid>
@@ -963,17 +1113,204 @@ $purposeItems
               <ColumnDefinition Width="18" />
               <ColumnDefinition Width="198" />
             </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="$primary" CornerRadius="10" Padding="12,9" BorderBrush="$muted" BorderThickness="1">
+            <Border Grid.Column="0" Background="$primary" CornerRadius="10" Padding="12,9" BorderBrush="$border" BorderThickness="1">
               <TextBlock Name="HintText" Text="$tHint"
-                         FontFamily="Montserrat, Poppins, Segoe UI" FontSize="11.5" FontWeight="SemiBold" Foreground="$muted" TextWrapping="Wrap" />
+                         FontFamily="Segoe UI" FontSize="11.5" FontWeight="SemiBold" Foreground="$muted" TextWrapping="Wrap" />
             </Border>
-            <Button Grid.Column="2" Name="SubmitBtn" Height="48" Content="$tSubmit" FontFamily="Poppins, Montserrat, Segoe UI"
-                    FontSize="21" FontWeight="Bold" Background="$accent" Foreground="$text" BorderBrush="$muted"
+            <Button Grid.Column="2" Name="SubmitBtn" Height="48" Content="$tSubmit" FontFamily="Segoe UI"
+                    FontSize="21" FontWeight="Bold" Background="$accent" Foreground="$text" BorderBrush="$border"
                     BorderThickness="1" IsEnabled="False" Opacity="0.45" />
           </Grid>
         </StackPanel>
       </Grid>
     </Border>
+  </Grid>
+</Window>
+"@
+}
+
+function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
+    # Returning-user fast path (Action canvas: LogiX Sign-in Popup §A). A
+    # returning user confirms one saved identity and starts -- no full form.
+    # Same deep-navy fullscreen surface as the main popup. Named controls the
+    # controller wires: StartBtn (resume) and ChangeBtn (fall through to form).
+    $theme  = Get-LogbookTheme $cfg
+    $accent = $theme.accent; $text = $theme.text; $muted = $theme.muted
+    $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
+    $overlay = '#D8' + $surface.TrimStart('#')
+
+    $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
+    $title    = ConvertTo-LogbookXmlText ([string]$cfg.branding.title)
+    $subtitle = ConvertTo-LogbookXmlText ([string]$cfg.branding.subtitle)
+    $nama     = [string]$profile.nama
+    $nim      = [string]$profile.nim
+    $tujuan   = [string]$profile.tujuan
+    $access   = if ([string]::IsNullOrWhiteSpace([string]$detectedType)) { 'Physical' } else { [string]$detectedType }
+
+    # Avatar initials from the name (up to two).
+    $initials = (($nama -split '\s+' | Where-Object { $_ } | ForEach-Object { $_.Substring(0,1).ToUpper() }) -join '')
+    if ($initials.Length -gt 2) { $initials = $initials.Substring(0,2) }
+    if ([string]::IsNullOrWhiteSpace($initials)) { $initials = '?' }
+    $nimMasked = if ($nim.Length -gt 4) { $nim.Substring(0,4) + '…' } else { $nim }
+    $meta = ConvertTo-LogbookXmlText ("NIM $nimMasked · $access · $tujuan")
+
+    $tWelcome = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'welcomeBack' 'Lanjutkan sesi Anda')
+    $tContinue = ConvertTo-LogbookXmlText (([string](Get-LogbookText $cfg 'continueAs' 'Lanjut sebagai {0}')) -f $nama)
+    $tNotYou  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'notYou' 'Bukan saya / ganti data')
+    $tSubmit  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'submit' 'Mulai Sesi')
+    $tPrivacy = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'privacyOneLiner' 'Siapa, cara & kapan — bukan ketikan.')
+    $tRecorded = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'whatsRecorded' 'Apa yang dicatat?')
+    $started  = ConvertTo-LogbookXmlText ('Sesi dimulai ' + (Get-Date).ToString('HH:mm'))
+    $nameX    = ConvertTo-LogbookXmlText $nama
+
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
+        Topmost="True" ShowInTaskbar="False" Background="$surface" FontFamily="Segoe UI">
+  <Grid>
+    <Image Name="BgImage" Stretch="Fill" Opacity="0.88"><Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect></Image>
+    <Rectangle Fill="$overlay" />
+    <Border Width="430" CornerRadius="16" BorderBrush="$border" BorderThickness="1" Background="$elevated"
+            HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30,34,28">
+      <Border.Effect><DropShadowEffect BlurRadius="40" ShadowDepth="0" Opacity="0.5" Color="#070C15" /></Border.Effect>
+      <StackPanel>
+        <Image Name="MascotImage" Height="96" MaxWidth="200" Stretch="Uniform" HorizontalAlignment="Center"
+               RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" Margin="0,0,0,10" />
+        <TextBlock Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="28" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
+        <TextBlock Text="$title" FontSize="15" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" Margin="0,6,0,0" />
+        <TextBlock Text="$subtitle" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,1,0,0" />
+        <Border Height="1" Background="$border" Margin="0,20,0,18" />
+        <TextBlock Text="$tWelcome" FontSize="12" FontWeight="SemiBold" Foreground="$muted" Margin="0,0,0,12" />
+        <Border Background="$surface" CornerRadius="12" BorderBrush="$border" BorderThickness="1" Padding="14,12" Margin="0,0,0,18">
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Border Width="44" Height="44" CornerRadius="22" Background="$accent" VerticalAlignment="Center">
+              <TextBlock Text="$initials" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+              <TextBlock Text="$tContinue" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="$text" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="$meta" FontFamily="Consolas" FontSize="12" Foreground="$muted" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </Grid>
+        </Border>
+        <Button Name="StartBtn" Height="50" Content="$tSubmit" FontFamily="Segoe UI Semibold" FontSize="19" FontWeight="Bold"
+                Background="$accent" Foreground="#FFFFFF" BorderThickness="0" Cursor="Hand" />
+        <Button Name="ChangeBtn" Content="$tNotYou" Background="Transparent" BorderThickness="0" Foreground="$muted"
+                FontSize="13" FontWeight="SemiBold" Cursor="Hand" Margin="0,12,0,0" HorizontalAlignment="Center" />
+        <TextBlock Text="$started" FontFamily="Consolas" FontSize="11" Foreground="$muted" HorizontalAlignment="Center" Margin="0,14,0,0" />
+        <Border Height="1" Background="$border" Margin="0,16,0,14" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+          <TextBlock Text="$tPrivacy" FontSize="11.5" Foreground="$muted" VerticalAlignment="Center" />
+          <TextBlock Text="  $tRecorded" FontSize="11.5" FontWeight="SemiBold" Foreground="$accent" VerticalAlignment="Center" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>
+"@
+}
+
+function Build-LogbookEmergencyOverlayXaml($cfg) {
+    # Emergency countdown (design: LogiX Notifications §3). A shutdown in 30s is
+    # too important for the corner widget, so Variant 3 escapes to a centered,
+    # dimmed-backdrop, always-on-top overlay. Big live Consolas numeral, red,
+    # pulsing ring. The controller drives CountNumber via a DispatcherTimer.
+    $theme  = Get-LogbookTheme $cfg
+    $red    = $theme.signalCritical; $text = $theme.text; $muted = $theme.muted
+    $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
+    $tTitle = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencyTitle' 'Peringatan Sistem')
+    $tBody  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencyBody' 'Perangkat ini akan dimatikan oleh admin. Simpan pekerjaan Anda sekarang.')
+    $tSaved = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencySaved' 'Saya sudah menyimpan')
+    $device = ConvertTo-LogbookXmlText (Get-LogbookDeviceDisplayName)
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
+        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="#CC070C15" FontFamily="Segoe UI">
+  <Grid>
+    <Border Width="440" CornerRadius="16" Background="$elevated" BorderBrush="$red" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30" >
+      <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="0" Opacity="0.6" Color="#000000" /></Border.Effect>
+      <StackPanel HorizontalAlignment="Center">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
+          <Ellipse Width="10" Height="10" Fill="$red" Margin="0,0,9,0" VerticalAlignment="Center"/>
+          <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="16" FontWeight="Bold" Foreground="$red" VerticalAlignment="Center"/>
+        </StackPanel>
+        <TextBlock Text="$device" FontFamily="Consolas" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+        <Grid Width="180" Height="180" HorizontalAlignment="Center">
+          <Ellipse Name="Ring" Width="180" Height="180" Stroke="$red" StrokeThickness="4" Opacity="0.85"/>
+          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Name="CountNumber" Text="30" FontFamily="Consolas" FontSize="76" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center"/>
+            <TextBlock Text="detik" FontFamily="Segoe UI" FontSize="13" Foreground="$muted" HorizontalAlignment="Center" Margin="0,-6,0,0"/>
+          </StackPanel>
+        </Grid>
+        <TextBlock Text="$tBody" FontSize="14" Foreground="$text" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" Margin="0,16,0,18"/>
+        <Button Name="SavedBtn" Content="$tSaved" Height="44" MinWidth="200" Cursor="Hand"
+                Background="$red" Foreground="#FFFFFF" BorderThickness="0" FontFamily="Segoe UI Semibold" FontSize="15" FontWeight="Bold"/>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>
+"@
+}
+
+function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
+    # Lock / paused overlay (design: LogiX Lock & Setup §A). Reads "in use,
+    # paused" -- never punitive. The session keeps running; only the screen is
+    # held. Controller drives LockClock + LockElapsed; UnlockBtn resumes.
+    $theme  = Get-LogbookTheme $cfg
+    $accent = $theme.accent; $text = $theme.text; $muted = $theme.muted
+    $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
+    $warn   = $theme.signalWarning
+    $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
+    $namaX  = ConvertTo-LogbookXmlText $Nama
+    $reasonX = ConvertTo-LogbookXmlText $Reason
+    $tTitle = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockTitle' 'Workstation dikunci oleh admin lab')
+    $tPaused = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockPausedNote' 'Sesi Anda dijeda, bukan diakhiri. Semua pekerjaan & waktu sesi tetap tersimpan.')
+    $tBadge = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockPausedBadge' 'DIJEDA')
+    $tElapsed = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockElapsedLabel' 'Waktu sesi berjalan')
+    $tUser  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockUserLabel' 'Pengguna')
+    $tReason = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockReasonLabel' 'Alasan dari admin')
+    $tHint  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockUnlockHint' 'Masuk kembali untuk melanjutkan sesi')
+    $tUnlock = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'lockUnlockBtn' 'Buka & Lanjutkan')
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
+        Topmost="True" ShowInTaskbar="False" Background="$surface" FontFamily="Segoe UI">
+  <Grid>
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
+      <Image Name="MascotImage" Height="96" Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,10"/>
+      <TextBlock Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="30" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center"/>
+      <TextBlock Name="LockClock" Text="--:--" FontFamily="Consolas" FontSize="15" Foreground="$muted" HorizontalAlignment="Center" Margin="0,6,0,22"/>
+      <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="20" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" TextAlignment="Center"/>
+      <TextBlock Text="$tPaused" FontSize="14" Foreground="$muted" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,20"/>
+      <Border Background="$elevated" CornerRadius="12" BorderBrush="$border" BorderThickness="1" Padding="20,16" Margin="0,0,0,20">
+        <StackPanel>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,10">
+            <Border Background="#22F59E0B" CornerRadius="999" Padding="9,3" Margin="0,0,10,0">
+              <TextBlock Text="$tBadge" FontFamily="Segoe UI Semibold" FontSize="11" FontWeight="Bold" Foreground="$warn"/>
+            </Border>
+            <TextBlock Text="$tElapsed" FontSize="12" Foreground="$muted" VerticalAlignment="Center"/>
+          </StackPanel>
+          <TextBlock Name="LockElapsed" Text="00:00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="$tUser" FontSize="12" Foreground="$muted" Width="120"/>
+            <TextBlock Grid.Column="1" Text="$namaX" FontFamily="Segoe UI Semibold" FontSize="13" Foreground="$text"/>
+          </Grid>
+          <Grid Margin="0,6,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="$tReason" FontSize="12" Foreground="$muted" Width="120"/>
+            <TextBlock Grid.Column="1" Text="$reasonX" FontSize="13" Foreground="$text" TextWrapping="Wrap"/>
+          </Grid>
+        </StackPanel>
+      </Border>
+      <TextBlock Text="$tHint" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+      <Button Name="UnlockBtn" Content="$tUnlock" Height="46" MinWidth="220" HorizontalAlignment="Center" Cursor="Hand"
+              Background="$accent" Foreground="#FFFFFF" BorderThickness="0" FontFamily="Segoe UI Semibold" FontSize="15" FontWeight="Bold"/>
+    </StackPanel>
   </Grid>
 </Window>
 "@
@@ -1022,10 +1359,17 @@ function Get-LogbookTimerShapeData([double]$ContentHeight, [double]$ContentWidth
 # Everything inside must fit the narrow width: values ellipsize, message
 # text wraps.
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
-    $primary = [string]$cfg.branding.colors.primary
-    $accent  = [string]$cfg.branding.colors.accent
-    $muted   = [string]$cfg.branding.colors.muted
-    $text    = [string]$cfg.branding.colors.text
+    $theme        = Get-LogbookTheme $cfg
+    $accent       = $theme.accent
+    $muted        = $theme.muted
+    $text         = $theme.text
+    $primary        = $theme.surfaceElevated
+    $widget         = $theme.surfaceWidget
+    $border         = $theme.border
+    $signalNormal   = $theme.signalNormal
+    $signalWarning  = $theme.signalWarning
+    $signalCritical = $theme.signalCritical
+    $tSelesai       = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
 
     $sessionType = ConvertTo-LogbookXmlText ([string]$session.session_type)
     $nama        = ConvertTo-LogbookXmlText ([string]$session.nama)
@@ -1049,9 +1393,9 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
         Width="230" Height="210" WindowStyle="None" ResizeMode="NoResize"
         Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
   <Grid>
-    <Path Name="ShapePath" Margin="10" Fill="#0B0F19" Stroke="$primary" StrokeThickness="1.3" Data="$seedShapeData">
+    <Path Name="ShapePath" Margin="10" Fill="$widget" Stroke="$border" StrokeThickness="1.3" Data="$seedShapeData">
       <Path.Effect>
-        <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.45" Color="$primary" />
+        <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.55" Color="#070C15" />
       </Path.Effect>
     </Path>
 
@@ -1065,37 +1409,13 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
 
       <Grid Grid.Row="0" Margin="18,14,18,0">
         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <Ellipse Name="Pulse" Width="8" Height="8" Fill="$accent" Margin="0,3,8,0" VerticalAlignment="Center" />
+        <Ellipse Name="Pulse" Width="8" Height="8" Fill="$signalNormal" Margin="0,3,8,0" VerticalAlignment="Center" />
         <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-        <Button Grid.Column="2" Name="ExitBtn" Content="END" Cursor="Hand" VerticalAlignment="Center" Visibility="Collapsed"
-                Padding="8,2" Margin="8,0,0,0" Background="#1EFFFFFF" BorderBrush="$muted" BorderThickness="1"
-                Foreground="$text" FontFamily="Segoe UI Semibold" FontSize="9.5" SnapsToDevicePixels="True"
-                ToolTip="Akhiri sesi &amp; kunci workstation">
-          <Button.Template>
-            <ControlTemplate TargetType="Button">
-              <Border x:Name="ExitBtnBg" CornerRadius="7" Background="{TemplateBinding Background}"
-                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                      SnapsToDevicePixels="True">
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"
-                                  TextElement.Foreground="{TemplateBinding Foreground}" />
-              </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="ExitBtnBg" Property="Background" Value="$accent" />
-                  <Setter TargetName="ExitBtnBg" Property="BorderBrush" Value="$accent" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="ExitBtnBg" Property="Opacity" Value="0.8" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Button.Template>
-        </Button>
       </Grid>
 
       <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,10" VerticalAlignment="Bottom">
         <TextBlock Name="ClockMain" Text="00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text"/>
-        <TextBlock Name="ClockSeconds" Text="00" FontFamily="Consolas" FontSize="16" FontWeight="Bold" Foreground="$primary" Margin="4,0,0,6" VerticalAlignment="Bottom"/>
+        <TextBlock Name="ClockSeconds" Text="00" FontFamily="Consolas" FontSize="16" FontWeight="Bold" Foreground="$muted" Margin="4,0,0,6" VerticalAlignment="Bottom"/>
       </StackPanel>
 
       <StackPanel Grid.Row="2" Name="InfoSection" Visibility="Visible">
@@ -1119,7 +1439,7 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
           <TextBlock Grid.Column="1" Name="DeviceValue" Text="$device" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
         </Grid>
 
-        <Border Height="4" Margin="18,0,18,14" CornerRadius="2">
+        <Border Height="4" Margin="18,0,18,12" CornerRadius="2">
           <Border.Background>
             <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
               <GradientStop Color="$primary" Offset="0"/>
@@ -1127,6 +1447,31 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
             </LinearGradientBrush>
           </Border.Background>
         </Border>
+
+        <!-- SELESAI: always present (no hover-to-reveal), two-step to prevent
+             misclicks. Calm outline by default, warms to amber on hover; the
+             controller (logbook_timer.ps1) arms it red on first press and ends
+             the session on a confirming second press within 3s. -->
+        <Button Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,14" Height="34"
+                Background="Transparent" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
+                FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
+          <Button.Template>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="SelesaiBg" CornerRadius="8" Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
+                <TextBlock Text="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="SelesaiBg" Property="Background" Value="#22F59E0B"/>
+                  <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$signalWarning"/>
+                  <Setter Property="Foreground" Value="$signalWarning"/>
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Button.Template>
+        </Button>
       </StackPanel>
 
       <Border Grid.Row="3" Name="MessageSection" Visibility="Collapsed" Margin="14,0,14,14" Padding="10,10" CornerRadius="10"

@@ -14,7 +14,7 @@ Write-Host "default config -> XAML"
 $cfg = Get-LogbookDefaultConfig
 $xaml = Build-LogbookPopupXaml $cfg
 $doc = [xml]$xaml
-Assert ($doc.Window.Background -eq '#741B47') "default accent on window background"
+Assert ($doc.Window.Background -eq '#070C15') "default deep-navy surface on fullscreen popup background (Client Foundation)"
 $logo = ($doc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'LogoText' }).Text
 Assert ($logo -eq 'Logix') "default logo text Logix"
 $items = $doc.SelectNodes("//*[local-name()='ComboBoxItem']")
@@ -30,7 +30,7 @@ $tmp = Join-Path $env:TEMP ("logix_cfgtest_" + [guid]::NewGuid().ToString('N').S
 try {
     $merged = Merge-LogbookConfig (Get-LogbookDefaultConfig) (Read-LogbookConfigFile $tmp)
     Assert ($merged.branding.colors.accent -eq '#1A7F4B') "accent overridden"
-    Assert ($merged.branding.colors.primary -eq '#073763') "primary kept from defaults"
+    Assert ($merged.branding.colors.primary -eq '#0E1626') "primary kept from defaults"
     Assert ($merged.branding.title -eq 'Report Logbook') "title kept from defaults"
     Assert (@($merged.purposes).Count -eq 4) "purposes array replaced (4)"
     Assert (@($merged.requiredFields) -join ',' -eq 'nama,keterangan') "requiredFields replaced"

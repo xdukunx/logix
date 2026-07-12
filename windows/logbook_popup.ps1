@@ -15,6 +15,10 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
 . 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 $cfg = Get-LogbookConfig
+# Combo dropdowns render as a light control (white surface, dark text) for
+# readability over the dark popup; the text uses the brand accent so it stays
+# on-theme when a lab re-brands. See Set-ReadableComboBox.
+$script:comboFg = (Get-LogbookTheme $cfg).accent
 Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
 
 try {
@@ -84,6 +88,90 @@ $detectedSessionType = [string]$sessionInfo[0]
 $detectedAnyDesk = [int]$sessionInfo[1]
 $sessionId = "win-$($env:USERNAME)-$([DateTimeOffset]::Now.ToUnixTimeSeconds())-$([guid]::NewGuid().ToString('N').Substring(0,8))"
 $profileFile = Join-Path $Global:StateDir 'last_profile.json'
+
+# Shared session-start used by BOTH the full sign-in form and the returning-
+# user fast path, so the two paths can never drift. Writes the session file +
+# local profile, logs START, and starts the timer.
+function Invoke-LogbookStartSession {
+    param([string]$Nama, [string]$Nim, [string]$Access, [string]$Tujuan, [string]$Keterangan)
+    Ensure-LogbookDirs
+    $sessionType = $Access.Trim()
+    $sid = "win-$env:USERNAME-$([DateTimeOffset]::Now.ToUnixTimeSeconds())-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+    $anydeskDetected = $(if ($sessionType -eq 'AnyDesk') { 1 } else { 0 })
+    $obj = [ordered]@{
+        session_id       = $sid
+        start_time       = (Get-Date).ToString('o')
+        session_type     = $sessionType
+        anydesk_detected = $anydeskDetected
+        username         = $env:USERNAME
+        windows_user     = "$env:USERDOMAIN\$env:USERNAME"
+        hostname         = $env:COMPUTERNAME
+        nama             = $Nama.Trim()
+        nim              = $Nim.Trim()
+        tujuan           = $Tujuan.Trim()
+        keterangan       = $Keterangan.Trim()
+    }
+    $obj | ConvertTo-Json -Depth 4 | Out-File -FilePath $Global:SessionFile -Encoding UTF8 -Force
+    # Persist locally so the fast path can resume next time (identity never
+    # leaves the machine except via the normal START log).
+    ([ordered]@{ nama = $obj.nama; nim = $obj.nim; tujuan = $obj.tujuan; keterangan = $obj.keterangan } |
+        ConvertTo-Json -Depth 3) | Out-File -FilePath $profileFile -Encoding UTF8 -Force
+    $logged = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan
+    if (-not $logged) { Write-LogbookError "START logging failed but continuing safely. sid=$sid" }
+    Start-LogbookTimer -SessionId $sid | Out-Null
+    return $true
+}
+
+# Returning-user fast path (C8.1): a saved profile + not a forced fresh form
+# -> offer one-tap resume before the full sign-in form. "Bukan saya / ganti
+# data" falls through to the full form below.
+if ((-not $ForceNew) -and (Test-Path $profileFile)) {
+    try {
+        $fpProfile = Get-Content $profileFile -Raw | ConvertFrom-Json
+        if ($fpProfile.nama -and $fpProfile.nim) {
+            $fpWindow = [Windows.Markup.XamlReader]::Load(
+                (New-Object System.Xml.XmlNodeReader ([xml](Build-LogbookWelcomeBackXaml $cfg $fpProfile $detectedSessionType))))
+            $fpWindow.WindowState = 'Normal'
+            $fpWindow.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
+            $fpWindow.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
+            $fpWindow.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
+            $fpWindow.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+            $fpWindow.Topmost = $true
+            $fpBg = New-BlurredBackgroundImage
+            if ($fpBg) { $fpWindow.FindName('BgImage').Source = $fpBg }
+            $fpLogo = [string]$cfg.branding.logoPath
+            if (Test-Path $fpLogo) {
+                try {
+                    $m = New-Object System.Windows.Media.Imaging.BitmapImage
+                    $m.BeginInit(); $m.UriSource = New-Object System.Uri($fpLogo); $m.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $m.EndInit(); $m.Freeze()
+                    $fpWindow.FindName('MascotImage').Source = $m
+                    $fpWindow.FindName('MascotImage').Visibility = 'Visible'
+                } catch {}
+            }
+            $script:fpChoice = 'pending'
+            $fpWindow.Add_Closing({ param($s, $e) if ($script:fpChoice -eq 'pending') { $e.Cancel = $true } })
+            $fpWindow.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape' -or $e.SystemKey -eq 'F4') { $e.Handled = $true } })
+            $fpWindow.FindName('StartBtn').Add_Click({
+                try {
+                    $ket = [string]$fpProfile.keterangan
+                    if ([string]::IsNullOrWhiteSpace($ket)) { $ket = '(lanjutan sesi)' }
+                    Invoke-LogbookStartSession -Nama ([string]$fpProfile.nama) -Nim ([string]$fpProfile.nim) -Access $detectedSessionType -Tujuan ([string]$fpProfile.tujuan) -Keterangan $ket | Out-Null
+                } catch { Write-LogbookError "Fast-path start failed: $($_.Exception.Message)" }
+                $script:fpChoice = 'resumed'
+                $fpWindow.Close()
+            })
+            $fpWindow.FindName('ChangeBtn').Add_Click({ $script:fpChoice = 'form'; $fpWindow.Close() })
+            try {
+                Set-TaskManagerDisabled -Disabled $true
+                [void]$fpWindow.ShowDialog()
+            } finally {
+                Set-TaskManagerDisabled -Disabled $false
+            }
+            if ($script:fpChoice -eq 'resumed') { exit 0 }
+            # otherwise fall through to the full sign-in form below
+        }
+    } catch { Write-LogbookError "Fast path skipped, showing full form: $($_.Exception.Message)" }
+}
 
 $xaml = Build-LogbookPopupXaml $cfg
 
@@ -171,7 +259,7 @@ function Set-ComboVisualTreeReadable($root, $fg, $bg) {
 function Set-ReadableComboBox($combo) {
     try {
         $brushConverter = New-Object System.Windows.Media.BrushConverter
-        $fg = $brushConverter.ConvertFromString('#741B47')
+        $fg = $brushConverter.ConvertFromString($script:comboFg)
         $bg = $brushConverter.ConvertFromString('#FFFFFF')
         $border = $brushConverter.ConvertFromString('#C0C0C0')
         $combo.IsEnabled = $true
@@ -192,21 +280,21 @@ function Set-ReadableComboBox($combo) {
             param($sender, $eventArgs)
             try {
                 $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString('#741B47')) ($bc.ConvertFromString('#FFFFFF'))
+                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
             } catch {}
         })
         $combo.Add_DropDownOpened({
             param($sender, $eventArgs)
             try {
                 $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString('#741B47')) ($bc.ConvertFromString('#FFFFFF'))
+                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
             } catch {}
         })
         $combo.Add_DropDownClosed({
             param($sender, $eventArgs)
             try {
                 $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString('#741B47')) ($bc.ConvertFromString('#FFFFFF'))
+                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
             } catch {}
         })
     } catch {
@@ -287,33 +375,7 @@ $btn.Add_Click({
         Ensure-LogbookDirs
         $btn.IsEnabled = $false
         $btn.Content = 'Menyimpan...'
-        $purpose = (Get-ComboText $tujuan).Trim()
-        $sessionType = (Get-ComboText $access).Trim()
-        $sessionId = "win-$env:USERNAME-$([DateTimeOffset]::Now.ToUnixTimeSeconds())-$([guid]::NewGuid().ToString('N').Substring(0,8))"
-        $anydeskDetected = $(if ($sessionType -eq 'AnyDesk') { 1 } else { 0 })
-        $startTime = Get-Date
-        $obj = [ordered]@{
-            session_id = $sessionId
-            start_time = $startTime.ToString('o')
-            session_type = $sessionType
-            anydesk_detected = $anydeskDetected
-            username = $env:USERNAME
-            windows_user = "$env:USERDOMAIN\$env:USERNAME"
-            hostname = $env:COMPUTERNAME
-            nama = $nama.Text.Trim()
-            nim = $nim.Text.Trim()
-            tujuan = $purpose
-            keterangan = $ket.Text.Trim()
-        }
-        $obj | ConvertTo-Json -Depth 4 | Out-File -FilePath $Global:SessionFile -Encoding UTF8 -Force
-        ([ordered]@{ nama=$obj.nama; nim=$obj.nim; tujuan=$obj.tujuan } | ConvertTo-Json -Depth 3) | Out-File -FilePath $profileFile -Encoding UTF8 -Force
-
-        $logged = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sessionId -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan
-        if (-not $logged) {
-            Write-LogbookError "START logging failed but form will continue to close safely. sid=$sessionId"
-        }
-
-        Start-LogbookTimer -SessionId $sessionId | Out-Null
+        Invoke-LogbookStartSession -Nama $nama.Text -Nim $nim.Text -Access (Get-ComboText $access) -Tujuan (Get-ComboText $tujuan) -Keterangan $ket.Text | Out-Null
         $script:submitted = $true
         $window.Close()
     } catch {
