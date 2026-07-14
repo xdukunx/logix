@@ -14,12 +14,11 @@ from fastapi.testclient import TestClient
 
 
 def _load_main(monkeypatch, tmp_path, *, dev_mode="0", ingest_key="",
-               allowed_origins="", google_client_id="", google_client_secret=""):
+               allowed_origins="", admin_password=""):
     monkeypatch.setenv("LOGIX_DEV_MODE", dev_mode)
     monkeypatch.setenv("LOGIX_INGEST_API_KEY", ingest_key)
     monkeypatch.setenv("LOGIX_ALLOWED_ORIGINS", allowed_origins)
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", google_client_id)
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", google_client_secret)
+    monkeypatch.setenv("LOGIX_ADMIN_PASSWORD", admin_password)
     monkeypatch.setenv("ADMIN_EMAILS", "admin@example.org")
 
     if "main" in sys.modules:
@@ -38,100 +37,77 @@ def _load_main(monkeypatch, tmp_path, *, dev_mode="0", ingest_key="",
 
 
 def _login(client):
-    res = client.get("/api/auth/google/login", follow_redirects=False)
-    token = res.headers["location"].split("token=")[1]
+    res = client.post("/api/auth/dev-login")
+    token = res.json()["token"]
     return {"Authorization": f"Bearer {token}"}
 
 
-# --- Fix #1: auth-bypass gate ------------------------------------------------
+# --- Fix #1: local admin auth (email + password) ----------------------------
+# Google OAuth was replaced by a self-contained email + password login. The
+# password lives in LOGIX_ADMIN_PASSWORD (env / .env, never in source or DB).
+# Login is closed unless BOTH the email is on the ADMIN_EMAILS allowlist AND the
+# password matches; an unconfigured password in production can never match.
 
-def test_google_login_mock_blocked_outside_dev_mode(monkeypatch, tmp_path):
-    module = _load_main(monkeypatch, tmp_path, dev_mode="0", google_client_id="")
+def test_login_closed_in_prod_without_password(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0", admin_password="")
     with TestClient(module.app) as client:
-        res = client.get("/api/auth/google/login", follow_redirects=False)
-    assert res.status_code == 503
+        res = client.post("/api/auth/login", json={"email": "admin@example.org", "password": "anything"})
+    assert res.status_code == 401
+    assert module.ACTIVE_TOKENS == {}  # no backdoor when no password configured
+
+
+def test_login_succeeds_with_correct_password(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0", admin_password="s3cret-pass")
+    with TestClient(module.app) as client:
+        res = client.post("/api/auth/login", json={"email": "admin@example.org", "password": "s3cret-pass"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["token"] and body["email"] == "admin@example.org" and body["role"]
+    assert len(module.ACTIVE_TOKENS) == 1
+
+
+def test_login_rejects_wrong_password(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0", admin_password="s3cret-pass")
+    with TestClient(module.app) as client:
+        res = client.post("/api/auth/login", json={"email": "admin@example.org", "password": "nope"})
+    assert res.status_code == 401
     assert module.ACTIVE_TOKENS == {}
 
 
-def test_google_login_mock_allowed_in_dev_mode(monkeypatch, tmp_path):
-    module = _load_main(monkeypatch, tmp_path, dev_mode="1", google_client_id="")
+def test_login_rejects_non_allowlisted_email(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0", admin_password="s3cret-pass")
     with TestClient(module.app) as client:
-        res = client.get("/api/auth/google/login", follow_redirects=False)
-    assert res.status_code in (302, 307)
-    assert "token=" in res.headers["location"]
+        res = client.post("/api/auth/login", json={"email": "attacker@example.net", "password": "s3cret-pass"})
+    assert res.status_code == 401
+    assert module.ACTIVE_TOKENS == {}
+
+
+def test_login_rate_limited_after_repeated_failures(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0", admin_password="s3cret-pass")
+    with TestClient(module.app) as client:
+        for _ in range(module.LOGIN_MAX_FAILURES):
+            client.post("/api/auth/login", json={"email": "admin@example.org", "password": "wrong"})
+        # Even the correct password is now refused with 429 until the window passes.
+        res = client.post("/api/auth/login", json={"email": "admin@example.org", "password": "s3cret-pass"})
+    assert res.status_code == 429
+    assert module.ACTIVE_TOKENS == {}
+
+
+def test_dev_login_blocked_outside_dev_mode(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="0")
+    with TestClient(module.app) as client:
+        res = client.post("/api/auth/dev-login")
+    assert res.status_code == 404
+    assert module.ACTIVE_TOKENS == {}
+
+
+def test_dev_login_works_in_dev_mode(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path, dev_mode="1")
+    with TestClient(module.app) as client:
+        res = client.post("/api/auth/dev-login")
+    assert res.status_code == 200
+    assert res.json()["token"]
     assert len(module.ACTIVE_TOKENS) == 1
-
-
-# --- Google OAuth: real-credential flow --------------------------------------
-# The mock-gating tests above cover the no-credential paths; these cover what
-# happens once real GOOGLE_CLIENT_ID/SECRET are configured: the outbound
-# redirect must carry the right params, and the callback must enforce the
-# ADMIN_EMAILS allowlist (Google's endpoints are mocked -- the decision logic
-# under test is entirely ours).
-
-def _fake_google(monkeypatch, module, email):
-    """Mock urllib so the callback's token exchange + userinfo fetch succeed."""
-    import io
-    import json as _json
-
-    class FakeResponse(io.BytesIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    def fake_urlopen(req, *a, **k):
-        url = req.full_url if hasattr(req, "full_url") else str(req)
-        if "oauth2.googleapis.com/token" in url:
-            return FakeResponse(_json.dumps({"access_token": "fake-access"}).encode())
-        if "userinfo" in url:
-            return FakeResponse(_json.dumps({"email": email}).encode())
-        raise AssertionError(f"unexpected outbound call: {url}")
-
-    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
-
-
-def test_google_login_redirects_to_google_when_configured(monkeypatch, tmp_path):
-    module = _load_main(monkeypatch, tmp_path, dev_mode="0",
-                        google_client_id="123-abc.apps.googleusercontent.com",
-                        google_client_secret="s3cret")
-    with TestClient(module.app) as client:
-        res = client.get("/api/auth/google/login", follow_redirects=False)
-    assert res.status_code in (302, 307)
-    loc = res.headers["location"]
-    assert loc.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
-    assert "client_id=123-abc.apps.googleusercontent.com" in loc
-    assert "response_type=code" in loc
-    assert "scope=openid+email+profile" in loc
-    assert "redirect_uri=" in loc
-    assert module.ACTIVE_TOKENS == {}  # no session minted before Google answers
-
-
-def test_callback_accepts_allowlisted_email(monkeypatch, tmp_path):
-    module = _load_main(monkeypatch, tmp_path, dev_mode="0",
-                        google_client_id="123-abc.apps.googleusercontent.com",
-                        google_client_secret="s3cret")
-    _fake_google(monkeypatch, module, "admin@example.org")
-    with TestClient(module.app) as client:
-        res = client.get("/api/auth/callback?code=fake-code", follow_redirects=False)
-    assert res.status_code in (302, 307)
-    assert "token=" in res.headers["location"]
-    assert len(module.ACTIVE_TOKENS) == 1
-    session = next(iter(module.ACTIVE_TOKENS.values()))
-    assert session["email"] == "admin@example.org"
-    assert session["role"]
-
-
-def test_callback_rejects_non_allowlisted_email(monkeypatch, tmp_path):
-    module = _load_main(monkeypatch, tmp_path, dev_mode="0",
-                        google_client_id="123-abc.apps.googleusercontent.com",
-                        google_client_secret="s3cret")
-    _fake_google(monkeypatch, module, "attacker@example.net")
-    with TestClient(module.app) as client:
-        res = client.get("/api/auth/callback?code=fake-code", follow_redirects=False)
-    assert res.status_code == 403
-    assert module.ACTIVE_TOKENS == {}  # no session for a non-allowlisted account
 
 
 # --- Fix #2: ingest API key validation --------------------------------------
@@ -214,10 +190,15 @@ def test_cors_is_not_wildcard_with_credentials_in_prod(monkeypatch, tmp_path):
 
 # --- Fix #5: dead code removed -----------------------------------------------
 
-def test_dead_login_code_removed(monkeypatch, tmp_path):
+def test_google_oauth_code_removed(monkeypatch, tmp_path):
+    # Google OAuth was replaced by local email + password auth. The old
+    # endpoints and credential globals must be gone (no dead auth paths), and
+    # the password-login replacement must be present.
     module = _load_main(monkeypatch, tmp_path)
-    assert not hasattr(module, "LoginRequest")
-    assert not hasattr(module, "get_admin_password")
+    assert not hasattr(module, "google_login")
+    assert not hasattr(module, "google_callback")
+    assert not hasattr(module, "GOOGLE_CLIENT_ID")
+    assert hasattr(module, "LoginRequest")
 
 
 # --- Fix #7: /api/reports path ----------------------------------------------

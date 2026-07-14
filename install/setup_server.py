@@ -138,11 +138,9 @@ def register_service(python: str, host: str, port: int, user: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Configure the Logix central admin server")
     ap.add_argument("--admin-emails", default="",
-                    help="comma-separated Google accounts allowed to sign in")
-    ap.add_argument("--google-client-id", default="")
-    ap.add_argument("--google-client-secret", default="")
-    ap.add_argument("--redirect-uri", default="",
-                    help="OAuth callback, e.g. https://logix.example.org/api/auth/callback")
+                    help="comma-separated admin emails allowed to sign in")
+    ap.add_argument("--admin-password", default="",
+                    help="shared admin login password (leave blank to set later in .env)")
     ap.add_argument("--ingest-key", default="",
                     help="shared X-API-Key for devices (blank = generate a strong one)")
     ap.add_argument("--allowed-origins", default="",
@@ -164,12 +162,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit(f"server/ not found at {SERVER_DIR}. Run from a full clone of the repo.")
 
     admin_emails = ns.admin_emails or prompt("Admin email(s), comma-separated", "admin@example.org")
-    client_id = ns.google_client_id or prompt("Google OAuth client id (blank = configure later)")
-    client_secret = ns.google_client_secret
-    if client_id and not client_secret:
-        client_secret = prompt("Google OAuth client secret")
-    redirect_uri = ns.redirect_uri or prompt(
-        "OAuth redirect URI", f"http://localhost:{ns.port}/api/auth/callback")
+    admin_password = ns.admin_password or prompt(
+        "Admin login password (blank = set later in .env; use a STRONG value, not admin123)")
     ingest_key = ns.ingest_key or secrets.token_hex(32)
     allowed_origins = ns.allowed_origins or prompt(
         "Allowed dashboard origin(s)", f"http://localhost:{ns.port}")
@@ -184,9 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         update_config(ENV_PATH, {
             "ADMIN_EMAILS": admin_emails,
-            "GOOGLE_CLIENT_ID": client_id,
-            "GOOGLE_CLIENT_SECRET": client_secret,
-            "GOOGLE_REDIRECT_URI": redirect_uri,
+            "LOGIX_ADMIN_PASSWORD": admin_password,
             "LOGIX_INGEST_API_KEY": ingest_key,
             "LOGIX_ALLOWED_ORIGINS": allowed_origins,
             "LOGIX_DEV_MODE": dev_mode,
@@ -197,9 +189,9 @@ def main(argv: list[str] | None = None) -> int:
         os.chmod(ENV_PATH, 0o600)
     print(f"\nWrote server settings to {ENV_PATH}")
 
-    if dev_mode != "1" and not client_id:
-        print("NOTE: no Google OAuth configured and dev mode is off -- the dashboard")
-        print("      login stays locked until you add GOOGLE_CLIENT_ID/SECRET to .env.")
+    if dev_mode != "1" and not admin_password:
+        print("NOTE: no admin password set and dev mode is off -- the dashboard")
+        print("      login stays locked until you set LOGIX_ADMIN_PASSWORD in .env.")
         print("      Device ingest (logs/heartbeats) works already via the API key.")
 
     if ns.install_deps:

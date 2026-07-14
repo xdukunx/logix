@@ -36,8 +36,8 @@ def _load_main(monkeypatch, tmp_path):
 
 
 def _login(client):
-    res = client.get("/api/auth/google/login", follow_redirects=False)
-    token = res.headers["location"].split("token=")[1]
+    res = client.post("/api/auth/dev-login")
+    token = res.json()["token"]
     return {"Authorization": f"Bearer {token}"}
 
 

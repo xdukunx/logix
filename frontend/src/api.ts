@@ -15,6 +15,21 @@ export const setOnSessionExpired = (callback: () => void) => {
   onSessionExpired = callback;
 };
 
+// Local admin login (email + password). On success the session token is
+// stored; callers then flip the app into its authenticated state. Replaces the
+// former Google OAuth redirect flow.
+export const login = async (email: string, password: string): Promise<void> => {
+  const res = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: email.trim(), password }),
+  });
+  if (!res.ok) throw new Error(await errorDetail(res, "Gagal masuk. Periksa email dan password."));
+  const body = await res.json();
+  if (!body?.token) throw new Error("Respons login tidak valid dari server.");
+  setToken(body.token as string);
+};
+
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   const token = getToken();
   const headers = new Headers(options.headers);

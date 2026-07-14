@@ -248,5 +248,9 @@ export default function App() {
   // Wall/kiosk mode: full-screen, read-only, no app chrome (requires auth).
   if (hash === "#wall" && isAuthed) return <WallMode />;
 
-  return isAuthed ? <Dashboard onLogout={logout} /> : <Login />;
+  return isAuthed ? (
+    <Dashboard onLogout={logout} />
+  ) : (
+    <Login onAuthenticated={() => setIsAuthed(true)} />
+  );
 }

@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import subprocess
 import secrets
+import hmac
 import urllib.request
 import urllib.parse
 import uuid
@@ -1037,159 +1038,97 @@ def startup_event():
 
 
 # Google OAuth configuration variables
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/callback")
+# --- Local admin authentication (email + password) -----------------------
+# Google OAuth was removed in favour of a self-contained email + password
+# login. The password is read from the LOGIX_ADMIN_PASSWORD environment
+# variable (set in server/.env, which is gitignored) -- never hardcoded in
+# source or stored in the database. Whoever signs in must (a) be on the
+# ADMIN_EMAILS allowlist and (b) present the shared admin password. In dev
+# mode a default password ("admin123") is used when none is configured, and a
+# passwordless /api/auth/dev-login shortcut exists for the test suite -- both
+# are gated behind LOGIX_DEV_MODE and must never be used on a shared server.
+ADMIN_PASSWORD = os.environ.get("LOGIX_ADMIN_PASSWORD", "")
+if not ADMIN_PASSWORD and LOGIX_DEV_MODE:
+    ADMIN_PASSWORD = "admin123"
+
+# Simple in-memory brute-force guard: lock a client IP after LOGIN_MAX_FAILURES
+# failed attempts within LOGIN_WINDOW_SECONDS. Resets on a successful login.
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 300
+_LOGIN_FAILURES: Dict[str, List[datetime]] = {}
+
+
+def _login_client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _login_is_locked(ip: str) -> bool:
+    cutoff = datetime.now() - timedelta(seconds=LOGIN_WINDOW_SECONDS)
+    recent = [t for t in _LOGIN_FAILURES.get(ip, []) if t > cutoff]
+    _LOGIN_FAILURES[ip] = recent
+    return len(recent) >= LOGIN_MAX_FAILURES
+
+
+def _login_record_failure(ip: str) -> None:
+    _LOGIN_FAILURES.setdefault(ip, []).append(datetime.now())
+
+
+def _login_clear(ip: str) -> None:
+    _LOGIN_FAILURES.pop(ip, None)
+
+
+def _issue_session(email: str, role: str) -> str:
+    token = secrets.token_hex(24)
+    ACTIVE_TOKENS[token] = {
+        "email": email,
+        "expires": datetime.now() + timedelta(hours=8),
+        "role": role,
+    }
+    return token
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
 
 # Authentication Routes
-@app.get("/api/auth/google/login")
-def google_login():
-    if not GOOGLE_CLIENT_ID:
-        if not LOGIX_DEV_MODE:
-            # A browser lands here, not an API client -- render instructions,
-            # not raw JSON. 503 keeps the "misconfigured" semantics for
-            # anything that does check the status code.
-            return HTMLResponse(
-                status_code=503,
-                content="""
-                <html>
-                  <head>
-                    <title>Login Belum Dikonfigurasi</title>
-                    <style>
-                      body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #f1f5f9; color: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                      .card { background: #ffffff; border: 1px solid #dbeafe; padding: 32px; border-radius: 16px; max-width: 520px; box-shadow: 0 4px 30px rgba(15, 23, 42, 0.08); }
-                      h2 { color: #2563eb; margin-top: 0; }
-                      p, li { color: #475569; font-size: 14px; line-height: 1.6; }
-                      code { background: #eef2f7; padding: 2px 6px; border-radius: 4px; color: #0f172a; font-size: 12.5px; }
-                      a { color: #2563eb; }
-                    </style>
-                  </head>
-                  <body>
-                    <div class="card">
-                      <h2>Login Google belum dikonfigurasi</h2>
-                      <p>Server ini berjalan dalam postur produksi tanpa kredensial
-                      OAuth, jadi login sengaja ditolak (tidak ada celah masuk).
-                      Untuk mengaktifkan tombol "Masuk dengan Google":</p>
-                      <ol>
-                        <li>Buat <b>OAuth Client ID</b> (tipe <i>Web application</i>) di
-                          <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>,
-                          dengan redirect URI persis: <code>&lt;URL-server-ini&gt;/api/auth/callback</code></li>
-                        <li>Di mesin server, jalankan:
-                          <code>python install/setup_server.py</code>
-                          dan isi Client ID/Secret &mdash; atau tulis
-                          <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code>
-                          ke <code>server/.env</code></li>
-                        <li>Restart server ini.</li>
-                      </ol>
-                      <p>Hanya untuk uji coba di laptop sendiri:
-                      <code>LOGIX_DEV_MODE=1</code> mengaktifkan login pengembangan
-                      tanpa Google. Jangan pernah di server yang bisa diakses
-                      orang lain.</p>
-                    </div>
-                  </body>
-                </html>
-                """,
-            )
-        # Developer Mock Fallback (LOGIX_DEV_MODE=1 only): auto-authenticate as first whitelist admin
-        mock_token = secrets.token_hex(24)
-        admin_roles = get_admin_roles()
-        mock_email = next(iter(admin_roles))
-        ACTIVE_TOKENS[mock_token] = {
-            "email": mock_email,
-            "expires": datetime.now() + timedelta(hours=8),
-            "role": admin_roles[mock_email],
-        }
-        return RedirectResponse(url=f"/?token={mock_token}")
+@app.post("/api/auth/login")
+def password_login(payload: LoginRequest, request: Request):
+    ip = _login_client_ip(request)
+    if _login_is_locked(ip):
+        raise HTTPException(status_code=429, detail="Terlalu banyak percobaan login. Coba lagi dalam beberapa menit.")
 
-    params = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "access_type": "online",
-        "prompt": "select_account"
-    }
-    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
-    return RedirectResponse(url=url)
-
-
-@app.get("/api/auth/callback")
-def google_callback(code: str):
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=400, detail="Google OAuth is not configured on the server.")
-        
-    token_url = "https://oauth2.googleapis.com/token"
-    data = urllib.parse.urlencode({
-        "code": code,
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "redirect_uri": GOOGLE_REDIRECT_URI,
-        "grant_type": "authorization_code"
-    }).encode("utf-8")
-    
-    req = urllib.request.Request(
-        token_url,
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST"
+    email = payload.email.strip().lower()
+    admin_roles = get_admin_roles()
+    email_ok = email in admin_roles
+    # Constant-time compare, always evaluated so wrong-email and wrong-password
+    # take the same path. An empty ADMIN_PASSWORD (production with no password
+    # configured) can never match -- login stays closed by design, no backdoor.
+    password_ok = bool(ADMIN_PASSWORD) and hmac.compare_digest(
+        payload.password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")
     )
-    
-    try:
-        with urllib.request.urlopen(req) as res:
-            token_data = json.loads(res.read().decode())
-            access_token = token_data.get("access_token")
-            
-        if not access_token:
-            raise HTTPException(status_code=400, detail="Failed to retrieve access token from Google.")
-            
-        userinfo_url = f"https://www.googleapis.com/oauth2/v3/userinfo?access_token={access_token}"
-        userinfo_req = urllib.request.Request(userinfo_url)
-        
-        with urllib.request.urlopen(userinfo_req) as res:
-            user_data = json.loads(res.read().decode())
-            email = user_data.get("email", "").strip().lower()
-            
-        if not email:
-            raise HTTPException(status_code=400, detail="Google account has no associated email address.")
-            
-        admin_roles = get_admin_roles()
-        if email in admin_roles:
-            session_token = secrets.token_hex(24)
-            ACTIVE_TOKENS[session_token] = {
-                "email": email,
-                "expires": datetime.now() + timedelta(hours=8),
-                "role": admin_roles[email],
-            }
-            return RedirectResponse(url=f"/?token={session_token}")
-        else:
-            return HTMLResponse(
-                content=f"""
-                <html>
-                  <head>
-                    <title>Akses Ditolak</title>
-                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-                    <style>
-                      body {{ font-family: 'Inter', sans-serif; background: #f1f5f9; color: #0f172a; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }}
-                      .card {{ background: #ffffff; border: 1px solid #fecaca; padding: 32px; border-radius: 16px; text-align: center; max-width: 400px; box-shadow: 0 4px 30px rgba(15, 23, 42, 0.08); }}
-                      h2 {{ color: #dc2626; margin-top: 0; }}
-                      p {{ color: #475569; font-size: 14px; line-height: 1.5; }}
-                      .btn {{ display: inline-block; margin-top: 20px; background: #2563eb; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 13px; font-weight: 600; }}
-                    </style>
-                  </head>
-                  <body>
-                    <div class="card">
-                      <h2>Akses Tidak Diberikan</h2>
-                      <p>Surel Google Anda (<strong>{email}</strong>) tidak terdaftar dalam daftar putih admin di server Logix.</p>
-                      <a href="/" class="btn">Kembali ke Halaman Masuk</a>
-                    </div>
-                  </body>
-                </html>
-                """,
-                status_code=403
-            )
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OAuth verification error: {str(e)}")
+    if not (email_ok and password_ok):
+        _login_record_failure(ip)
+        raise HTTPException(status_code=401, detail="Email atau password salah, atau email tidak terdaftar sebagai admin.")
+
+    _login_clear(ip)
+    token = _issue_session(email, admin_roles[email])
+    logger.info("Admin login ok: %s (role=%s)", email, admin_roles[email])
+    return {"token": token, "email": email, "role": admin_roles[email]}
+
+
+@app.post("/api/auth/dev-login")
+def dev_login():
+    # Dev-only convenience (tests + local): mint a session for the first
+    # whitelisted admin without a password. 404 in production posture so it
+    # can't be discovered or used on a shared server.
+    if not LOGIX_DEV_MODE:
+        raise HTTPException(status_code=404, detail="Not found")
+    admin_roles = get_admin_roles()
+    email = next(iter(admin_roles))
+    token = _issue_session(email, admin_roles[email])
+    return {"token": token, "email": email, "role": admin_roles[email]}
 
 
 @app.get("/api/auth/verify")

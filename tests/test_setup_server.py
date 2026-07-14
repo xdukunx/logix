@@ -45,7 +45,7 @@ def test_env_written_via_flags_and_seeded_from_example(tmp_path, monkeypatch):
     (server_dir / ".env.example").write_text(
         '# --- Admin allowlist ---\n'
         'ADMIN_EMAILS="admin@example.org"\n'
-        'GOOGLE_CLIENT_ID=""\n'
+        'LOGIX_ADMIN_PASSWORD=""\n'
         'LOGIX_INGEST_API_KEY=""\n'
         'LOGIX_DEV_MODE="0"\n'
         'LOGIX_ALLOWED_ORIGINS="http://localhost:8000"\n',
@@ -57,10 +57,10 @@ def test_env_written_via_flags_and_seeded_from_example(tmp_path, monkeypatch):
 
     rc = sv.main([
         "--admin-emails", "ops@example.org",
+        "--admin-password", "s3cret-pass",
         "--ingest-key", "k123",
         "--allowed-origins", "https://logix.example.org",
         "--dev-mode", "0",
-        "--redirect-uri", "https://logix.example.org/api/auth/callback",
     ])
     assert rc == 0
     text = (server_dir / ".env").read_text(encoding="utf-8")
@@ -68,6 +68,7 @@ def test_env_written_via_flags_and_seeded_from_example(tmp_path, monkeypatch):
     assert "# --- Admin allowlist ---" in text
     assert text.count("ADMIN_EMAILS=") == 1
     assert 'ADMIN_EMAILS="ops@example.org"' in text
+    assert 'LOGIX_ADMIN_PASSWORD="s3cret-pass"' in text
     assert 'LOGIX_INGEST_API_KEY="k123"' in text
     assert 'LOGIX_ALLOWED_ORIGINS="https://logix.example.org"' in text
 
@@ -81,7 +82,7 @@ def test_generated_ingest_key_is_strong(tmp_path, monkeypatch):
     monkeypatch.setattr(sv, "REQUIREMENTS", server_dir / "requirements.txt")
 
     rc = sv.main(["--admin-emails", "a@b.c", "--dev-mode", "0",
-                  "--allowed-origins", "x", "--redirect-uri", "y"])
+                  "--allowed-origins", "x", "--admin-password", "pw"])
     assert rc == 0
     text = (server_dir / ".env").read_text(encoding="utf-8")
     key_line = next(l for l in text.splitlines() if l.startswith("LOGIX_INGEST_API_KEY="))
