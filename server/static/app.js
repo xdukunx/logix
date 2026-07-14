@@ -59,6 +59,41 @@ const showAppScreen = () => {
 
 setOnSessionExpired(showLoginScreen);
 
+// Local admin login (email + password). Google OAuth was removed; this posts
+// to /api/auth/login and stores the returned session token.
+const loginForm = document.getElementById("login-form");
+if (loginForm) {
+    loginForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = document.getElementById("login-email").value.trim();
+        const password = document.getElementById("login-password").value;
+        const errEl = document.getElementById("login-error");
+        const btn = document.getElementById("login-submit");
+        errEl.style.display = "none";
+        btn.disabled = true;
+        try {
+            const res = await fetch("/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || "Gagal masuk. Periksa email dan password.");
+            }
+            const body = await res.json();
+            setToken(body.token);
+            showToast("Login berhasil!");
+            showAppScreen();
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.style.display = "block";
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
 // Real sidebar connectivity indicator (roadmap item H) -- replaces the old
 // static "Server Terhubung" dot, which stayed green even while the offline
 // banner (js/api.js) was red. Reuses the same browser online/offline signal

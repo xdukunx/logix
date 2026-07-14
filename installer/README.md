@@ -67,7 +67,8 @@ few seconds, AnyDesk ID auto-reported.
 - **AnyDesk unattended access**: to let admins connect without the user clicking
   Accept, set `LOGIX_ANYDESK_PASSWORD=...` in `C:\ProgramData\Logix\config.env`
   and reinstall AnyDesk, or run `AnyDesk.exe --set-password`.
-- **Auth**: with `LOGIX_DEV_MODE=1` the dashboard auto-logs in with no Google
-  Cloud (fine for a trusted LAN, but *anyone* who reaches the server gets admin).
-  For a real deployment set up Google OAuth: `LOGIX_DEV_MODE=0`,
-  `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, and `ADMIN_EMAILS`. See `server/.env`.
+- **Auth**: login is email + password. With `LOGIX_DEV_MODE=1` the password
+  defaults to `admin123` and a passwordless dev shortcut exists (fine for a
+  trusted LAN, but *anyone* who reaches the server gets admin). For a real
+  deployment: `LOGIX_DEV_MODE=0`, set a strong `LOGIX_ADMIN_PASSWORD`, and list
+  admins in `ADMIN_EMAILS`. See `server/.env`.

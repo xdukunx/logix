@@ -107,7 +107,7 @@ If you run the central server, admins get a web dashboard to:
   every screen capture notifies the user on the device, never silently;
 - enroll new devices with revocable per-device keys, and download Excel reports.
 
-Setup, HTTPS (Caddy or nginx), and Google sign-in: **[docs/HOSTING.md](docs/HOSTING.md)**.
+Setup, HTTPS (Caddy or nginx), and admin sign-in (email + password): **[docs/HOSTING.md](docs/HOSTING.md)**.
 
 ## Customization
 

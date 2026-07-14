@@ -60,8 +60,8 @@ cd frontend && npm install && npm run build && cd ..   # optional — builds the
 python3 install/setup_server.py --install-deps --service
 ```
 
-Either way it's interactive: it asks for admin email(s), Google OAuth
-(optional), allowed origins; **generates a strong device API key**; writes
+Either way it's interactive: it asks for admin email(s), an admin login
+password, allowed origins; **generates a strong device API key**; writes
 `server/.env`; installs dependencies; and (with `--service`, run elevated)
 registers the server to start on every boot — systemd on Linux, launchd on
 macOS, Task Scheduler on Windows. At the end it prints the exact
@@ -88,9 +88,9 @@ shared/production use:
 
 | Env var | Purpose |
 |---|---|
-| `LOGIX_DEV_MODE` | `0` (default) = production posture. `1` = local dev only: **unauthenticated mock admin login** + permissive CORS. Never `1` on a reachable server. |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth for the dashboard. Required for real auth outside dev mode. |
-| `ADMIN_EMAILS` | Comma-separated allowlist of Google accounts allowed to sign in. |
+| `LOGIX_DEV_MODE` | `0` (default) = production posture. `1` = local dev only: default admin password `admin123` + passwordless `/api/auth/dev-login` + permissive CORS. Never `1` on a reachable server. |
+| `LOGIX_ADMIN_PASSWORD` | Admin login password. **Required for real auth** outside dev mode — empty in production rejects every login (no backdoor). Use a strong value. |
+| `ADMIN_EMAILS` | Comma-separated allowlist of admin emails allowed to sign in (optionally `email:role`). |
 | `LOGIX_INGEST_API_KEY` | Shared secret devices send as `X-API-Key`. Required outside dev mode. Generate with `openssl rand -hex 32`. |
 | `LOGIX_ALLOWED_ORIGINS` | Comma-separated dashboard origins for CORS — e.g. `https://logix.example.org`. |
 
@@ -162,10 +162,9 @@ server {
 
 `certbot --nginx` issues and renews the certificate.
 
-**Either way:** set `LOGIX_ALLOWED_ORIGINS` and `GOOGLE_REDIRECT_URI` to the
-same `https://logix.example.org` domain, and register that redirect URI in the
-Google Cloud Console. Only port `443` (and `80` for the ACME challenge) should
-be open publicly; `8000` stays bound to localhost.
+**Either way:** set `LOGIX_ALLOWED_ORIGINS` to your `https://logix.example.org`
+domain. Only port `443` (and `80` for the ACME challenge) should be open
+publicly; `8000` stays bound to localhost.
 
 ---
 

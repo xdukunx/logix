@@ -121,9 +121,9 @@ gets a fresh popup.
 This part gives you a live dashboard showing which machines are active and
 lets you browse session logs from a browser, on one central machine.
 
-The defaults are locked down (see [`SECURITY.md`](../SECURITY.md)): without
-real Google OAuth credentials the login simply refuses (503) rather than
-letting anyone in, and devices must present an API key to push anything.
+The defaults are locked down (see [`SECURITY.md`](../SECURITY.md)): without an
+admin password set (`LOGIX_ADMIN_PASSWORD`) the login simply refuses rather
+than letting anyone in, and devices must present an API key to push anything.
 The two rules that remain yours to follow:
 
 > - Never set `LOGIX_DEV_MODE=1` on a machine other people can reach — it
@@ -140,14 +140,12 @@ from a clone of this repo:
 python3 install/setup_server.py --install-deps
 ```
 
-It prompts for admin email(s) and Google OAuth credentials (from Google
-Cloud Console: OAuth 2.0 Client, "Web application" type, redirect URI
-`http://<server-ip>:8000/api/auth/callback` — must match
-`GOOGLE_REDIRECT_URI` exactly), generates a strong device API key, and
-writes everything to `server/.env`. Add `--service` (elevated) to also
-start the server on every boot. Prefer doing it by hand? Copy
-`server/.env.example` to `server/.env` and fill it in — the server
-auto-loads that file on start.
+It prompts for admin email(s) and a single admin login password (use a strong
+one — it's the only thing between the internet and the dashboard), generates a
+strong device API key, and writes everything to `server/.env`. Add `--service`
+(elevated) to also start the server on every boot. Prefer doing it by hand?
+Copy `server/.env.example` to `server/.env` and fill in `ADMIN_EMAILS` +
+`LOGIX_ADMIN_PASSWORD` — the server auto-loads that file on start.
 
 ### 2. Run it
 
@@ -156,8 +154,9 @@ cd server
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Then open `http://<server-ip>:8000` in a browser. If OAuth is configured
-correctly, you'll see a "Sign in with Google" screen.
+Then open `http://<server-ip>:8000` in a browser. You'll see the email +
+password sign-in screen; log in with an `ADMIN_EMAILS` address and the
+`LOGIX_ADMIN_PASSWORD` you set.
 
 ### 3. Point a device at it
 
@@ -221,6 +220,6 @@ git push -u origin main
 |---|---|
 | Installer says "Permission denied" | Re-run with `sudo` (Linux/macOS) or an Administrator shell (Windows). |
 | `python: command not found` | Install Python 3.8+ and make sure it's on `PATH`. |
-| Dashboard shows "Akses Ditolak" after Google sign-in | Your email isn't in `ADMIN_EMAILS`. |
+| Login rejected ("Email atau password salah") | Email isn't in `ADMIN_EMAILS`, or the password doesn't match `LOGIX_ADMIN_PASSWORD`. In production, an empty `LOGIX_ADMIN_PASSWORD` rejects all logins by design. |
 | Device isn't showing as active in the dashboard | Check `LOGIX_SERVER_URL` is set in that device's `config.env`, and that it can reach the server's IP/port over the network. |
 | `/api/reports` download fails on the server | Known bug — see `AUDIT_AND_ROADMAP.md` item C; the endpoint points at the wrong file path today. |

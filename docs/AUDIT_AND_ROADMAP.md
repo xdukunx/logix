@@ -47,7 +47,7 @@ Still open:
 
 | # | Sev | Finding | Location |
 |---|---|---|---|
-| 1 | Critical | Google login mints an admin session with no auth when `GOOGLE_CLIENT_ID` is unset (the default) | `main.py` ~192–202 |
+| 1 | Critical | ~~Google login mints an admin session with no auth when `GOOGLE_CLIENT_ID` is unset~~ **Resolved:** Google OAuth removed; login is email + password (`ADMIN_EMAILS` + `LOGIX_ADMIN_PASSWORD`), empty password in prod rejects all logins, rate-limited | `main.py` (`password_login`) |
 | 2 | High | `/api/log` and `/api/heartbeat` accept `X-API-Key` but never validate it — unauthenticated PII ingest / heartbeat spoofing | `main.py` 331–346, 395–442 |
 | 3 | High | Stored XSS: unauthenticated ingest rendered into dashboard via `innerHTML` without escaping | `main.py` (2) + `static/app.js` 163, 388 |
 | 4 | High | `CORSMiddleware(allow_origins=["*"], allow_credentials=True)` — invalid/unsafe combination | `main.py` 21–27 |

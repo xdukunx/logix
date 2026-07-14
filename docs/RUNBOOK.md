@@ -72,8 +72,8 @@ daily. Reports regenerate on demand, so retention can be short.
   (dashboard → Devices → Enroll device) so you can revoke one device without
   re-keying the fleet. To rotate the shared key: set a new value in `.env`,
   restart, update each device's `config.env`.
-- **Google OAuth secret**: rotate in Google Cloud Console, update `.env`,
-  restart. Existing admin sessions are in-memory and drop on restart (re-login).
+- **Admin password**: rotate by setting a new `LOGIX_ADMIN_PASSWORD` in `.env`
+  and restarting. Existing admin sessions are in-memory and drop on restart (re-login).
 - Never commit `.env`, `*.db`, backups, reports, or logs — all gitignored.
 
 ## Capacity & scaling

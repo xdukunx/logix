@@ -48,7 +48,7 @@ lower-risk than adding new remote-access capability to managed devices.
 
 Screen streaming and remote control are not being designed in code-level
 detail, let alone built, until all of the following exist and are
-hardened: authentication (already exists — Google OAuth + session tokens),
+hardened: authentication (already exists — email + password + session tokens),
 a real permission/role model (not yet — see §4), an audit log (this
 milestone — §6), a policy model (this milestone, as data only — §5), and
 persisted device identity (this milestone — §5). Only after those are in

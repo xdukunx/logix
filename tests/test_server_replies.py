@@ -17,8 +17,6 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("LOGIX_DEV_MODE", "1")
     monkeypatch.setenv("LOGIX_INGEST_API_KEY", API_KEY)
     monkeypatch.setenv("LOGIX_ALLOWED_ORIGINS", "")
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "")
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "")
     monkeypatch.setenv("ADMIN_EMAILS", "admin@example.org")
 
     if "main" in sys.modules:

@@ -1037,7 +1037,6 @@ def startup_event():
     logger.info("Logix server started (dev_mode=%s, db=%s)", LOGIX_DEV_MODE, DB_PATH.name)
 
 
-# Google OAuth configuration variables
 # --- Local admin authentication (email + password) -----------------------
 # Google OAuth was removed in favour of a self-contained email + password
 # login. The password is read from the LOGIX_ADMIN_PASSWORD environment

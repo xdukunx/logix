@@ -36,11 +36,13 @@ The findings from the original audit (roadmap item C in
 `docs/AUDIT_AND_ROADMAP.md`) are **fixed and regression-tested** in
 [`tests/test_server_security.py`](tests/test_server_security.py):
 
-- **Auth fallback gated.** The unauthenticated developer mock login only
-  exists behind `LOGIX_DEV_MODE=1`. In the default production posture
-  (`LOGIX_DEV_MODE=0`), a server without real Google OAuth credentials
-  refuses login (503) rather than granting a session. The OAuth callback
-  enforces the `ADMIN_EMAILS` allowlist in both directions.
+- **Auth fallback gated.** Login is email + password: the email must be on the
+  `ADMIN_EMAILS` allowlist and the password must match `LOGIX_ADMIN_PASSWORD`
+  (constant-time compare). In the default production posture
+  (`LOGIX_DEV_MODE=0`), an empty `LOGIX_ADMIN_PASSWORD` refuses every login
+  rather than granting a session (no backdoor). Repeated failures from one IP
+  are rate-limited. The passwordless `/api/auth/dev-login` shortcut only exists
+  behind `LOGIX_DEV_MODE=1`.
 - **Ingest authentication.** `/api/log` and `/api/heartbeat` validate
   `X-API-Key` (constant-time compare) outside dev mode; devices get
   individual revocable keys via enrollment, or use the shared
@@ -97,7 +99,7 @@ committed into the public repo, not retroactively).
 
 - Never commit `config.env`, `service_account.json`, any `*.db`, generated
   reports, or logs. These are covered by `.gitignore`; verify before pushing.
-- OAuth client secrets, admin passwords, and API keys must come from
-  environment variables — never from source or committed config.
+- The admin password (`LOGIX_ADMIN_PASSWORD`) and API keys must come from
+  environment variables / `.env` — never from source or committed config.
 - Reports and databases contain PII and must stay on the deploying
   organization's controlled storage.

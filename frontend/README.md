@@ -19,8 +19,9 @@ $env:LOGIX_DEV_MODE='1'; $env:ADMIN_EMAILS='admin@example.org'
 py -m uvicorn main:app --host 127.0.0.1 --port 8791
 ```
 
-With `LOGIX_DEV_MODE=1`, "Masuk dengan Google" uses the mock login and lands
-straight in the dashboard.
+Login is email + password (`ADMIN_EMAILS` + `LOGIX_ADMIN_PASSWORD`). With
+`LOGIX_DEV_MODE=1` the admin password defaults to `admin123`, so you can sign
+in as `admin@example.org` / `admin123` straight away.
 
 ## Production
 

@@ -10,7 +10,7 @@ flowchart TB
     end
 
     subgraph Admin["Admins"]
-        B1["Browser<br/>dashboard (Google OAuth)"]
+        B1["Browser<br/>dashboard (email + password)"]
     end
 
     subgraph Host["Server host (single node)"]
