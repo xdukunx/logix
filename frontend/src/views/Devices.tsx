@@ -48,6 +48,8 @@ const COMMAND_BADGE: Record<CommandStatus, { label: string; variant: "success" |
   expired: { label: "Kedaluwarsa", variant: "neutral" },
 };
 
+const DEVICES_PER_PAGE = 15;
+
 const syncBadge = (status: SyncStatus) => {
   const info = SYNC_BADGE[status] ?? { label: status, variant: "neutral" as const };
   return <Badge variant={info.variant} label={info.label} />;
@@ -72,6 +74,7 @@ export default function Devices() {
   const [isRenameOpen, setRenameOpen] = useState(false);
   const [isScreenshotOpen, setScreenshotOpen] = useState(false);
   const [isRevokeOpen, setRevokeOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   const notify = useCallback(
     (message: string, isError = false) =>
@@ -199,6 +202,18 @@ export default function Devices() {
     else counts.offline++; // offline + never_seen both read as "not reachable"
   }
 
+  // Client-side pagination for the registry table (the fleet can grow to
+  // hundreds; /api/devices returns the full list). Clamp the page so a
+  // shrinking list never leaves us stranded past the end.
+  const totalPages = Math.max(1, Math.ceil(counts.total / DEVICES_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const pagedDevices = (devices ?? []).slice(
+    (safePage - 1) * DEVICES_PER_PAGE,
+    safePage * DEVICES_PER_PAGE,
+  );
+  const rangeStart = counts.total === 0 ? 0 : (safePage - 1) * DEVICES_PER_PAGE + 1;
+  const rangeEnd = (safePage - 1) * DEVICES_PER_PAGE + pagedDevices.length;
+
   return (
     <VStack gap={6}>
       <HStack gap={3} align="center" justify="between" wrap="wrap">
@@ -229,8 +244,9 @@ export default function Devices() {
           description="Perangkat muncul di sini setelah mengirim heartbeat pertama. Daftarkan satu untuk mulai."
         />
       ) : (
+        <VStack gap={3}>
         <Table<Device>
-          data={devices}
+          data={pagedDevices}
           idKey="device_id"
           hasHover
           density="balanced"
@@ -266,6 +282,19 @@ export default function Devices() {
             },
           ]}
         />
+        {counts.total > DEVICES_PER_PAGE && (
+          <HStack gap={3} align="center" justify="between">
+            <Text type="supporting" color="secondary">
+              {rangeStart}–{rangeEnd} dari {counts.total} perangkat
+            </Text>
+            <HStack gap={2} align="center">
+              <Button label="‹" size="sm" variant="secondary" isDisabled={safePage === 1} onClick={() => setPage((p) => Math.max(1, p - 1))} />
+              <Text type="supporting" color="secondary">Halaman {safePage} / {totalPages}</Text>
+              <Button label="›" size="sm" variant="secondary" isDisabled={safePage >= totalPages} onClick={() => setPage((p) => p + 1)} />
+            </HStack>
+          </HStack>
+        )}
+        </VStack>
       )}
 
       <Dialog isOpen={detailId !== null} onOpenChange={(open) => !open && setDetailId(null)} width={720}>

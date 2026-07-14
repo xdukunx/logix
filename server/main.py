@@ -2136,6 +2136,7 @@ def get_analytics(email: str = Depends(require_permission("analytics_read"))):
         hostname_seconds = {}
         purpose_counts = {}
         hour_counts = [0] * 24
+        dow_hour = [[0] * 24 for _ in range(7)]  # weekday (Mon=0..Sun=6) x hour-of-day
         active_sessions_count = 0
         
         for sid, s_rows in sessions.items():
@@ -2150,6 +2151,7 @@ def get_analytics(email: str = Depends(require_permission("analytics_read"))):
                 try:
                     dt = datetime.fromisoformat(start_row["timestamp"])
                     hour_counts[dt.hour] += 1
+                    dow_hour[dt.weekday()][dt.hour] += 1
                 except Exception:
                     pass
                     
@@ -2170,7 +2172,9 @@ def get_analytics(email: str = Depends(require_permission("analytics_read"))):
         by_workstation = [{"hostname": h, "hours": round(s / 3600, 1)} for h, s in hostname_seconds.items()]
         by_purpose = [{"purpose": p, "count": c} for p, c in purpose_counts.items()]
         by_hour = [{"hour": f"{h:02d}:00", "count": count} for h, count in enumerate(hour_counts)]
-        
+        _DOW = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"]
+        by_dow_hour = [{"day": _DOW[d], "hours": dow_hour[d]} for d in range(7)]
+
         return {
             "totals": {
                 "hours": total_hours,
@@ -2179,7 +2183,8 @@ def get_analytics(email: str = Depends(require_permission("analytics_read"))):
             },
             "by_workstation": sorted(by_workstation, key=lambda x: x["hours"], reverse=True)[:5], # top 5
             "by_purpose": sorted(by_purpose, key=lambda x: x["count"], reverse=True),
-            "by_hour": by_hour
+            "by_hour": by_hour,
+            "by_dow_hour": by_dow_hour
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

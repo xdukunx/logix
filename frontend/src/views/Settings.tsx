@@ -258,7 +258,7 @@ export default function Settings() {
                 </span>
                 <Text type="supporting" color="secondary">{subtitle || "Lab Access Logbook"}</Text>
                 <span style={{ marginTop: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "9px 16px", borderRadius: 6, background: colorPrimary, color: "#fff", fontSize: 13, fontWeight: 600 }}>
-                  Masuk dengan Google
+                  Masuk
                 </span>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--lx-text-muted)" }}>
                   <span style={{ width: 10, height: 10, borderRadius: 3, background: colorAccent, display: "inline-block" }} />

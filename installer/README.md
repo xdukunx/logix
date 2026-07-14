@@ -60,6 +60,31 @@ It then installs everything and starts the agent. Lock/unlock the machine to
 confirm the sign-in form appears; the device shows up on the dashboard within a
 few seconds, AnyDesk ID auto-reported.
 
+## Re-point an existing install to a new server
+Re-running the installer is **idempotent** — it updates the scheduled task,
+re-copies the scripts, and rewrites `config.env` in place. To just change where
+a device reports (e.g. the server moved / the endpoint changed), re-run elevated:
+
+```powershell
+& 'C:\Program Files\Logix\install_logbook_tasks.ps1' -NonInteractive `
+    -ServerUrl 'http://NEW-server:8000' -ServerApiKey '<ingest-key>' -DeviceName '<name>'
+```
+
+## Wipe an old install (clean slate)
+If a machine has a stale install pointing at a dead endpoint, wipe it first,
+then reinstall. Run elevated:
+
+```powershell
+& 'C:\Program Files\Logix\uninstall_logbook.ps1'
+```
+
+This removes the scheduled task, the HKCU Run fallback, the program files
+(`C:\Program Files\Logix`, legacy `C:\lab`), the runtime state
+(`%ProgramData%\MindLabLogbook`), and the server config — and re-enables Task
+Manager in case a popup left it gated. Add `-KeepConfig` to preserve the server
+binding. AnyDesk is left installed (it's a separate app). Then reinstall with
+the command above (or the wizard) pointing at the new server.
+
 ## Notes
 - **Python 3** is required only for *local* session logging (`log_physical.py`).
   The sign-in/timer/lock/remote features are pure PowerShell and work without

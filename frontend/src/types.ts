@@ -96,6 +96,9 @@ export interface Analytics {
   by_workstation: { hostname: string; hours: number }[];
   by_purpose: { purpose: string; count: number }[];
   by_hour: { hour: string; count: number }[];
+  // Day-of-week (Mon..Sun) x hour occupancy matrix for the heatmap; each
+  // entry's `hours` is a 24-length count array. Optional for backward compat.
+  by_dow_hour?: { day: string; hours: number[] }[];
 }
 
 // GET/PUT /api/config -- the config object the Settings tab edits. Fields the

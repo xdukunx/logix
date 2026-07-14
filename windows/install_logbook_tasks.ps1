@@ -81,7 +81,8 @@ $files = @(
     'logbook_setup.ps1',
     'cleanup_logbook_state.ps1',
     'debug_logbook_detection.ps1',
-    'repair_logbook_permissions.ps1'
+    'repair_logbook_permissions.ps1',
+    'uninstall_logbook.ps1'
 )
 foreach ($f in $files) {
     $src = Join-Path $PSScriptRoot $f

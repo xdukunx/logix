@@ -77,41 +77,55 @@ const BarList = ({ items, emptyLabel }: { items: { label: string; value: number;
   );
 };
 
-// Occupancy heat strip: one cell per hour, tinted by relative volume. This is
-// the best-effort stand-in for the design's day×hour heat map.
-// TODO(backend): expose a day×hour occupancy matrix for the full grid.
-const HeatStrip = ({ byHour }: { byHour: { hour: string; count: number }[] }) => {
-  const max = Math.max(...byHour.map((h) => h.count), 1);
+// Occupancy heat map: weekday (rows) x hour-of-day (columns), tinted by
+// relative session volume so hot times are obvious at a glance. Falls back to
+// a single hourly row if the backend hasn't sent by_dow_hour yet.
+const HOUR_TICKS = new Set([0, 6, 12, 18, 23]);
+const COL_TEMPLATE = "34px repeat(24, 1fr)";
+const HeatMap = ({
+  byDowHour,
+  byHour,
+}: {
+  byDowHour?: { day: string; hours: number[] }[];
+  byHour: { hour: string; count: number }[];
+}) => {
+  const perDay = byDowHour && byDowHour.length > 0;
+  const rows = perDay
+    ? byDowHour!
+    : [{ day: "", hours: Array.from({ length: 24 }, (_, h) => byHour.find((b) => Number(b.hour) === h)?.count ?? 0) }];
+  const max = Math.max(1, ...rows.flatMap((r) => r.hours));
+  const cell = (count: number) =>
+    count === 0
+      ? "var(--lx-skeleton-base)"
+      : `color-mix(in srgb, var(--lx-accent) ${Math.round(18 + (count / max) * 82)}%, transparent)`;
   return (
     <VStack gap={2}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(24, 1fr)", gap: 3 }}>
-        {Array.from({ length: 24 }).map((_, h) => {
-          const count = byHour.find((b) => Number(b.hour) === h)?.count ?? 0;
-          const intensity = count / max; // 0..1
-          return (
+      {/* hour axis */}
+      <div style={{ display: "grid", gridTemplateColumns: COL_TEMPLATE, gap: 3, alignItems: "center" }}>
+        <span />
+        {Array.from({ length: 24 }).map((_, h) => (
+          <span key={h} style={{ fontSize: 9, textAlign: "center", color: "var(--lx-text-muted)", fontFamily: "ui-monospace, monospace" }}>
+            {HOUR_TICKS.has(h) ? String(h).padStart(2, "0") : ""}
+          </span>
+        ))}
+      </div>
+      {/* one row per day (or a single row in the fallback) */}
+      {rows.map((row, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: COL_TEMPLATE, gap: 3, alignItems: "center" }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--lx-text-muted)" }}>{row.day}</span>
+          {row.hours.map((count, h) => (
             <div
               key={h}
-              title={`Pukul ${String(h).padStart(2, "0")}:00 — ${count} sesi`}
-              style={{
-                aspectRatio: "1",
-                borderRadius: 4,
-                background:
-                  intensity === 0
-                    ? "var(--lx-skeleton-base)"
-                    : `color-mix(in srgb, var(--lx-accent) ${Math.round(20 + intensity * 80)}%, transparent)`,
-              }}
+              title={`${row.day || "Pukul"} ${String(h).padStart(2, "0")}:00 — ${count} sesi`}
+              style={{ height: perDay ? 16 : 22, borderRadius: 3, background: cell(count) }}
             />
-          );
-        })}
-      </div>
-      <HStack justify="between">
-        <Text type="supporting" color="secondary">00:00</Text>
-        <HStack gap={1} align="center">
-          <Text type="supporting" color="secondary">sepi</Text>
-          <div style={{ width: 60, height: 8, borderRadius: 999, background: "linear-gradient(90deg, var(--lx-skeleton-base), var(--lx-accent))" }} />
-          <Text type="supporting" color="secondary">ramai</Text>
-        </HStack>
-        <Text type="supporting" color="secondary">23:00</Text>
+          ))}
+        </div>
+      ))}
+      <HStack gap={1} align="center" justify="end">
+        <Text type="supporting" color="secondary">sepi</Text>
+        <div style={{ width: 60, height: 8, borderRadius: 999, background: "linear-gradient(90deg, var(--lx-skeleton-base), var(--lx-accent))" }} />
+        <Text type="supporting" color="secondary">ramai</Text>
       </HStack>
     </VStack>
   );
@@ -250,9 +264,9 @@ export default function Analytics() {
             <VStack gap={3}>
               <VStack gap={0.5}>
                 <Heading level={6}>Peta Okupansi</Heading>
-                <Text type="supporting" color="secondary">per jam · volume sesi</Text>
+                <Text type="supporting" color="secondary">hari × jam · volume sesi</Text>
               </VStack>
-              {analytics ? <HeatStrip byHour={byHour} /> : <SkeletonLines lines={2} widths={["100%", "60%"]} />}
+              {analytics ? <HeatMap byDowHour={analytics.by_dow_hour} byHour={byHour} /> : <SkeletonLines lines={2} widths={["100%", "60%"]} />}
             </VStack>
           </Card>
 
