@@ -92,11 +92,11 @@ function Test-LogbookPopupRunning {
 # write HKCU:\...\Policies\System even in its own hive (Windows locks that
 # subtree down for exactly this reason). Elevation preserves the calling
 # user's identity (HKCU still resolves to the same account, just with an
-# elevated token — see the existing HKCU:\...\Run write a few lines below
+# elevated token - see the existing HKCU:\...\Run write a few lines below
 # this function's caller), so this grants that one specific account just
 # enough rights (SetValue + ReadKey on this one key, nothing broader) to
 # toggle the sign-in gate at runtime without needing to be an admin.
-# Idempotent — safe to call on every install/reinstall.
+# Idempotent - safe to call on every install/reinstall.
 function Grant-LogbookTaskMgrGateAccess {
     $keyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
     $identity = "$env:USERDOMAIN\$env:USERNAME"
@@ -426,7 +426,7 @@ function Get-LogbookDefaultConfig {
             continueAs       = 'Lanjut sebagai {0}'
             notYou           = 'Bukan saya / ganti data'
             whatsRecorded    = 'Apa yang dicatat?'
-            privacyOneLiner  = 'Siapa, cara & kapan — bukan ketikan.'
+            privacyOneLiner  = 'Siapa, cara & kapan - bukan ketikan.'
             # Timer widget (C8.2)
             timerEnd         = 'SELESAI'
             timerEndArmed    = 'Tekan lagi untuk selesai'
@@ -439,7 +439,7 @@ function Get-LogbookDefaultConfig {
             msgClose         = 'Tutup'
             noticePrivacyTitle = 'Pemberitahuan Privasi'
             noticeScreenshot = 'Admin baru saja mengambil tangkapan layar perangkat ini untuk keperluan pemantauan.'
-            noticeAlwaysTold = 'Anda selalu diberi tahu — tidak pernah diam-diam.'
+            noticeAlwaysTold = 'Anda selalu diberi tahu - tidak pernah diam-diam.'
             noticeAck        = 'Mengerti'
             emergencyTitle   = 'Peringatan Sistem'
             emergencyBody    = 'Perangkat ini akan dimatikan oleh admin. Simpan pekerjaan Anda sekarang.'
@@ -479,7 +479,7 @@ function Get-LogbookDefaultConfig {
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
                 msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'
                 noticePrivacyTitle = 'Privacy Notice'
-                noticeAlwaysTold = 'You are always notified — never silently.'
+                noticeAlwaysTold = 'You are always notified - never silently.'
                 noticeAck      = 'Got it'
                 emergencyTitle = 'System Alert'
                 emergencySaved = 'I have saved'
@@ -529,7 +529,7 @@ function Read-LogbookConfigFile([string]$Path) {
     if (-not (Test-Path $Path)) { return $null }
     try {
         $raw = Get-Content $Path -Raw -Encoding UTF8
-        $raw = $raw -replace '^﻿', ''   # tolerate a leading BOM
+        $raw = $raw -replace '^', ''   # tolerate a leading BOM
         if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
         return ConvertTo-LogbookHashtable ($raw | ConvertFrom-Json)
     } catch {
@@ -1130,7 +1130,7 @@ $purposeItems
 }
 
 function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
-    # Returning-user fast path (Action canvas: LogiX Sign-in Popup §A). A
+    # Returning-user fast path (Action canvas: LogiX Sign-in Popup SA). A
     # returning user confirms one saved identity and starts -- no full form.
     # Same deep-navy fullscreen surface as the main popup. Named controls the
     # controller wires: StartBtn (resume) and ChangeBtn (fall through to form).
@@ -1151,14 +1151,14 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
     $initials = (($nama -split '\s+' | Where-Object { $_ } | ForEach-Object { $_.Substring(0,1).ToUpper() }) -join '')
     if ($initials.Length -gt 2) { $initials = $initials.Substring(0,2) }
     if ([string]::IsNullOrWhiteSpace($initials)) { $initials = '?' }
-    $nimMasked = if ($nim.Length -gt 4) { $nim.Substring(0,4) + '…' } else { $nim }
-    $meta = ConvertTo-LogbookXmlText ("NIM $nimMasked · $access · $tujuan")
+    $nimMasked = if ($nim.Length -gt 4) { $nim.Substring(0,4) + '...' } else { $nim }
+    $meta = ConvertTo-LogbookXmlText ("NIM $nimMasked - $access - $tujuan")
 
     $tWelcome = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'welcomeBack' 'Lanjutkan sesi Anda')
     $tContinue = ConvertTo-LogbookXmlText (([string](Get-LogbookText $cfg 'continueAs' 'Lanjut sebagai {0}')) -f $nama)
     $tNotYou  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'notYou' 'Bukan saya / ganti data')
     $tSubmit  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'submit' 'Mulai Sesi')
-    $tPrivacy = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'privacyOneLiner' 'Siapa, cara & kapan — bukan ketikan.')
+    $tPrivacy = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'privacyOneLiner' 'Siapa, cara & kapan - bukan ketikan.')
     $tRecorded = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'whatsRecorded' 'Apa yang dicatat?')
     $started  = ConvertTo-LogbookXmlText ('Sesi dimulai ' + (Get-Date).ToString('HH:mm'))
     $nameX    = ConvertTo-LogbookXmlText $nama
@@ -1212,7 +1212,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
 }
 
 function Build-LogbookEmergencyOverlayXaml($cfg) {
-    # Emergency countdown (design: LogiX Notifications §3). A shutdown in 30s is
+    # Emergency countdown (design: LogiX Notifications S3). A shutdown in 30s is
     # too important for the corner widget, so Variant 3 escapes to a centered,
     # dimmed-backdrop, always-on-top overlay. Big live Consolas numeral, red,
     # pulsing ring. The controller drives CountNumber via a DispatcherTimer.
@@ -1256,7 +1256,7 @@ function Build-LogbookEmergencyOverlayXaml($cfg) {
 }
 
 function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
-    # Lock / paused overlay (design: LogiX Lock & Setup §A). Reads "in use,
+    # Lock / paused overlay (design: LogiX Lock & Setup SA). Reads "in use,
     # paused" -- never punitive. The session keeps running; only the screen is
     # held. Controller drives LockClock + LockElapsed; UnlockBtn resumes.
     $theme  = Get-LogbookTheme $cfg

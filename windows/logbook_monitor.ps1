@@ -53,7 +53,7 @@ Invoke-InitialPopupOrTimer
 # NOTE: this scriptblock runs as a PSEventJob (Register-ObjectEvent), a
 # different execution context than the rest of this script. Deliberately
 # not calling functions from logbook_common.ps1 here (e.g.
-# Test-LogbookPopupRunning) — only built-in cmdlets — so this doesn't
+# Test-LogbookPopupRunning) - only built-in cmdlets - so this doesn't
 # depend on cross-scope function resolution that's awkward to verify for a
 # background-thread-raised .NET event. A silent failure here would mean
 # the sign-in prompt never appears at all on unlock, which is worse than

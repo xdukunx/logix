@@ -93,7 +93,7 @@ foreach ($d in @($installDir, $legacyDir, $stateDir, $perUserCfg)) {
 # 5. Server config (%ProgramData%\Logix): kept with -KeepConfig so a reinstall
 #    reuses the same LOGIX_SERVER_URL / API key / device name.
 if ($KeepConfig) {
-    Write-Host "  Kept server config at $configDir (‑KeepConfig)." -ForegroundColor Cyan
+    Write-Host "  Kept server config at $configDir (-KeepConfig)." -ForegroundColor Cyan
 } elseif (Test-Path $configDir) {
     try { Remove-Item -Path $configDir -Recurse -Force -ErrorAction Stop; Write-Host "  Removed $configDir" -ForegroundColor Green }
     catch { Write-Host "  Could not fully remove $configDir ($($_.Exception.Message))" -ForegroundColor Yellow }

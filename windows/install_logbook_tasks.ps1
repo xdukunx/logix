@@ -102,7 +102,7 @@ Write-Host 'Logix Report Logbook installer' -ForegroundColor Cyan
 Write-Host 'User:' $TaskUser
 
 # One-time grant so the sign-in popup can gate Task Manager at runtime even
-# on a standard (non-admin) account — this install step runs elevated, the
+# on a standard (non-admin) account - this install step runs elevated, the
 # scheduled task it registers below does not. See
 # Grant-LogbookTaskMgrGateAccess in logbook_common.ps1 for why this is safe
 # and narrowly scoped.

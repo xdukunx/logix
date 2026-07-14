@@ -97,9 +97,11 @@ function Sync-LogbookTimerShape {
 # simple enough to reason about and guaranteed not to misfire.
 $script:HEIGHT_COLLAPSED = 120   # status + timer only (not used at rest now that
                                  # info+SELESAI stay visible; kept for safety)
-$script:HEIGHT_EXPANDED  = 252   # + nama/tujuan/device + accent bar + the
-                                 # always-visible two-step SELESAI button
-                                 # (~46px). Tune visually via preview_client.ps1.
+$script:HEIGHT_EXPANDED  = 262   # + nama/tujuan/device + accent bar + the
+                                 # always-visible two-step SELESAI button.
+                                 # Verified by headless RenderTargetBitmap: at
+                                 # 262 the SELESAI button sits fully inside the
+                                 # chamfered shape with clean padding.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default

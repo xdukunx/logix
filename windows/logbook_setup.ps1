@@ -163,7 +163,7 @@ $saveBtn.Add_Click({
     $privacy = if ($privacyModeBox.SelectedItem) { [string]$privacyModeBox.SelectedItem.Content } else { 'local_only' }
 
     # Device name is required (defaults to the hostname, so this only fires
-    # if the user deliberately clears it) — it's how this workstation shows
+    # if the user deliberately clears it) - it's how this workstation shows
     # up on the admin dashboard, with or without a server configured yet.
     if (-not $name) {
         $statusText.Text = "Error: Nama Device tidak boleh kosong."
@@ -172,7 +172,7 @@ $saveBtn.Add_Click({
     }
 
     # If an enrollment code was given, redeem it first. Its device_id/api_key
-    # go to device.json (per API_CONTRACT.md), not into config.env — the
+    # go to device.json (per API_CONTRACT.md), not into config.env - the
     # per-device key must survive independently of this wizard running again.
     if ($enrollCode) {
         if (-not $url) {
