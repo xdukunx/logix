@@ -152,8 +152,8 @@ if ($Surface -in 'timer', 'all') {
     # HEIGHT_COLLAPSED/HEIGHT_EXPANDED) -- measured headlessly via
     # ContentGrid.Measure(), not guessed, so the chamfered shape always
     # matches the window exactly (no transparent gaps, no clipped content).
-    $script:pvHCollapsed = 175
-    $script:pvHExpanded = 258
+    $script:pvHCollapsed = 182
+    $script:pvHExpanded = 265
     $script:pvTimerW = 230
     $session = @{ session_type = 'SSH'; nama = 'A. Rahmawati'; tujuan = 'Simulasi DFT' }
     Show-PreviewWindow (Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100') 'Logix - Timer Widget (hover to expand, click SELESAI) (PREVIEW)' $script:pvTimerW $script:pvHCollapsed {
@@ -210,7 +210,7 @@ if ($Surface -in 'timer', 'all') {
         $script:pvArmTimer.Add_Tick({
             $script:pvArmed = $false; $script:pvArmTimer.Stop()
             $script:pvSelesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEnd' 'SELESAI')
-            $script:pvSelesaiBtn.Background = [System.Windows.Media.Brushes]::Transparent
+            $script:pvSelesaiBtn.Background = $script:pvBc.ConvertFromString('#14FFFFFF')
             $script:pvSelesaiBtn.BorderBrush = $script:pvBc.ConvertFromString($script:pvTheme.border)
             $script:pvSelesaiBtn.Foreground = $script:pvBc.ConvertFromString($script:pvTheme.muted)
         })

@@ -51,7 +51,7 @@ $theme = Get-LogbookTheme $cfg
 function Reset-LogbookSelesai {
     $script:selesaiArmed = $false
     $selesaiBtn.Content = (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
-    $selesaiBtn.Background = [System.Windows.Media.Brushes]::Transparent
+    $selesaiBtn.Background = $brushConv.ConvertFromString('#14FFFFFF')
     $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.border)
     $selesaiBtn.Foreground = $brushConv.ConvertFromString($theme.muted)
 }
@@ -95,12 +95,12 @@ function Sync-LogbookTimerShape {
 # the XML-structural tests. These constants trade a little visual slack
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
-$script:HEIGHT_COLLAPSED = 175   # status + clock + the always-visible SELESAI
-                                 # pill (Nama/Tujuan/Device collapsed). Measured
-                                 # headlessly via ContentGrid.Measure() = 152.1
-                                 # natural height + 20 shape margin, +3 slack.
-$script:HEIGHT_EXPANDED  = 258   # + Nama/Tujuan/Device + accent bar, on top of
-                                 # SELESAI. Measured = 235.0 natural + 20 + 3.
+$script:HEIGHT_COLLAPSED = 182   # status + clock + the always-visible SELESAI
+                                 # button (Nama/Tujuan/Device collapsed).
+                                 # Measured via ContentGrid.Measure() = 158.8
+                                 # natural + 20 shape margin, +3 slack.
+$script:HEIGHT_EXPANDED  = 265   # + Nama/Tujuan/Device + accent bar, on top of
+                                 # SELESAI. Measured = 241.7 natural + 20 + 3.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default

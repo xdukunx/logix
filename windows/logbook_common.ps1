@@ -1483,26 +1483,32 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
       <!-- SELESAI lives in its OWN row, a sibling of InfoSection (NOT nested
            inside it): always present regardless of whether Nama/Tujuan/
            Device are shown or collapsed (hover / first-10s only). Two-step to
-           prevent misclicks: calm outline by default, warms to amber on
-           hover; the controller (logbook_timer.ps1) arms it red on first
-           press and ends the session on a confirming second press within 3s. -->
-      <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="0,0,0,14"
-              HorizontalAlignment="Center" Padding="18,6"
-              Background="Transparent" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
-              FontFamily="Segoe UI Semibold" FontSize="11" FontWeight="Bold">
+           prevent misclicks. Filled soft surface + icon (not a hollow outline
+           pill) so it reads as a real, deliberate control at a glance;
+           stretches to the same 18px inset every other row in this card
+           uses, so it aligns with the layout instead of floating centered.
+           Warms to amber on hover; the controller (logbook_timer.ps1) arms
+           it red on first press and ends the session on a confirming second
+           press within 3s. -->
+      <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,2,18,14"
+              Padding="0,8" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
+              FontFamily="Segoe UI Semibold" FontSize="11.5" FontWeight="Bold">
         <Button.Template>
           <ControlTemplate TargetType="Button">
-            <!-- Pill shape (not a full-width bar) so it unmistakably reads as
-                 a small, tappable control rather than a footer/label. -->
-            <Border x:Name="SelesaiBg" CornerRadius="999" Background="{TemplateBinding Background}"
+            <Border x:Name="SelesaiBg" CornerRadius="9" Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
                     Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
-              <TextBlock Text="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                         Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
+              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Path Data="M18.36 6.64A9 9 0 1 1 5.64 6.64 M12 2 L12 12" Stroke="{TemplateBinding Foreground}"
+                      StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      Width="12" Height="12" Stretch="Uniform" Margin="0,0,7,0"/>
+                <TextBlock Text="{TemplateBinding Content}" VerticalAlignment="Center"
+                           Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
+              </StackPanel>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="SelesaiBg" Property="Background" Value="#22F59E0B"/>
+                <Setter TargetName="SelesaiBg" Property="Background" Value="#33F59E0B"/>
                 <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$signalWarning"/>
                 <Setter Property="Foreground" Value="$signalWarning"/>
               </Trigger>
