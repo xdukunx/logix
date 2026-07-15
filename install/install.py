@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Logix cross-platform installer (system-wide).
 
-Installs the Logix *core* — the logging bridge, the report generator, and the
-read-only SQL helper — to a system location, initializes the SQLite schema,
+Installs the Logix *core* -- the logging bridge, the report generator, and the
+read-only SQL helper -- to a system location, initializes the SQLite schema,
 and interactively asks the handful of things that matter (device name,
 central server, privacy mode) before printing the remaining per-OS steps.
 
@@ -10,9 +10,9 @@ central server, privacy mode) before printing the remaining per-OS steps.
   Windows:      (elevated PowerShell)  python install\\install.py
 
 Stdlib only; no third-party dependencies. Run it again any time to upgrade the
-installed core in place — it never clobbers an existing config.env or database.
+installed core in place -- it never clobbers an existing config.env or database.
 
-Non-interactive (CI/automation) — pass flags; anything omitted is prompted for
+Non-interactive (CI/automation) -- pass flags; anything omitted is prompted for
 when a terminal is attached, same convention as install/setup_sync.py:
 
   sudo python3 install/install.py --non-interactive \
@@ -41,7 +41,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "logix"
 sys.path.insert(0, str(SRC))
-import paths  # noqa: E402  (resolved from SRC above — single source of truth)
+import paths  # noqa: E402  (resolved from SRC above -- single source of truth)
 
 CORE_FILES = [
     "paths.py",
@@ -71,7 +71,7 @@ def starter_config(dest: Path) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# config.env merge (replace key in place — commented or not — else append).
+# config.env merge (replace key in place -- commented or not -- else append).
 # Same idiom as install/setup_sync.py's update_config(), duplicated rather
 # than shared -- each install/*.py script is a self-contained stdlib file.
 # --------------------------------------------------------------------------- #
@@ -119,7 +119,7 @@ def prompt_privacy_mode(default: str) -> str:
 
 def redeem_enrollment_code(server_url: str, enroll_code: str, device_name: str) -> bool:
     """POST to /api/enroll and persist the result via paths.write_device_identity()
-    -- the same identity file windows/logbook_setup.ps1's Save button writes,
+ -- the same identity file windows/logbook_setup.ps1's Save button writes,
     so either wizard path produces an agent in the same enrolled state."""
     body = json.dumps({
         "invite_code": enroll_code,
@@ -181,7 +181,7 @@ def print_next_steps(dest: Path, hook: Path | None) -> None:
         print("  Use the WPF popup in windows/ - run windows\\install_logbook_tasks.ps1")
         print("  (elevated) to register the lock/unlock sign-in. It writes to this same DB.")
     else:
-        print("\nSSH capture — install the generated hook:")
+        print("\nSSH capture -- install the generated hook:")
         if sys.platform == "darwin":
             print(f'  echo \'source "{hook}"\' | sudo tee -a /etc/zprofile   # or /etc/profile')
         else:

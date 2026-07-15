@@ -22,6 +22,21 @@ The wizard runs `install_logbook_tasks.ps1 -NonInteractive -RunNow` under the
 hood, which registers the monitor as a **non-elevated** scheduled task, installs
 AnyDesk, writes `config.env`, and starts the agent.
 
+## Don't want to build the wizard? Use the one-liner instead
+Building `LogixAgentSetup.exe` needs Inno Setup installed locally (see
+[Build](#build) below). If you just need to get the agent onto a machine
+*right now*, skip the build and run this instead (elevated PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 | iex
+```
+
+Same payload as the wizard (core + sign-in/timer agent + monitor task, config-
+driven), except it doesn't bundle AnyDesk — install AnyDesk separately, or drop
+an `AnyDesk*.exe` next to `install_logbook_tasks.ps1` before running it and it
+auto-installs. See the README / `docs/GETTING_STARTED.md` for flags (mass
+deployment) and `-KeepConfig` re-point instructions further down.
+
 ## Branding (mascot)
 The wizard shows the faculty mascot on a Logix-blue panel (Welcome/Finish
 pages), a small logo in every inner-page header, a matching `.exe` icon, and

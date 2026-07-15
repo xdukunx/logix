@@ -36,9 +36,19 @@ sudo ./install/install.sh
 .\install\install.ps1
 ```
 
-There are no flags to choose — it always does the same thing: copies the core
-files, writes a starter `config.env`, and initializes the local database. You
-should see output like:
+With no flags, it prompts for the handful of things that matter (device name,
+central server URL/key, privacy mode) — blank answers are fine for local-only
+use. For scripted/unattended installs, pass flags instead (same convention as
+every other installer here — anything you don't pass gets prompted for):
+
+```bash
+sudo ./install/install.sh --non-interactive --device-name "Lab PC 3" \
+     --server-url https://logix.example.org --server-api-key <key>
+```
+
+Run `install.py --help` (via either wrapper) for the full flag list. Either
+way it copies the core files, writes a starter `config.env`, and initializes
+the local database. You should see output like:
 
 ```
 Logix installer - platform=linux
@@ -70,9 +80,12 @@ The installer prints the exact next step for your platform. In short:
 
 - **Linux/macOS**: it generates an SSH login hook; follow the printed
   `ln -sf` command to activate it. SSH logins will then log automatically.
-- **Windows**: the physical sign-in popup is separate — see
-  [`windows/logbook_setup.ps1`](../windows/logbook_setup.ps1) and the
-  Task Scheduler entries it registers.
+- **Windows**: the physical sign-in popup is a separate piece
+  ([`windows/install_logbook_tasks.ps1`](../windows/install_logbook_tasks.ps1),
+  registers the Task Scheduler entries and the WPF popup/timer). If you used
+  the one-liner from the README ([`windows/bootstrap-client.ps1`](../windows/bootstrap-client.ps1)),
+  this step is already done — skip ahead to
+  [Using the sign-in popup](#using-the-sign-in-popup).
 
 ### 4. Generate a report
 
@@ -160,17 +173,31 @@ password sign-in screen; log in with an `ADMIN_EMAILS` address and the
 
 ### 3. Point a device at it
 
-On a device that already has the core installed (Part 1), edit its
-`config.env` (in the install directory from Part 1) and add:
+**Fresh Windows lab PC, one line** (elevated PowerShell) does both the core
+install and the sign-in popup agent, already pointed at your server:
+
+```powershell
+irm https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 | iex
+```
+
+For mass deployment (imaging, a scripted rollout to many machines), download
+then run with flags so it's fully unattended:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 -OutFile bootstrap-client.ps1
+.\bootstrap-client.ps1 -ServerUrl "http://<server-ip>:8000" -ServerApiKey "<the key setup_server.py printed>" -DeviceName "WS-07"
+```
+
+Already has the core installed (Part 1) and just needs to be pointed at a
+server? Either answer the device installer's prompts (it asks for exactly
+this, and can redeem a per-device enrollment code from the dashboard instead
+of the shared key), or edit `config.env` directly (in the install directory
+from Part 1) and add:
 
 ```
 LOGIX_SERVER_URL="http://<server-ip>:8000"
 LOGIX_SERVER_API_KEY="<the key setup_server.py printed>"
 ```
-
-(Or answer the device installer's prompts — it asks for exactly these, and
-can redeem a per-device enrollment code from the dashboard instead of the
-shared key.)
 
 The device then appears on the dashboard via its heartbeats, and remote
 commands (lock, broadcast message) work. **Session rows are a separate,

@@ -4,7 +4,7 @@
 Run this from a clone of the repo on the machine that will host the server.
 It writes server/.env (generating a strong ingest API key for you), installs
 the server dependencies, and can register the server to start on boot
-(systemd / launchd / Task Scheduler). No Docker, no external database —
+(systemd / launchd / Task Scheduler). No Docker, no external database -- 
 the server is FastAPI + SQLite and runs on a plain Python install.
 
   Linux/macOS:  python3 install/setup_server.py
@@ -53,7 +53,7 @@ def install_deps() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# service registration (per OS) — the server starts on boot and restarts on
+# service registration (per OS) -- the server starts on boot and restarts on
 # failure. The unit/task runs uvicorn bound to --host/--port; keep the default
 # 127.0.0.1 and put a TLS reverse proxy in front for anything non-local
 # (see README "Running it for real").

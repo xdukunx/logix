@@ -4,10 +4,11 @@
 #
 # `irm | iex` can't take named parameters (PowerShell limitation, not a bug
 # here) -- that invocation runs fully interactive, which is fine since
-# setup_server.py prompts for everything it needs. To pass flags (admin
-# emails, -Service, etc.) instead, download then run it:
+# setup_server.py prompts for everything it needs (including the admin login
+# password). To pass flags (admin emails, -Service, etc.) instead, download
+# then run it:
 #   iwr -useb <url> -OutFile bootstrap-server.ps1
-#   .\bootstrap-server.ps1 -AdminEmails "you@example.org" -Service
+#   .\bootstrap-server.ps1 -AdminEmails "you@example.org" -AdminPassword "strong-pass" -Service
 #
 # Like any pipe-to-shell installer, read it before you run it. Run this from
 # an elevated PowerShell if you pass -Service (Task Scheduler registration
@@ -18,9 +19,7 @@ param(
     [string]$RepoUrl = "https://github.com/xdukunx/logix.git",
     [string]$Branch = "main",
     [string]$AdminEmails = "",
-    [string]$GoogleClientId = "",
-    [string]$GoogleClientSecret = "",
-    [string]$RedirectUri = "",
+    [string]$AdminPassword = "",
     [string]$IngestKey = "",
     [string]$AllowedOrigins = "",
     [ValidateSet("0", "1")][string]$DevMode = "",
@@ -105,13 +104,11 @@ if (Test-Cmd "npm") {
 # --- 4. Hand off to the real installer --------------------------------------
 Say "Running install\setup_server.py"
 $pyArgs = @()
-if ($AdminEmails)        { $pyArgs += @("--admin-emails", $AdminEmails) }
-if ($GoogleClientId)     { $pyArgs += @("--google-client-id", $GoogleClientId) }
-if ($GoogleClientSecret) { $pyArgs += @("--google-client-secret", $GoogleClientSecret) }
-if ($RedirectUri)        { $pyArgs += @("--redirect-uri", $RedirectUri) }
-if ($IngestKey)          { $pyArgs += @("--ingest-key", $IngestKey) }
-if ($AllowedOrigins)     { $pyArgs += @("--allowed-origins", $AllowedOrigins) }
-if ($DevMode)            { $pyArgs += @("--dev-mode", $DevMode) }
+if ($AdminEmails)    { $pyArgs += @("--admin-emails", $AdminEmails) }
+if ($AdminPassword)  { $pyArgs += @("--admin-password", $AdminPassword) }
+if ($IngestKey)      { $pyArgs += @("--ingest-key", $IngestKey) }
+if ($AllowedOrigins) { $pyArgs += @("--allowed-origins", $AllowedOrigins) }
+if ($DevMode)        { $pyArgs += @("--dev-mode", $DevMode) }
 $pyArgs += @("--host", $BindHost, "--port", $Port)
 if ($InstallDeps) { $pyArgs += "--install-deps" }
 if ($Service)     { $pyArgs += "--service" }

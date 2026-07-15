@@ -46,7 +46,15 @@ Details: [docs/PRIVACY.md](docs/PRIVACY.md) · [SECURITY.md](SECURITY.md) · [ET
 
 ## Quick start
 
-Install the agent on a lab computer (Python 3.8+ is the only requirement):
+**Windows lab PC, one line** (in an elevated PowerShell — right-click
+PowerShell → "Run as Administrator"). Installs the core logger *and* the
+sign-in popup / timer widget:
+
+```powershell
+irm https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 | iex
+```
+
+**Linux / macOS**, or if you'd rather clone the repo yourself first:
 
 ```bash
 git clone https://github.com/xdukunx/logix.git
@@ -55,7 +63,7 @@ cd logix
 # Linux / macOS
 sudo ./install/install.sh
 
-# Windows (in an elevated PowerShell)
+# Windows (core logger only, no sign-in popup — use the one-liner above for that)
 .\install\install.ps1
 ```
 
@@ -66,9 +74,8 @@ database. Generate an Excel report any time:
 python logbook_report.py     # writes an .xlsx into <data-dir>/reports
 ```
 
-On Windows, a small setup window also opens to name the device and (optionally)
-point it at a central server. Full walkthrough:
-[docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+Either installer also asks (or takes flags) to point the device at a central
+server. Full walkthrough, flags, and mass-deployment: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 ## What it captures
 
