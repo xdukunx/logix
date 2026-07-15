@@ -95,12 +95,12 @@ function Sync-LogbookTimerShape {
 # the XML-structural tests. These constants trade a little visual slack
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
-$script:HEIGHT_COLLAPSED = 120   # status + timer only (not used at rest now that
-                                 # info+SELESAI stay visible; kept for safety)
-$script:HEIGHT_EXPANDED  = 236   # + nama/tujuan/device + accent bar + the
-                                 # always-visible two-step SELESAI button (now
-                                 # a compact centered pill, not a full-width
-                                 # bar). Verified by headless RenderTargetBitmap.
+$script:HEIGHT_COLLAPSED = 175   # status + clock + the always-visible SELESAI
+                                 # pill (Nama/Tujuan/Device collapsed). Measured
+                                 # headlessly via ContentGrid.Measure() = 152.1
+                                 # natural height + 20 shape margin, +3 slack.
+$script:HEIGHT_EXPANDED  = 258   # + Nama/Tujuan/Device + accent bar, on top of
+                                 # SELESAI. Measured = 235.0 natural + 20 + 3.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default
@@ -171,13 +171,17 @@ function Update-LogbookTimerSize {
 
 # Full info (nama/tujuan/device) shows for the first 10 seconds of a
 # session, or on hover -- collapsed the rest of the time so the widget is
-# just the clock, letting the user focus on time, not data. The window
-# then animates to the matching size (narrow clock-only at rest).
+# just the clock, letting the user focus on time, not data. SELESAI lives in
+# its own row (a sibling of InfoSection, not nested inside it -- see
+# Build-LogbookTimerXaml), so it stays visible at all times regardless of
+# this toggle. The window then animates to the matching size.
 function Update-LogbookInfoVisibility {
-    # Info + the always-visible SELESAI button stay shown (design's resting
-    # "Default" state) -- SELESAI must be present at all times, no hover-to-
-    # reveal. The widget still grows for an incoming message (Expanded).
-    if ($infoSection.Visibility -ne 'Visible') { $infoSection.Visibility = 'Visible' }
+    $elapsedSec = ((Get-Date) - $start).TotalSeconds
+    $shouldShow = $script:isHovering -or ($elapsedSec -le 10)
+    $isShown = $infoSection.Visibility -eq 'Visible'
+    if ($shouldShow -ne $isShown) {
+        $infoSection.Visibility = if ($shouldShow) { 'Visible' } else { 'Collapsed' }
+    }
     Update-LogbookTimerSize
 }
 $window.Add_MouseEnter({ $script:isHovering = $true; Update-LogbookInfoVisibility })

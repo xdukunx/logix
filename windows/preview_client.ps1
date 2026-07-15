@@ -148,8 +148,15 @@ if ($Surface -in 'welcome', 'all') {
 }
 
 if ($Surface -in 'timer', 'all') {
+    # Same fixed heights the real widget uses (logbook_timer.ps1's
+    # HEIGHT_COLLAPSED/HEIGHT_EXPANDED) -- measured headlessly via
+    # ContentGrid.Measure(), not guessed, so the chamfered shape always
+    # matches the window exactly (no transparent gaps, no clipped content).
+    $script:pvHCollapsed = 175
+    $script:pvHExpanded = 258
+    $script:pvTimerW = 230
     $session = @{ session_type = 'SSH'; nama = 'A. Rahmawati'; tujuan = 'Simulasi DFT' }
-    Show-PreviewWindow (Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100') 'Logix - Timer Widget + SELESAI (PREVIEW)' 320 360 {
+    Show-PreviewWindow (Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100') 'Logix - Timer Widget (hover to expand, click SELESAI) (PREVIEW)' $script:pvTimerW $script:pvHCollapsed {
         param($window)
         # Live-ticking clock (starts at 02:14:41, counts up every second) so
         # this reads as a running session, not a frozen screenshot -- and the
@@ -169,6 +176,30 @@ if ($Surface -in 'timer', 'all') {
             $script:pvClockSeconds.Text = ('{0:00}' -f $script:pvElapsed.Seconds)
         })
         $script:pvClockTimer.Start()
+
+        # Info (Nama/Tujuan/Device) only shows on hover -- matches the real
+        # widget's Update-LogbookInfoVisibility. Resync the shape + clip to
+        # the new size every time, exactly like Sync-LogbookTimerShape does,
+        # or the outline drifts out of alignment with the actual content.
+        $script:pvInfoSection = $window.FindName('InfoSection')
+        $script:pvShapePath = $window.FindName('ShapePath')
+        $script:pvContentGrid = $window.FindName('ContentGrid')
+        $script:pvInfoSection.Visibility = 'Collapsed'
+        $script:pvSyncShape = {
+            $geom = [System.Windows.Media.Geometry]::Parse((Get-LogbookTimerShapeData ($script:pvWin.Height - 20) ($script:pvTimerW - 20)))
+            $script:pvShapePath.Data = $geom
+            $script:pvContentGrid.Clip = $geom
+        }
+        $window.Add_MouseEnter({
+            $script:pvInfoSection.Visibility = 'Visible'
+            $script:pvWin.Height = $script:pvHExpanded
+            & $script:pvSyncShape
+        })
+        $window.Add_MouseLeave({
+            $script:pvInfoSection.Visibility = 'Collapsed'
+            $script:pvWin.Height = $script:pvHCollapsed
+            & $script:pvSyncShape
+        })
 
         $script:pvSelesaiBtn = $window.FindName('SelesaiBtn')
         $script:pvTheme = Get-LogbookTheme $script:pvCfg
