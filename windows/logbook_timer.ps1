@@ -95,12 +95,15 @@ function Sync-LogbookTimerShape {
 # the XML-structural tests. These constants trade a little visual slack
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
-$script:HEIGHT_COLLAPSED = 176   # status + clock + the always-visible SELESAI
+$script:HEIGHT_COLLAPSED = 165   # status + clock + the always-visible SELESAI
                                  # button (Nama/Tujuan/Device collapsed).
-                                 # Measured via ContentGrid.Measure() = 153.4
-                                 # natural + 20 shape margin, +3 slack.
-$script:HEIGHT_EXPANDED  = 259   # + Nama/Tujuan/Device + accent bar, on top of
-                                 # SELESAI. Measured = 236.3 natural + 20 + 3.
+                                 # Measured precisely via TransformToAncestor
+                                 # (button's true bottom edge + its own
+                                 # margin, not the coarser aggregate
+                                 # Measure() which left ~12px of unaccounted
+                                 # dead space below the button).
+$script:HEIGHT_EXPANDED  = 248   # + Nama/Tujuan/Device + accent bar, on top
+                                 # of SELESAI. Same precise measurement.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default

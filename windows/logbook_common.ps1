@@ -1487,9 +1487,9 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
            pill) so it reads as a real, deliberate control at a glance;
            stretches to the same 18px inset every other row in this card
            uses, so it aligns with the layout instead of floating centered.
-           Warms to amber on hover; the controller (logbook_timer.ps1) arms
-           it red on first press and ends the session on a confirming second
-           press within 3s. -->
+           Warms to the brand accent (blue) on hover; the controller
+           (logbook_timer.ps1) arms it red on first press and ends the
+           session on a confirming second press within 3s. -->
       <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,12"
               Padding="0,10" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
               FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
@@ -1507,10 +1507,14 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
               </StackPanel>
             </Border>
             <ControlTemplate.Triggers>
+              <!-- Hover uses the brand accent (blue), not amber: "Blue is
+                   the direction, everything else is a theme" (Client
+                   Foundation). Amber/red stay reserved for the two-step
+                   arm/confirm escalation, not mere hover. -->
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="SelesaiBg" Property="Background" Value="#33F59E0B"/>
-                <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$signalWarning"/>
-                <Setter Property="Foreground" Value="$signalWarning"/>
+                <Setter TargetName="SelesaiBg" Property="Background" Value="#332563EB"/>
+                <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$accent"/>
+                <Setter Property="Foreground" Value="$accent"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
                 <Setter TargetName="SelesaiBg" Property="Opacity" Value="0.75"/>
