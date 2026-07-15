@@ -231,6 +231,7 @@ $window.FindName('StartTimeText').Text = [string]$cfg.text.startHint
 
 $nama = $window.FindName('NamaBox')
 $nim = $window.FindName('NimBox')
+Set-LogbookNumericOnly $nim
 $access = $window.FindName('AccessBox')
 $tujuan = $window.FindName('TujuanBox')
 $ket = $window.FindName('KetBox')

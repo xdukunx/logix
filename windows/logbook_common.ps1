@@ -939,6 +939,36 @@ function Get-LogbookTheme($cfg) {
     }
 }
 
+# NIM/NIP/NIK is numbers-only (student/staff ID, national ID) -- reject
+# non-digit keystrokes at the source and strip non-digits from paste, rather
+# than validating after the fact. Shared by the real popup (logbook_popup.ps1)
+# and the interactive preview (preview_client.ps1) so both behave the same.
+function Set-LogbookNumericOnly($TextBox) {
+    $TextBox.Add_PreviewTextInput({
+        param($sender, $e)
+        if ($e.Text -notmatch '^[0-9]+$') { $e.Handled = $true }
+    })
+    $TextBox.Add_PreviewKeyDown({
+        param($sender, $e)
+        # Space bar doesn't fire PreviewTextInput as printable text on some
+        # layouts -- block it explicitly so it can't sneak a blank in.
+        if ($e.Key -eq 'Space') { $e.Handled = $true }
+    })
+    [System.Windows.DataObject]::AddPastingHandler($TextBox, {
+        param($sender, $e)
+        if ($e.DataObject.GetDataPresent([System.Windows.DataFormats]::Text)) {
+            $text = [string]$e.DataObject.GetData([System.Windows.DataFormats]::Text)
+            $digits = ($text -replace '[^0-9]', '')
+            if ($digits -ne $text) {
+                if ($digits) { $sender.SelectedText = $digits }
+                $e.CancelCommand()
+            }
+        } else {
+            $e.CancelCommand()
+        }
+    })
+}
+
 function Build-LogbookPopupXaml($cfg) {
     # Render the popup XAML from config. Pure string building (no WPF), so it is
     # unit-testable by parsing the result as [xml].
@@ -1452,13 +1482,17 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
              misclicks. Calm outline by default, warms to amber on hover; the
              controller (logbook_timer.ps1) arms it red on first press and ends
              the session on a confirming second press within 3s. -->
-        <Button Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,14" Height="34"
+        <Button Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="0,0,0,14"
+                HorizontalAlignment="Center" Padding="18,6"
                 Background="Transparent" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
-                FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
+                FontFamily="Segoe UI Semibold" FontSize="11" FontWeight="Bold">
           <Button.Template>
             <ControlTemplate TargetType="Button">
-              <Border x:Name="SelesaiBg" CornerRadius="8" Background="{TemplateBinding Background}"
-                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
+              <!-- Pill shape (not a full-width bar) so it unmistakably reads as
+                   a small, tappable control rather than a footer/label. -->
+              <Border x:Name="SelesaiBg" CornerRadius="999" Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                      Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
                 <TextBlock Text="{TemplateBinding Content}" HorizontalAlignment="Center" VerticalAlignment="Center"
                            Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
               </Border>
@@ -1467,6 +1501,9 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
                   <Setter TargetName="SelesaiBg" Property="Background" Value="#22F59E0B"/>
                   <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$signalWarning"/>
                   <Setter Property="Foreground" Value="$signalWarning"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="SelesaiBg" Property="Opacity" Value="0.75"/>
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>

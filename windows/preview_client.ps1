@@ -64,6 +64,7 @@ function Enable-PopupInteractive($window) {
     $script:pvKet = $window.FindName('KetBox'); $script:pvBtn = $window.FindName('SubmitBtn')
     $script:pvHint = $window.FindName('HintText'); $script:pvReq = @($script:pvCfg.requiredFields)
     $window.FindName('StartTimeText').Text = [string]$script:pvCfg.text.startHint
+    Set-LogbookNumericOnly $script:pvNim
 
     $bc = New-Object System.Windows.Media.BrushConverter
     $fg = $bc.ConvertFromString((Get-LogbookTheme $script:pvCfg).accent)
@@ -150,8 +151,49 @@ if ($Surface -in 'timer', 'all') {
     $session = @{ session_type = 'SSH'; nama = 'A. Rahmawati'; tujuan = 'Simulasi DFT' }
     Show-PreviewWindow (Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100') 'Logix - Timer Widget + SELESAI (PREVIEW)' 320 360 {
         param($window)
-        $window.FindName('ClockMain').Text = '02:14'
-        $window.FindName('ClockSeconds').Text = '41'
+        # Live-ticking clock (starts at 02:14:41, counts up every second) so
+        # this reads as a running session, not a frozen screenshot -- and the
+        # real SELESAI two-step (arm on first click, confirm within 3s on the
+        # second), so you can actually click-test it here.
+        $clockMain = $window.FindName('ClockMain'); $clockSeconds = $window.FindName('ClockSeconds')
+        $script:pvElapsed = [TimeSpan]::FromHours(2).Add([TimeSpan]::FromMinutes(14)).Add([TimeSpan]::FromSeconds(41))
+        $clockTimer = New-Object Windows.Threading.DispatcherTimer
+        $clockTimer.Interval = [TimeSpan]::FromSeconds(1)
+        $clockTimer.Add_Tick({
+            $script:pvElapsed = $script:pvElapsed.Add([TimeSpan]::FromSeconds(1))
+            $clockMain.Text = ('{0:00}:{1:00}' -f [math]::Floor($script:pvElapsed.TotalHours), $script:pvElapsed.Minutes)
+            $clockSeconds.Text = ('{0:00}' -f $script:pvElapsed.Seconds)
+        })
+        $clockTimer.Start()
+
+        $selesaiBtn = $window.FindName('SelesaiBtn')
+        $theme = Get-LogbookTheme $script:pvCfg
+        $bc = New-Object System.Windows.Media.BrushConverter
+        $script:pvArmed = $false
+        $armTimer = New-Object Windows.Threading.DispatcherTimer
+        $armTimer.Interval = [TimeSpan]::FromSeconds(3)
+        $resetSelesai = {
+            $script:pvArmed = $false; $armTimer.Stop()
+            $selesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEnd' 'SELESAI')
+            $selesaiBtn.Background = [System.Windows.Media.Brushes]::Transparent
+            $selesaiBtn.BorderBrush = $bc.ConvertFromString($theme.border)
+            $selesaiBtn.Foreground = $bc.ConvertFromString($theme.muted)
+        }
+        $armTimer.Add_Tick({ & $resetSelesai })
+        $selesaiBtn.Add_Click({
+            if (-not $script:pvArmed) {
+                $script:pvArmed = $true
+                $selesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEndArmed' 'Tekan lagi untuk selesai')
+                $red = $bc.ConvertFromString($theme.signalCritical)
+                $selesaiBtn.Background = $red; $selesaiBtn.BorderBrush = $red
+                $selesaiBtn.Foreground = [System.Windows.Media.Brushes]::White
+                $armTimer.Stop(); $armTimer.Start()
+            } else {
+                $armTimer.Stop(); $clockTimer.Stop()
+                [System.Windows.MessageBox]::Show('SELESAI dikonfirmasi (PRATINJAU). Agent asli akan mengunci workstation di titik ini.', 'Logix - Preview') | Out-Null
+                $script:pvWin.Close()
+            }
+        })
     }
 }
 
