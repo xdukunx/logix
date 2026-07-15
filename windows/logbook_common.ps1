@@ -1444,7 +1444,7 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
         <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
       </Grid>
 
-      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,10" VerticalAlignment="Bottom">
+      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,4" VerticalAlignment="Bottom">
         <TextBlock Name="ClockMain" Text="00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text"/>
         <TextBlock Name="ClockSeconds" Text="00" FontFamily="Consolas" FontSize="16" FontWeight="Bold" Foreground="$muted" Margin="4,0,0,6" VerticalAlignment="Bottom"/>
       </StackPanel>
@@ -1490,9 +1490,9 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
            Warms to amber on hover; the controller (logbook_timer.ps1) arms
            it red on first press and ends the session on a confirming second
            press within 3s. -->
-      <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,2,18,14"
-              Padding="0,8" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
-              FontFamily="Segoe UI Semibold" FontSize="11.5" FontWeight="Bold">
+      <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,12"
+              Padding="0,10" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
+              FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
         <Button.Template>
           <ControlTemplate TargetType="Button">
             <Border x:Name="SelesaiBg" CornerRadius="9" Background="{TemplateBinding Background}"
@@ -1501,7 +1501,7 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
               <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Path Data="M18.36 6.64A9 9 0 1 1 5.64 6.64 M12 2 L12 12" Stroke="{TemplateBinding Foreground}"
                       StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                      Width="12" Height="12" Stretch="Uniform" Margin="0,0,7,0"/>
+                      Width="13" Height="13" Stretch="Uniform" Margin="0,0,7,0"/>
                 <TextBlock Text="{TemplateBinding Content}" VerticalAlignment="Center"
                            Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
               </StackPanel>
