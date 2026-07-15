@@ -154,45 +154,53 @@ if ($Surface -in 'timer', 'all') {
         # Live-ticking clock (starts at 02:14:41, counts up every second) so
         # this reads as a running session, not a frozen screenshot -- and the
         # real SELESAI two-step (arm on first click, confirm within 3s on the
-        # second), so you can actually click-test it here.
-        $clockMain = $window.FindName('ClockMain'); $clockSeconds = $window.FindName('ClockSeconds')
+        # second), so you can actually click-test it here. Everything an event
+        # handler touches must be $script: scoped (see Enable-PopupInteractive
+        # above) -- a DispatcherTimer's Tick handler fires long after this
+        # block returns, and closures over merely-local variables go stale by
+        # then, corrupting later ShowDialog() calls for OTHER surfaces.
+        $script:pvClockMain = $window.FindName('ClockMain'); $script:pvClockSeconds = $window.FindName('ClockSeconds')
         $script:pvElapsed = [TimeSpan]::FromHours(2).Add([TimeSpan]::FromMinutes(14)).Add([TimeSpan]::FromSeconds(41))
-        $clockTimer = New-Object Windows.Threading.DispatcherTimer
-        $clockTimer.Interval = [TimeSpan]::FromSeconds(1)
-        $clockTimer.Add_Tick({
+        $script:pvClockTimer = New-Object Windows.Threading.DispatcherTimer
+        $script:pvClockTimer.Interval = [TimeSpan]::FromSeconds(1)
+        $script:pvClockTimer.Add_Tick({
             $script:pvElapsed = $script:pvElapsed.Add([TimeSpan]::FromSeconds(1))
-            $clockMain.Text = ('{0:00}:{1:00}' -f [math]::Floor($script:pvElapsed.TotalHours), $script:pvElapsed.Minutes)
-            $clockSeconds.Text = ('{0:00}' -f $script:pvElapsed.Seconds)
+            $script:pvClockMain.Text = ('{0:00}:{1:00}' -f [math]::Floor($script:pvElapsed.TotalHours), $script:pvElapsed.Minutes)
+            $script:pvClockSeconds.Text = ('{0:00}' -f $script:pvElapsed.Seconds)
         })
-        $clockTimer.Start()
+        $script:pvClockTimer.Start()
 
-        $selesaiBtn = $window.FindName('SelesaiBtn')
-        $theme = Get-LogbookTheme $script:pvCfg
-        $bc = New-Object System.Windows.Media.BrushConverter
+        $script:pvSelesaiBtn = $window.FindName('SelesaiBtn')
+        $script:pvTheme = Get-LogbookTheme $script:pvCfg
+        $script:pvBc = New-Object System.Windows.Media.BrushConverter
         $script:pvArmed = $false
-        $armTimer = New-Object Windows.Threading.DispatcherTimer
-        $armTimer.Interval = [TimeSpan]::FromSeconds(3)
-        $resetSelesai = {
-            $script:pvArmed = $false; $armTimer.Stop()
-            $selesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEnd' 'SELESAI')
-            $selesaiBtn.Background = [System.Windows.Media.Brushes]::Transparent
-            $selesaiBtn.BorderBrush = $bc.ConvertFromString($theme.border)
-            $selesaiBtn.Foreground = $bc.ConvertFromString($theme.muted)
-        }
-        $armTimer.Add_Tick({ & $resetSelesai })
-        $selesaiBtn.Add_Click({
+        $script:pvArmTimer = New-Object Windows.Threading.DispatcherTimer
+        $script:pvArmTimer.Interval = [TimeSpan]::FromSeconds(3)
+        $script:pvArmTimer.Add_Tick({
+            $script:pvArmed = $false; $script:pvArmTimer.Stop()
+            $script:pvSelesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEnd' 'SELESAI')
+            $script:pvSelesaiBtn.Background = [System.Windows.Media.Brushes]::Transparent
+            $script:pvSelesaiBtn.BorderBrush = $script:pvBc.ConvertFromString($script:pvTheme.border)
+            $script:pvSelesaiBtn.Foreground = $script:pvBc.ConvertFromString($script:pvTheme.muted)
+        })
+        $script:pvSelesaiBtn.Add_Click({
             if (-not $script:pvArmed) {
                 $script:pvArmed = $true
-                $selesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEndArmed' 'Tekan lagi untuk selesai')
-                $red = $bc.ConvertFromString($theme.signalCritical)
-                $selesaiBtn.Background = $red; $selesaiBtn.BorderBrush = $red
-                $selesaiBtn.Foreground = [System.Windows.Media.Brushes]::White
-                $armTimer.Stop(); $armTimer.Start()
+                $script:pvSelesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEndArmed' 'Tekan lagi untuk selesai')
+                $red = $script:pvBc.ConvertFromString($script:pvTheme.signalCritical)
+                $script:pvSelesaiBtn.Background = $red; $script:pvSelesaiBtn.BorderBrush = $red
+                $script:pvSelesaiBtn.Foreground = [System.Windows.Media.Brushes]::White
+                $script:pvArmTimer.Stop(); $script:pvArmTimer.Start()
             } else {
-                $armTimer.Stop(); $clockTimer.Stop()
                 [System.Windows.MessageBox]::Show('SELESAI dikonfirmasi (PRATINJAU). Agent asli akan mengunci workstation di titik ini.', 'Logix - Preview') | Out-Null
                 $script:pvWin.Close()
             }
+        })
+        # Safety net: however this window closes (SELESAI, or the title-bar X),
+        # stop both timers so they can never keep ticking into the next surface.
+        $window.Add_Closed({
+            try { $script:pvClockTimer.Stop() } catch {}
+            try { $script:pvArmTimer.Stop() } catch {}
         })
     }
 }
@@ -205,6 +213,10 @@ if ($Surface -in 'notif', 'all') {
         $script:pvTimer.Interval = [TimeSpan]::FromSeconds(1)
         $script:pvTimer.Add_Tick({ $script:pvSecs -= 1; if ($script:pvSecs -le 0) { $script:pvCount.Text = '0'; $script:pvTimer.Stop() } else { $script:pvCount.Text = [string]$script:pvSecs } })
         $window.FindName('SavedBtn').Add_Click({ $script:pvTimer.Stop(); $script:pvWin.Close() })
+        # Safety net: stop the countdown however this window closes, so it
+        # can't keep ticking (and referencing this closed window's controls)
+        # into the next surface if closed via the title-bar X instead of the button.
+        $window.Add_Closed({ try { $script:pvTimer.Stop() } catch {} })
         $script:pvTimer.Start()
     }
 }
