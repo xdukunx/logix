@@ -419,7 +419,7 @@ function Get-LogbookDefaultConfig {
             submit         = 'Mulai Sesi'
             hint           = 'Mohon isi data dengan benar dan selengkap mungkin, apabila ada error atau kesalahan, segera hubungi admin.'
             hintIncomplete = 'Lengkapi Nama, NIM/ID, tipe akses, tujuan, dan keterangan.'
-            hintReady      = 'Siap disimpan. Nama, NIM, tujuan, dan keterangan akan dikirim ke SQLite.'
+            hintReady      = 'Siap disimpan. Tuliskan keterangan kegiatan sedetail mungkin agar mudah dipahami admin -- hanya nama, NIM, tipe akses, tujuan, dan keterangan yang dicatat, bukan aktivitas di layar Anda.'
             # --- Client Copy Deck (docs/design/LogiX Copy Deck.dc.html) ---
             # Returning-user fast path (C8.1)
             welcomeBack      = 'Lanjutkan sesi Anda'
@@ -469,7 +469,7 @@ function Get-LogbookDefaultConfig {
                 intro          = 'Fill in your session details to start using this workstation.'
                 submit         = 'Start Session'
                 hintIncomplete = 'Please complete name, ID, access type, purpose, and notes.'
-                hintReady      = 'Ready to save.'
+                hintReady      = 'Ready to save. Describe your activity in as much detail as you can -- only your name, ID, access type, purpose, and notes are recorded, never what is on your screen.'
                 welcomeBack    = 'Continue your session'
                 continueAs     = 'Continue as {0}'
                 notYou         = 'Not you / change details'

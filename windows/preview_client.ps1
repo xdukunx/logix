@@ -110,8 +110,17 @@ function Show-PreviewWindow([string]$xaml, [string]$title, [double]$w, [double]$
     $window = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$xaml)))
     $script:pvWin = $window
     if ($after) { & $after $window }
-    $window.WindowStyle = 'SingleBorderWindow'; $window.WindowState = 'Normal'
-    $window.ResizeMode = 'CanResize'; $window.Topmost = $false; $window.ShowInTaskbar = $true
+    # WPF requires WindowStyle=None whenever AllowsTransparency=True (the timer
+    # widget and the emergency overlay are both transparent-background windows
+    # for their custom shapes) -- forcing SingleBorderWindow on those crashes at
+    # ShowDialog. Give solid-background surfaces a normal title bar; leave the
+    # transparent ones borderless (matches how they really render anyway).
+    if ($window.AllowsTransparency) {
+        $window.WindowStyle = 'None'; $window.ResizeMode = 'NoResize'
+    } else {
+        $window.WindowStyle = 'SingleBorderWindow'; $window.ResizeMode = 'CanResize'
+    }
+    $window.WindowState = 'Normal'; $window.Topmost = $false; $window.ShowInTaskbar = $true
     $window.SizeToContent = 'Manual'; $window.Width = $w; $window.Height = $h
     $window.WindowStartupLocation = 'CenterScreen'; $window.Title = $title
     Write-Host "Opening: $title (close the window to continue)" -ForegroundColor Cyan

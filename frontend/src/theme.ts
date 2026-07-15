@@ -23,6 +23,12 @@ export const logixTheme = defineTheme({
   // modes match the canvases exactly.
   tokens: {
     "--color-accent": ["#2563eb", "#2563eb"],
+    // Astryx auto-derives on-accent text contrast from the accent's
+    // light/dark brightness delta; since our accent is pinned to the SAME
+    // #2563EB in both modes (brief: "one accent, everything else is a
+    // theme"), that derivation produced dark navy text in dark mode --
+    // nearly invisible on a blue button. Force white in both modes instead.
+    "--color-on-accent": ["#ffffff", "#ffffff"],
     "--color-background-body": ["#eef1f5", "#0b1120"],
     "--color-background-surface": ["#ffffff", "#0f172a"],
     "--color-background-card": ["#ffffff", "#0f172a"],

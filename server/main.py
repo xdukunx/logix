@@ -471,7 +471,7 @@ DEFAULT_CONFIG = {
         "submit": "Mulai Sesi",
         "hint": "Mohon isi data dengan benar dan selengkap mungkin, apabila ada error atau kesalahan, segera hubungi admin.",
         "hintIncomplete": "Lengkapi Nama, NIM/ID, tipe akses, tujuan, dan keterangan.",
-        "hintReady": "Siap disimpan. Nama, NIM, tujuan, dan keterangan akan dikirim ke SQLite."
+        "hintReady": "Siap disimpan. Tuliskan keterangan kegiatan sedetail mungkin agar mudah dipahami admin -- hanya nama, NIM, tipe akses, tujuan, dan keterangan yang dicatat, bukan aktivitas di layar Anda."
     },
     "accessTypes": ["Physical", "AnyDesk"],
     "purposes": ["Visualisasi Data", "Running Data", "Maintenance"],
