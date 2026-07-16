@@ -69,9 +69,16 @@ Set-TaskManagerDisabled -Disabled $false
 # 4. Re-register the monitor task at RunLevel Limited (non-elevated) so future
 #    runs stay user-owned. Mirrors install_logbook_tasks.ps1.
 try {
+    # SID, not the $TaskUser name string: on a Microsoft-Account-linked sign-in
+    # (common on a personal laptop, vs. a domain-joined lab workstation),
+    # "$env:USERDOMAIN\$env:USERNAME" often can't be resolved by Task
+    # Scheduler's name lookup ("No mapping between account names and security
+    # IDs was done", 0x80070534). A SID needs no name resolution. $TaskUser
+    # itself stays name-based above, since NTAccount/ownership needs a name.
+    $taskUserSid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
-    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Limited
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUserSid
+    $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUserSid -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 30)
     Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Force | Out-Null
     Write-Host '  monitor task re-registered at RunLevel Limited' -ForegroundColor Green

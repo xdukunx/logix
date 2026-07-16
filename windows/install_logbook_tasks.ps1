@@ -1,5 +1,13 @@
 param(
-    [string]$TaskUser = "$env:USERDOMAIN\$env:USERNAME",
+    # Defaults to the CURRENT user's SID, not "$env:USERDOMAIN\$env:USERNAME" --
+    # on a Microsoft-Account-linked Windows sign-in (the common case on a
+    # personal laptop, as opposed to a domain-joined lab workstation),
+    # $env:USERNAME is a display-name-derived string that Task Scheduler's
+    # name lookup often can't resolve to a SID, failing with "No mapping
+    # between account names and security IDs was done" (0x80070534). A SID
+    # is accepted directly by both -User and -UserId below and needs no
+    # name resolution, so it works regardless of account type.
+    [string]$TaskUser = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value,
     [switch]$RunNow,
     [switch]$TestPopup,
     [switch]$UseWSL,
