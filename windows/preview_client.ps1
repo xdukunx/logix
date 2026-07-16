@@ -152,8 +152,8 @@ if ($Surface -in 'timer', 'all') {
     # HEIGHT_COLLAPSED/HEIGHT_EXPANDED) -- measured headlessly via
     # ContentGrid.Measure(), not guessed, so the chamfered shape always
     # matches the window exactly (no transparent gaps, no clipped content).
-    $script:pvHCollapsed = 145
-    $script:pvHExpanded = 228
+    $script:pvHCollapsed = 152
+    $script:pvHExpanded = 235
     $script:pvTimerW = 230
     $session = @{ session_type = 'SSH'; nama = 'A. Rahmawati'; tujuan = 'Simulasi DFT' }
     Show-PreviewWindow (Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100') 'Logix - Timer Widget (hover to expand, click SELESAI) (PREVIEW)' $script:pvTimerW $script:pvHCollapsed {

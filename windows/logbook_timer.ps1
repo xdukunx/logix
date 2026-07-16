@@ -95,7 +95,7 @@ function Sync-LogbookTimerShape {
 # the XML-structural tests. These constants trade a little visual slack
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
-$script:HEIGHT_COLLAPSED = 145   # status + clock + the always-visible SELESAI
+$script:HEIGHT_COLLAPSED = 152   # status + clock + the always-visible SELESAI
                                  # button (Nama/Tujuan/Device collapsed).
                                  # Measured against a REAL shown Window (Show()
                                  # + UpdateLayout(), off-screen) -- Measure()/
@@ -109,11 +109,15 @@ $script:HEIGHT_COLLAPSED = 145   # status + clock + the always-visible SELESAI
                                  # pack at the top -- so a too-tall window
                                  # just shows as dead space below the last
                                  # row, and neither offline technique caught
-                                 # it. 165 measured 33px of that dead space;
-                                 # 145 leaves ~13px (just the button's own
-                                 # 12px margin + slack).
-$script:HEIGHT_EXPANDED  = 228   # + Nama/Tujuan/Device + accent bar, on top
-                                 # of SELESAI. Same real-window measurement.
+                                 # it. 165 measured 33px of that dead space
+                                 # (too loose); 145 measured ~13.5px (too
+                                 # tight -- read as cramped against the
+                                 # bottom corners on a real run). 152 lands
+                                 # at ~20.5px, the reported sweet spot.
+$script:HEIGHT_EXPANDED  = 235   # + Nama/Tujuan/Device + accent bar, on top
+                                 # of SELESAI. Same real-window measurement,
+                                 # same +7 delta (228 -> 235) to keep the
+                                 # gap identical in both collapsed/expanded.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default
