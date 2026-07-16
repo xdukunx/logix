@@ -1502,7 +1502,15 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
                 <Path Data="M18.36 6.64A9 9 0 1 1 5.64 6.64 M12 2 L12 12" Stroke="{TemplateBinding Foreground}"
                       StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                       Width="13" Height="13" Stretch="Uniform" Margin="0,0,7,0"/>
-                <TextBlock Text="{TemplateBinding Content}" VerticalAlignment="Center"
+                <!-- MaxWidth+TextTrimming: the armed-state label ("Tekan lagi
+                     untuk selesai") is long enough to overflow the button's
+                     ~194px width at this font/weight and get hard-clipped by
+                     the widget's own chamfered-shape Clip, found by live
+                     clicking the real widget rather than just rendering the
+                     short "SELESAI" label. 150 is comfortably under
+                     "SELESAI"'s own natural width, so it has zero effect
+                     on the normal (unarmed) state. -->
+                <TextBlock Text="{TemplateBinding Content}" VerticalAlignment="Center" MaxWidth="150" TextTrimming="CharacterEllipsis"
                            Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
               </StackPanel>
             </Border>
