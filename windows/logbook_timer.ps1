@@ -95,15 +95,25 @@ function Sync-LogbookTimerShape {
 # the XML-structural tests. These constants trade a little visual slack
 # (a message with unusually long text may run slightly tight) for being
 # simple enough to reason about and guaranteed not to misfire.
-$script:HEIGHT_COLLAPSED = 165   # status + clock + the always-visible SELESAI
+$script:HEIGHT_COLLAPSED = 145   # status + clock + the always-visible SELESAI
                                  # button (Nama/Tujuan/Device collapsed).
-                                 # Measured precisely via TransformToAncestor
-                                 # (button's true bottom edge + its own
-                                 # margin, not the coarser aggregate
-                                 # Measure() which left ~12px of unaccounted
-                                 # dead space below the button).
-$script:HEIGHT_EXPANDED  = 248   # + Nama/Tujuan/Device + accent bar, on top
-                                 # of SELESAI. Same precise measurement.
+                                 # Measured against a REAL shown Window (Show()
+                                 # + UpdateLayout(), off-screen) -- Measure()/
+                                 # Arrange() on an unshown Window silently
+                                 # no-ops (ActualHeight stays 0) and rendering
+                                 # a Border-hosted copy of window.Content
+                                 # UNDERSTATES the true size, because the
+                                 # ContentGrid stretches (default
+                                 # VerticalAlignment) to fill whatever height
+                                 # it is given, while its Auto rows still
+                                 # pack at the top -- so a too-tall window
+                                 # just shows as dead space below the last
+                                 # row, and neither offline technique caught
+                                 # it. 165 measured 33px of that dead space;
+                                 # 145 leaves ~13px (just the button's own
+                                 # 12px margin + slack).
+$script:HEIGHT_EXPANDED  = 228   # + Nama/Tujuan/Device + accent bar, on top
+                                 # of SELESAI. Same real-window measurement.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default
