@@ -57,8 +57,8 @@ $clockMain = $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Obje
 Assert ($clockMain.Text -eq '00:00') "clock starts at 00:00"
 $pulseEllipse = $timerDoc.SelectNodes("//*[local-name()='Ellipse']") | Where-Object { $_.Name -eq 'Pulse' }
 Assert ($null -ne $pulseEllipse) "pulse is an Ellipse (animated via BeginAnimation, not a text swap)"
-$shapePaths = $timerDoc.SelectNodes("//*[local-name()='Path']")
-Assert ($shapePaths.Count -eq 1) "exactly one chamfered-shape Path element"
+$shapePaths = $timerDoc.SelectNodes("//*[local-name()='Path'][@Name='ShapePath']")
+Assert ($shapePaths.Count -eq 1) "exactly one chamfered-shape Path element (SELESAI's icon glyph is also a Path, so match by name, not by count)"
 $pathData = $shapePaths[0].Data
 Assert ($pathData.StartsWith('M 20,0') -and $pathData.TrimEnd().EndsWith('Z')) "shape path data starts/ends correctly (closed geometry)"
 Assert ($timerDoc.Window.Height -eq '210') "window starts at a fixed 210 height (deterministic, not SizeToContent -- see logbook_timer.ps1's HEIGHT_* constants)"
