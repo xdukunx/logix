@@ -1,14 +1,63 @@
-# Logix
+<a id="readme-top"></a>
 
-> **Log · Track · Integrate** — a sign-in logbook for shared lab computers.
+[![CI][ci-shield]][ci-url]
+[![License: MIT][license-shield]][license-url]
+[![PII: local by default][pii-shield]][pii-url]
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PII: local by default](https://img.shields.io/badge/PII-local%20by%20default-critical.svg)](#privacy-read-this)
+<br />
+<div align="center">
+  <h3 align="center">Logix</h3>
 
-Logix records **who** used a lab computer, **how** (SSH, AnyDesk, or physically
-at the keyboard), and **when** — then turns that into attendance/usage reports.
-It was built for a shared computational-chemistry workstation at **FTMM UNAIR**
-and published as a reference you can adapt.
+  <p align="center">
+    A privacy-first sign-in logbook for shared lab computers — Log &middot; Track &middot; Integrate.
+    <br />
+    <a href="docs/GETTING_STARTED.md"><strong>Explore the docs »</strong></a>
+    <br />
+    <br />
+    <a href="docs/HOSTING.md">Host the server</a>
+    &middot;
+    <a href="https://github.com/xdukunx/logix/issues/new?labels=bug&template=bug_report.md">Report Bug</a>
+    &middot;
+    <a href="https://github.com/xdukunx/logix/issues/new?labels=enhancement&template=feature_request.md">Request Feature</a>
+  </p>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li>
+      <a href="#about-the-project">About The Project</a>
+      <ul>
+        <li><a href="#built-with">Built With</a></li>
+      </ul>
+    </li>
+    <li><a href="#privacy-read-this">Privacy (read this)</a></li>
+    <li>
+      <a href="#getting-started">Getting Started</a>
+      <ul>
+        <li><a href="#is-this-for-you">Is this for you?</a></li>
+        <li><a href="#quick-start">Quick start</a></li>
+      </ul>
+    </li>
+    <li>
+      <a href="#usage">Usage</a>
+      <ul>
+        <li><a href="#what-it-captures">What it captures</a></li>
+        <li><a href="#the-admin-dashboard-optional">The admin dashboard</a></li>
+        <li><a href="#customization">Customization</a></li>
+      </ul>
+    </li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#license">License</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="#acknowledgments">Acknowledgments</a></li>
+  </ol>
+</details>
+
+<!-- ABOUT THE PROJECT -->
+## About The Project
 
 <p align="center">
   <img src="docs/screenshots/login-screen.svg" alt="Logix admin login mockup" width="46%">
@@ -17,38 +66,56 @@ and published as a reference you can adapt.
 </p>
 <p align="center"><sub>Illustrative mockups of the optional admin dashboard — not live screenshots.</sub></p>
 
----
+Logix records **who** used a lab computer, **how** (SSH, AnyDesk, or physically
+at the keyboard), and **when** — then turns that into attendance/usage reports.
+It was built for a shared computational-chemistry workstation at **FTMM UNAIR**
+and published as a reference you can adapt.
 
-## Is this for you?
+* Works standalone on a single machine — no server, no network, nothing leaves the box.
+* Optionally scales to a whole lab with a central server, a live admin dashboard, and remote lock/message/screenshot commands (Logix Control).
+* Treats personal data (names, student IDs, IPs) as a first-class concern, not an afterthought — see [Privacy](#privacy-read-this) below.
 
-Logix works in two ways — pick one to start:
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-- **Just one computer?** Install the agent and it logs sessions **locally** to a
-  file on that machine. No server, no network, nothing leaves the box. → Start
-  with **[Quick start](#quick-start)** below.
-- **A whole lab / many computers?** Optionally run a small **central server** so
-  you can see every machine on one dashboard, download reports, and send remote
-  lock/message/screenshot commands. → See **[Hosting the server](docs/HOSTING.md)**.
+### Built With
 
+* [![Python][Python.badge]][Python-url]
+* [![FastAPI][FastAPI.badge]][FastAPI-url]
+* [![React][React.badge]][React-url]
+* [![TypeScript][TypeScript.badge]][TypeScript-url]
+* [![Vite][Vite.badge]][Vite-url]
+* [![SQLite][SQLite.badge]][SQLite-url]
+* [![PowerShell][PowerShell.badge]][PowerShell-url]
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- PRIVACY -->
 ## Privacy (read this)
 
 Logix handles personal data — names, student IDs (NIM), and IP addresses — so
 this is the most important thing to understand:
 
-- **By default, everything stays on the local computer.** Nothing is uploaded
-  unless you explicitly turn on server sync.
-- **This repository contains code only.** The database, reports, and logs are
-  git-ignored and must never be committed.
-- **If you deploy this, the collected data is your responsibility.** Tell users
-  their sessions are logged and follow your institution's data rules.
+* **By default, everything stays on the local computer.** Nothing is uploaded unless you explicitly turn on server sync.
+* **This repository contains code only.** The database, reports, and logs are git-ignored and must never be committed.
+* **If you deploy this, the collected data is your responsibility.** Tell users their sessions are logged and follow your institution's data rules.
 
-Details: [docs/PRIVACY.md](docs/PRIVACY.md) · [SECURITY.md](SECURITY.md) · [ETHICAL_USE.md](ETHICAL_USE.md).
+Details: [docs/PRIVACY.md](docs/PRIVACY.md) &middot; [SECURITY.md](SECURITY.md) &middot; [ETHICAL_USE.md](ETHICAL_USE.md).
 
-## Quick start
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-**Windows lab PC, one line** (in an elevated PowerShell — right-click
-PowerShell → "Run as Administrator"). Installs the core logger *and* the
-sign-in popup / timer widget:
+<!-- GETTING STARTED -->
+## Getting Started
+
+### Is this for you?
+
+Logix works in two ways — pick one to start:
+
+* **Just one computer?** Install the agent and it logs sessions **locally** to a file on that machine. → Start with [Quick start](#quick-start) below.
+* **A whole lab / many computers?** Optionally run a small **central server** so you can see every machine on one dashboard, download reports, and send remote lock/message/screenshot commands. → See [Hosting the server](docs/HOSTING.md).
+
+### Quick start
+
+**Windows lab PC, one line** (in an elevated PowerShell — right-click PowerShell → "Run as Administrator"). Installs the core logger *and* the sign-in popup / timer widget:
 
 ```powershell
 irm https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 | iex
@@ -77,7 +144,12 @@ python logbook_report.py     # writes an .xlsx into <data-dir>/reports
 Either installer also asks (or takes flags) to point the device at a central
 server. Full walkthrough, flags, and mass-deployment: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
-## What it captures
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- USAGE EXAMPLES -->
+## Usage
+
+### What it captures
 
 | Session type | How it's detected |
 |---|---|
@@ -94,8 +166,6 @@ local SQLite database, so re-running never double-counts a session.
   Physical popup ┘     (idempotent bridge)               (Excel: hours/user/type)
 ```
 
-## Platform support
-
 The **core** (logging + Excel reports) runs on Linux, macOS, and Windows. The
 **capture front-ends** are OS-specific by nature:
 
@@ -105,28 +175,54 @@ The **core** (logging + Excel reports) runs on Linux, macOS, and Windows. The
 | SSH login capture | ✅ | ✅ | — |
 | Physical at-keyboard sign-in popup | — | — | ✅ |
 
-## The admin dashboard (optional)
+### The admin dashboard (optional)
 
 If you run the central server, admins get a web dashboard to:
 
-- see active machines by device name, search the session log, view usage analytics;
-- send remote **lock / message / power / screenshot** commands (Logix Control) —
-  every screen capture notifies the user on the device, never silently;
-- enroll new devices with revocable per-device keys, and download Excel reports.
+* see active machines by device name, search the session log, view usage analytics;
+* send remote **lock / message / power / screenshot** commands (Logix Control) — every screen capture notifies the user on the device, never silently;
+* enroll new devices with revocable per-device keys, and download Excel reports.
 
-Setup, HTTPS (Caddy or nginx), and admin sign-in (email + password): **[docs/HOSTING.md](docs/HOSTING.md)**.
+Setup, HTTPS (Caddy or nginx), and admin sign-in (email + password): [docs/HOSTING.md](docs/HOSTING.md).
 
-## Customization
+### Customization
 
-- **Paths / DB location** are resolved in one place ([`logix/paths.py`](logix/paths.py)):
-  env var → `config.env` → OS-aware default.
-- **The sign-in popup** can be rebranded and re-fielded **without editing code**
-  via a JSON config — logo, title, colors, dropdown options, required fields.
-  Copy [`windows/logbook_config.example.json`](windows/logbook_config.example.json).
-- **Google Sheets sync** (optional) mirrors a *redacted, aggregated* view on a
-  schedule: [docs/GOING_LIVE.md](docs/GOING_LIVE.md).
+* **Paths / DB location** are resolved in one place ([`logix/paths.py`](logix/paths.py)): env var → `config.env` → OS-aware default.
+* **The sign-in popup** can be rebranded and re-fielded **without editing code** via a JSON config — logo, title, colors, dropdown options, required fields. Copy [`windows/logbook_config.example.json`](windows/logbook_config.example.json).
+* **Google Sheets sync** (optional) mirrors a *redacted, aggregated* view on a schedule: [docs/GOING_LIVE.md](docs/GOING_LIVE.md).
 
-## Development
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- ROADMAP -->
+## Roadmap
+
+- [x] Cross-platform core: logging bridge, Excel reports, one-command installers
+- [x] Central admin server + React dashboard (monitoring, devices, analytics, settings)
+- [x] Local email + password admin auth (no external OAuth dependency)
+- [x] Logix Control: remote lock / message / power / screenshot, per-device enrollment keys
+- [x] One-liner installers for both the server and the Windows agent
+- [ ] Live Google Sheets push validation against a real spreadsheet (tooling is done and unit-tested; blocked only on real credentials)
+- [ ] A native macOS/Linux GUI for physical at-keyboard capture (by decision, not currently planned — SSH already covers the POSIX side)
+
+Full detail and in-progress work: [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/AUDIT_AND_ROADMAP.md](docs/AUDIT_AND_ROADMAP.md).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- CONTRIBUTING -->
+## Contributing
+
+Contributions, bug reports, and suggestions are welcome.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+Working rules for this repo (privacy/PII handling, code conventions) live in
+[AGENTS.md](AGENTS.md) — read it before your first PR. Never commit real
+session data, database files, or filled-in `.env` copies (see
+[Privacy](#privacy-read-this)).
 
 ```bash
 python -m pytest tests/ -q     # redaction gate, upsert, server hardening
@@ -135,6 +231,52 @@ python -m pytest tests/ -q     # redaction gate, upsert, server hardening
 CI compiles the modules and runs the full test suite on Linux, macOS, and
 Windows — against a **synthetic** database only, never real data.
 
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- LICENSE -->
 ## License
 
-[MIT](LICENSE).
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- CONTACT -->
+## Contact
+
+Project Link: [https://github.com/xdukunx/logix](https://github.com/xdukunx/logix)
+
+Found a security issue? Please report it privately — see [SECURITY.md](SECURITY.md) — rather than opening a public issue.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- ACKNOWLEDGMENTS -->
+## Acknowledgments
+
+* Built for the computational-chemistry workstation at **FTMM UNAIR**
+* [Astryx design system](frontend/.claude/CLAUDE.md) — the component system the admin dashboard is built on
+* [Best-README-Template](https://github.com/othneildrew/Best-README-Template) — this README's structure
+* [Img Shields](https://shields.io) for the badges above
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- MARKDOWN LINKS & IMAGES -->
+[ci-shield]: https://img.shields.io/github/actions/workflow/status/xdukunx/logix/ci.yml?branch=main&style=for-the-badge&label=CI
+[ci-url]: https://github.com/xdukunx/logix/actions/workflows/ci.yml
+[license-shield]: https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge
+[license-url]: LICENSE
+[pii-shield]: https://img.shields.io/badge/PII-local%20by%20default-critical.svg?style=for-the-badge
+[pii-url]: #privacy-read-this
+[Python.badge]: https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white
+[Python-url]: https://www.python.org/
+[FastAPI.badge]: https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white
+[FastAPI-url]: https://fastapi.tiangolo.com/
+[React.badge]: https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB
+[React-url]: https://react.dev/
+[TypeScript.badge]: https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white
+[TypeScript-url]: https://www.typescriptlang.org/
+[Vite.badge]: https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white
+[Vite-url]: https://vitejs.dev/
+[SQLite.badge]: https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white
+[SQLite-url]: https://www.sqlite.org/
+[PowerShell.badge]: https://img.shields.io/badge/PowerShell-5391FE?style=for-the-badge&logo=powershell&logoColor=white
+[PowerShell-url]: https://learn.microsoft.com/en-us/powershell/
