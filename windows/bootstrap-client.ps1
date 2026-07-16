@@ -120,17 +120,28 @@ if ($ServerUrl -or $ServerApiKey -or $DeviceName) {
 
 # --- 4. Agent: sign-in popup, timer widget, monitor (windows\install_logbook_tasks.ps1) ---
 Say "Installing the agent (windows\install_logbook_tasks.ps1)"
-$taskArgs = @()
+# Hashtable, NOT an array -- array-splatting a bare "-SwitchName" string does
+# NOT bind it as a switch; PowerShell treats every array element as a plain
+# positional value, so "-RunNow" ended up bound to install_logbook_tasks.ps1's
+# first positional parameter ($TaskUser), which then failed inside
+# Register-ScheduledTask with "No mapping between account names and security
+# IDs was done" (0x80070534) -- a parameter-binding bug, not an account
+# problem. Hashtable splatting binds each key to its named parameter
+# correctly, switches included. Verified directly: array-splatting @("-RunNow")
+# leaves the target script's switch False and its first string parameter set
+# to the literal text "-RunNow"; hashtable splatting @{RunNow=$true} does not.
+$taskArgs = @{}
 if ($ServerUrl -and $ServerApiKey) {
-    $taskArgs += "-NonInteractive"
-    $taskArgs += @("-ServerUrl", $ServerUrl, "-ServerApiKey", $ServerApiKey)
-    if ($DeviceName) { $taskArgs += @("-DeviceName", $DeviceName) }
+    $taskArgs['NonInteractive'] = $true
+    $taskArgs['ServerUrl'] = $ServerUrl
+    $taskArgs['ServerApiKey'] = $ServerApiKey
+    if ($DeviceName) { $taskArgs['DeviceName'] = $DeviceName }
 } else {
     Warn "No -ServerUrl/-ServerApiKey given -- the interactive settings popup opens after install so you can type them in (or re-run install_logbook_tasks.ps1 -NonInteractive later)."
 }
-if ($UseWSL)         { $taskArgs += "-UseWSL" }
-if ($SkipAnyDesk)    { $taskArgs += "-SkipAnyDesk" }
-if (-not $NoRunNow)  { $taskArgs += "-RunNow" }
+if ($UseWSL)         { $taskArgs['UseWSL'] = $true }
+if ($SkipAnyDesk)    { $taskArgs['SkipAnyDesk'] = $true }
+if (-not $NoRunNow)  { $taskArgs['RunNow'] = $true }
 
 & (Join-Path $InstallSrcDir "windows\install_logbook_tasks.ps1") @taskArgs
 
