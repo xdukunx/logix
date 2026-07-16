@@ -108,10 +108,8 @@ Details: [docs/PRIVACY.md](docs/PRIVACY.md) &middot; [SECURITY.md](SECURITY.md) 
 
 ### Is this for you?
 
-Logix works in two ways — pick one to start:
-
-* **Just one computer?** Install the agent and it logs sessions **locally** to a file on that machine. → Start with [Quick start](#quick-start) below.
-* **A whole lab / many computers?** Optionally run a small **central server** so you can see every machine on one dashboard, download reports, and send remote lock/message/screenshot commands. → See [Hosting the server](docs/HOSTING.md).
+* **One computer** — install the agent below; sessions log **locally**, nothing else to set up.
+* **A whole lab** — add a [central server](docs/HOSTING.md) for one dashboard, downloadable reports, and remote lock/message/screenshot commands across every machine.
 
 ### Quick start
 
@@ -151,45 +149,33 @@ server. Full walkthrough, flags, and mass-deployment: [docs/GETTING_STARTED.md](
 
 ### What it captures
 
-| Session type | How it's detected |
-|---|---|
-| **Physical** (at the keyboard) | a Windows lock/unlock **sign-in popup** asks who's using the machine |
-| **SSH** | a shell hook logs interactive SSH logins, and closes them on logout |
-| **AnyDesk** | remote-desktop access is detected at login |
+| Session type | Detected via | Linux | macOS | Windows |
+|---|---|:---:|:---:|:---:|
+| **Physical** (at the keyboard) | sign-in popup on lock/unlock | — | — | ✅ |
+| **SSH** | shell hook, logged on login/logout | ✅ | ✅ | — |
+| **AnyDesk** | remote session detected at login | — | — | ✅ |
 
 All three write through **one idempotent bridge** (`log_physical.py`) into a
-local SQLite database, so re-running never double-counts a session.
-
-```
-  SSH login ─────┐
-  AnyDesk login ─┼──►  log_physical.py  ──►  SQLite DB  ──►  logbook_report.py
-  Physical popup ┘     (idempotent bridge)               (Excel: hours/user/type)
-```
-
-The **core** (logging + Excel reports) runs on Linux, macOS, and Windows. The
-**capture front-ends** are OS-specific by nature:
-
-| Capability | Linux | macOS | Windows |
-|---|:---:|:---:|:---:|
-| Log bridge + Excel reporting | ✅ | ✅ | ✅ |
-| SSH login capture | ✅ | ✅ | — |
-| Physical at-keyboard sign-in popup | — | — | ✅ |
+local SQLite database — re-running never double-counts a session. The
+logging bridge and Excel reports themselves run on all three OSes; only the
+capture methods above are platform-specific.
 
 ### The admin dashboard (optional)
 
-If you run the central server, admins get a web dashboard to:
+The central server adds a web dashboard: live machine status, session search,
+usage analytics, device enrollment with revocable keys, Excel report
+downloads, and remote **lock / message / power / screenshot** commands
+(Logix Control — every screenshot notifies the user, never silently).
 
-* see active machines by device name, search the session log, view usage analytics;
-* send remote **lock / message / power / screenshot** commands (Logix Control) — every screen capture notifies the user on the device, never silently;
-* enroll new devices with revocable per-device keys, and download Excel reports.
-
-Setup, HTTPS (Caddy or nginx), and admin sign-in (email + password): [docs/HOSTING.md](docs/HOSTING.md).
+Setup, HTTPS, and admin sign-in: [docs/HOSTING.md](docs/HOSTING.md).
 
 ### Customization
 
-* **Paths / DB location** are resolved in one place ([`logix/paths.py`](logix/paths.py)): env var → `config.env` → OS-aware default.
-* **The sign-in popup** can be rebranded and re-fielded **without editing code** via a JSON config — logo, title, colors, dropdown options, required fields. Copy [`windows/logbook_config.example.json`](windows/logbook_config.example.json).
-* **Google Sheets sync** (optional) mirrors a *redacted, aggregated* view on a schedule: [docs/GOING_LIVE.md](docs/GOING_LIVE.md).
+| What | How |
+|---|---|
+| Paths / DB location | [`logix/paths.py`](logix/paths.py) — env var → `config.env` → OS default |
+| Sign-in popup branding & fields | JSON config, no code edits — copy [`windows/logbook_config.example.json`](windows/logbook_config.example.json) |
+| Google Sheets sync (optional) | redacted, aggregated, on a schedule — [docs/GOING_LIVE.md](docs/GOING_LIVE.md) |
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -219,17 +205,16 @@ Contributions, bug reports, and suggestions are welcome.
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-Working rules for this repo (privacy/PII handling, code conventions) live in
-[AGENTS.md](AGENTS.md) — read it before your first PR. Never commit real
-session data, database files, or filled-in `.env` copies (see
+Read [AGENTS.md](AGENTS.md) first — repo conventions and PII handling rules.
+Never commit real session data, DB files, or a filled-in `.env` (see
 [Privacy](#privacy-read-this)).
 
 ```bash
 python -m pytest tests/ -q     # redaction gate, upsert, server hardening
 ```
 
-CI compiles the modules and runs the full test suite on Linux, macOS, and
-Windows — against a **synthetic** database only, never real data.
+CI runs this same suite on Linux, macOS, and Windows against a synthetic
+database only — never real data.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
