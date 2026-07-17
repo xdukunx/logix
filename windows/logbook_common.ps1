@@ -997,11 +997,22 @@ function Build-LogbookPopupXaml($cfg) {
     $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
     $purposeItems = (@($cfg.purposes)    | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
 
+    # ShowInTaskbar="True", not False: confirmed live that a Topmost,
+    # ShowInTaskbar=False, WindowStyle=None window spawned by the Task
+    # Scheduler-launched monitor process never actually renders (verified
+    # with a real Win32 EnumWindows scan, not just Get-Process -- the same
+    # window shown directly, outside of Task Scheduler, renders fine). The
+    # exact Windows mechanism wasn't pinned down further (candidates: the
+    # ShowInTaskbar=False/"tool window" style itself, or Topmost needing
+    # foreground rights a Task-Scheduler-launched process may lack) --
+    # ShowInTaskbar=True is the safer, lower-risk direction to try first.
+    # Same change applied to every other fullscreen/topmost window this
+    # client shows (welcome-back, lock, emergency overlay, timer widget).
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="False" Background="$surface"
+        Topmost="True" ShowInTaskbar="True" Background="$surface"
         FontFamily="Segoe UI">
   <Window.Resources>
     <SolidColorBrush x:Key="PrussianBlue" Color="$primary" />
@@ -1197,7 +1208,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="False" Background="$surface" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="Segoe UI">
   <Grid>
     <Image Name="BgImage" Stretch="Fill" Opacity="0.88"><Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect></Image>
     <Rectangle Fill="$overlay" />
@@ -1257,7 +1268,7 @@ function Build-LogbookEmergencyOverlayXaml($cfg) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="#CC070C15" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="#CC070C15" FontFamily="Segoe UI">
   <Grid>
     <Border Width="440" CornerRadius="16" Background="$elevated" BorderBrush="$red" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30" >
@@ -1308,7 +1319,7 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="False" Background="$surface" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="Segoe UI">
   <Grid>
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
       <Image Name="MascotImage" Height="96" Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,10"/>
@@ -1421,7 +1432,7 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Width="230" Height="210" WindowStyle="None" ResizeMode="NoResize"
-        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
+        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
   <Grid>
     <Path Name="ShapePath" Margin="10" Fill="$widget" Stroke="$border" StrokeThickness="1.3" Data="$seedShapeData">
       <Path.Effect>
