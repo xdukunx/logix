@@ -78,9 +78,12 @@ try {
     $taskUserSid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUserSid
+    # Mirrors install_logbook_tasks.ps1: 30-min self-heal trigger, no
+    # execution time limit, auto-restart on failure -- see the comments there.
+    $healTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Days 3650)
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUserSid -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 30)
-    Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Force | Out-Null
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger @($trigger, $healTrigger) -Principal $taskPrincipal -Settings $settings -Force | Out-Null
     Write-Host '  monitor task re-registered at RunLevel Limited' -ForegroundColor Green
 } catch { Write-Host "  task re-registration failed: $($_.Exception.Message)" -ForegroundColor Red }
 

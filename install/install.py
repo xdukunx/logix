@@ -75,7 +75,15 @@ def starter_config(dest: Path) -> str:
 # Same idiom as install/setup_sync.py's update_config(), duplicated rather
 # than shared -- each install/*.py script is a self-contained stdlib file.
 # --------------------------------------------------------------------------- #
-def update_config(cfg_path: Path, updates: dict[str, str]) -> None:
+def update_config(cfg_path: Path, updates: dict[str, str], clears: set[str] | None = None) -> None:
+    """Merge key=value updates into config.env. Blank values are skipped
+    (not written) UNLESS the key is listed in `clears`, in which case any
+    existing line for it is REMOVED. The distinction matters on re-install
+    over an old config: answering blank to "Central server URL (blank =
+    fully local, no sync)" must actually strip a stale URL left by an
+    earlier install, or the agent keeps trying to reach a dead server
+    forever (2s timeout on every popup open + a log line every heartbeat)."""
+    clears = clears or set()
     lines = cfg_path.read_text(encoding="utf-8").splitlines() if cfg_path.exists() else []
     remaining = {k: v for k, v in updates.items() if v}  # never write blank values
     out: list[str] = []
@@ -84,6 +92,8 @@ def update_config(cfg_path: Path, updates: dict[str, str]) -> None:
         if m and m.group(1) in remaining:
             key = m.group(1)
             out.append(f"{key}={remaining.pop(key)}")
+        elif m and m.group(1) in clears and not updates.get(m.group(1)):
+            continue  # explicit blank answer: drop the stale line entirely
         else:
             out.append(line)
     for key, val in remaining.items():
@@ -252,12 +262,16 @@ def main(argv: list[str] | None = None) -> int:
                 server_api_key = prompt("Shared server API key (blank if the server doesn't require one)", ns.server_api_key)
         privacy_mode = prompt_privacy_mode(ns.privacy_mode)
 
+    # Interactive blank = an explicit "fully local" answer -> clear any stale
+    # server URL/key a previous install left behind. Non-interactive blank
+    # just means "not specified on the command line" -> leave config as-is.
+    clears = {"LOGIX_SERVER_URL", "LOGIX_SERVER_API_KEY"} if (not ns.non_interactive and sys.stdin.isatty()) else set()
     update_config(cfg, {
         "LOGIX_DEVICE_NAME": device_name,
         "LOGIX_SERVER_URL": server_url,
         "LOGIX_SERVER_API_KEY": server_api_key,
         "LOGIX_PRIVACY_MODE": privacy_mode,
-    })
+    }, clears=clears)
     print(f"  updated {cfg.name}")
 
     if server_url and enroll_code:

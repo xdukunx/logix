@@ -3,19 +3,24 @@ $ErrorActionPreference = 'Stop'
 . 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 
-# Assume unlocked at monitor start (Task Scheduler's AtLogOn trigger only
-# fires into an interactive, unlocked session) -- a flag left over from
-# before a reboot would otherwise wrongly suppress idle-timeout on a brand
-# new, actively-used session.
-$Global:LockedFlagPath = Join-Path $Global:StateDir 'workstation_locked.flag'
-Remove-Item $Global:LockedFlagPath -Force -ErrorAction SilentlyContinue
-
 $created = $false
 $mutex = New-Object System.Threading.Mutex($true, 'Global\MindLabReportLogbookMonitor', [ref]$created)
 if (-not $created) {
     Write-LogbookInfo 'Monitor already running; exiting duplicate instance.'
     exit 0
 }
+
+# Assume unlocked at monitor start (Task Scheduler's AtLogOn trigger only
+# fires into an interactive, unlocked session) -- a flag left over from
+# before a reboot would otherwise wrongly suppress idle-timeout on a brand
+# new, actively-used session. Deliberately AFTER the mutex gate above: the
+# self-heal trigger (install_logbook_tasks.ps1) re-fires this script every
+# 30 minutes while a monitor is already running, and a duplicate instance
+# must exit without touching shared state -- clearing the flag here while
+# the real monitor holds it during a lock would re-enable idle-timeout on
+# a legitimately locked session.
+$Global:LockedFlagPath = Join-Path $Global:StateDir 'workstation_locked.flag'
+Remove-Item $Global:LockedFlagPath -Force -ErrorAction SilentlyContinue
 
 Write-LogbookInfo "Monitor started. User=$env:USERNAME PID=$PID"
 

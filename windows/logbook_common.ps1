@@ -18,6 +18,15 @@ function Write-LogbookError {
     param([string]$Message)
     try {
         New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
+        # Size-capped with a single .old rotation: a workstation whose
+        # configured server is unreachable logs a heartbeat failure every
+        # ~5 seconds, which unbounded would grow this file by hundreds of
+        # MB per year on a machine nobody looks at. 1 MB current + 1 MB
+        # .old keeps months of context while bounding disk use at ~2 MB.
+        $item = Get-Item -LiteralPath $Global:ErrorLog -ErrorAction SilentlyContinue
+        if ($item -and $item.Length -gt 1MB) {
+            Move-Item -LiteralPath $Global:ErrorLog -Destination "$Global:ErrorLog.old" -Force -ErrorAction SilentlyContinue
+        }
         "$(Get-Date -Format o) $Message" | Out-File -FilePath $Global:ErrorLog -Append -Encoding UTF8
     } catch {}
 }

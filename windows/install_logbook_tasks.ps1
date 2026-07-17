@@ -193,6 +193,18 @@ try {
 
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
+# Self-heal trigger: everything (popup on unlock, heartbeats, remote
+# commands) depends on the resident monitor, and a dead monitor previously
+# stayed dead until the next logon -- observed in the field as "no popup or
+# timer after lock/unlock" right after an otherwise-successful install (the
+# monitor had exited with 0xC000013A/terminated within minutes; root cause
+# of that one exit was never pinned down, so the durable fix is surviving
+# ANY death). This re-fires the script every 30 minutes indefinitely; while
+# a monitor is alive, Task Scheduler's default MultipleInstances=IgnoreNew
+# means the firing is a no-op (and the monitor's own mutex is a second
+# guard against e.g. the HKCU Run fallback racing it), so the only effect
+# is a dead monitor coming back within <=30 minutes.
+$healTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Days 3650)
 # RunLevel Limited (NOT Highest): the monitor and everything it spawns (popup,
 # timer) must run as the plain interactive user so the state files they create
 # are user-owned and therefore user-deletable. Running elevated made
@@ -202,9 +214,14 @@ $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
 # only privileged thing the popup does, gating Task Manager, already works
 # unelevated via Grant-LogbookTaskMgrGateAccess above.
 $principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Days 30)
+# ExecutionTimeLimit 0 = unlimited. The old 30-day limit meant Task
+# Scheduler force-killed the monitor after 30 days on a workstation that
+# stays logged in for months, silently disabling the sign-in popup until
+# the next logon. RestartCount/RestartInterval additionally restart the
+# task automatically if the monitor process dies abnormally.
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 try { Unregister-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
-Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger @($trigger, $healTrigger) -Principal $principal -Settings $settings -Force | Out-Null
 
 # HKCU Run is a fallback if Task Scheduler policy does not fire.
 try {
