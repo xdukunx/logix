@@ -355,6 +355,83 @@ $timer.Add_Tick({
     }
 })
 
+# --- Entrance + center-to-dock glide -----------------------------------------
+# The widget takes the stage in the exact center of the primary screen, fades
+# and scales in, ticks there for a beat, then glides smoothly to its resting
+# dock at the top-left corner. Kept entirely inside this timer process (rather
+# than split across the sign-in popup) so the sequence plays reliably even
+# though the popup is a separate, already-fading process by the time this
+# window renders. WorkArea is the primary screen minus the taskbar, in the same
+# device-independent units as Window.Left/Top.
+$script:rootVisual = $window.FindName('RootVisual')
+$script:rootScale  = if ($script:rootVisual) { $script:rootVisual.RenderTransform } else { $null }
+$work = [System.Windows.SystemParameters]::WorkArea
+$script:dockLeft   = $work.Left + 18
+$script:dockTop    = $work.Top + 18
+$script:centerLeft = $work.Left + (($work.Width  - $window.Width)  / 2.0)
+$script:centerTop  = $work.Top  + (($work.Height - $window.Height) / 2.0)
+# Start centered, overriding the XAML's docked Left/Top, so the very first
+# paint is already in the middle -- no visible jump from the corner.
+$window.Left = $script:centerLeft
+$window.Top  = $script:centerTop
+
+$script:slideStep  = 0
+$script:slideSteps = 44                        # ~0.72s at ~60fps
+$script:slideTimer = New-Object Windows.Threading.DispatcherTimer
+$script:slideTimer.Interval = [TimeSpan]::FromMilliseconds(16)
+$script:slideTimer.Add_Tick({
+    $script:slideStep += 1
+    $t = $script:slideStep / [double]$script:slideSteps
+    if ($t -ge 1.0) {
+        $window.Left = $script:dockLeft
+        $window.Top  = $script:dockTop
+        $script:slideTimer.Stop()
+        return
+    }
+    # Ease-in-out cubic: eases away from center, eases into the dock -- reads
+    # as a deliberate, premium move rather than a linear slide.
+    $eased = if ($t -lt 0.5) { 4.0 * $t * $t * $t } else { 1.0 - [Math]::Pow((-2.0 * $t + 2.0), 3) / 2.0 }
+    $window.Left = $script:centerLeft + ($script:dockLeft - $script:centerLeft) * $eased
+    $window.Top  = $script:centerTop  + ($script:dockTop  - $script:centerTop)  * $eased
+})
+
+# Dwell centered (clock already ticking) before the glide begins.
+$script:dwellTimer = New-Object Windows.Threading.DispatcherTimer
+$script:dwellTimer.Interval = [TimeSpan]::FromMilliseconds(850)
+$script:dwellTimer.Add_Tick({
+    $script:dwellTimer.Stop()
+    $script:slideStep = 0
+    $script:slideTimer.Start()
+})
+
+# Loaded (fires before the first paint) drives the fade+scale entrance and then
+# arms the dwell timer. Guard flag: Loaded can be raised again if the window is
+# ever re-parented, and the entrance should play exactly once.
+$script:entranceDone = $false
+$window.Add_Loaded({
+    if ($script:entranceDone) { return }
+    $script:entranceDone = $true
+    try {
+        if ($script:rootVisual) {
+            $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds(340))
+            $ef = New-Object System.Windows.Media.Animation.CubicEase; $ef.EasingMode = 'EaseOut'
+            $fade.EasingFunction = $ef
+            $script:rootVisual.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
+        }
+        if ($script:rootScale) {
+            # 0.92 -> 1.0 with a plain ease-out (no overshoot, so the shadow
+            # never spills past the transparent window bounds and clips).
+            $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.92, 1.0, [TimeSpan]::FromMilliseconds(430))
+            $ep = New-Object System.Windows.Media.Animation.CubicEase; $ep.EasingMode = 'EaseOut'
+            $pop.EasingFunction = $ep
+            $script:rootScale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $pop)
+            $script:rootScale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $pop)
+        }
+    } catch { Write-LogbookError "Timer entrance animation failed: $($_.Exception.Message)" }
+    $script:dwellTimer.Start()
+})
+# -----------------------------------------------------------------------------
+
 # A message sent just before this process finished launching would
 # otherwise be missed until the first tick a second later -- check once
 # immediately too.

@@ -88,6 +88,39 @@ function New-BlurredBackgroundImage {
     }
 }
 
+# Fade the fullscreen sign-in form out, then close, so the handoff to the
+# centered timer widget reads as one smooth motion instead of a hard cut. The
+# caller must have already set its close guard ($script:submitted /
+# $script:fpChoice) so the window's Closing handler lets Close() through when
+# the fade completes. Animates the window's CONTENT (a Grid), not the Window
+# itself: Window.Opacity only takes effect with AllowsTransparency, which these
+# forms don't set, whereas a child UIElement's Opacity always animates. Falls
+# back to an immediate close if anything goes wrong -- never leaves the form
+# stuck on screen.
+function Invoke-LogbookFadeClose($win) {
+    try {
+        $root = $win.Content
+        if (-not $root) { $win.Close(); return }
+        $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, [TimeSpan]::FromMilliseconds(300))
+        $ez = New-Object System.Windows.Media.Animation.CubicEase; $ez.EasingMode = 'EaseIn'
+        $fade.EasingFunction = $ez
+        $fade.Add_Completed({ try { $win.Close() } catch {} })
+        $root.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
+    } catch {
+        try { $win.Close() } catch {}
+    }
+}
+
+# Cached across the fast path -> full form transition. Clicking "Bukan saya /
+# ganti data" used to rebuild the full form AND recapture a fresh fullscreen
+# blurred screenshot (New-BlurredBackgroundImage: CopyFromScreen + PNG
+# encode/decode, a few hundred ms of blocking work) -- the visible lag on that
+# button. The fast path already captured an identical desktop screenshot, so we
+# reuse the frozen bitmap (safe to share across windows once Frozen) and skip
+# the second capture, making the switch feel instant.
+$script:cachedBg = $null
+$script:cachedMascot = $null
+
 $sessionInfo = Get-LogbookSessionType
 $detectedSessionType = [string]$sessionInfo[0]
 $detectedAnyDesk = [int]$sessionInfo[1]
@@ -143,7 +176,7 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
             $fpWindow.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
             $fpWindow.Topmost = $true
             $fpBg = New-BlurredBackgroundImage
-            if ($fpBg) { $fpWindow.FindName('BgImage').Source = $fpBg }
+            if ($fpBg) { $fpWindow.FindName('BgImage').Source = $fpBg; $script:cachedBg = $fpBg }
             $fpLogo = [string]$cfg.branding.logoPath
             if (Test-Path $fpLogo) {
                 try {
@@ -151,6 +184,7 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
                     $m.BeginInit(); $m.UriSource = New-Object System.Uri($fpLogo); $m.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $m.EndInit(); $m.Freeze()
                     $fpWindow.FindName('MascotImage').Source = $m
                     $fpWindow.FindName('MascotImage').Visibility = 'Visible'
+                    $script:cachedMascot = $m
                 } catch {}
             }
             $script:fpChoice = 'pending'
@@ -163,13 +197,20 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
                     Invoke-LogbookStartSession -Nama ([string]$fpProfile.nama) -Nim ([string]$fpProfile.nim) -Access $detectedSessionType -Tujuan ([string]$fpProfile.tujuan) -Keterangan $ket | Out-Null
                 } catch { Write-LogbookError "Fast-path start failed: $($_.Exception.Message)" }
                 $script:fpChoice = 'resumed'
-                $fpWindow.Close()
+                # Fade the form out as the timer takes over -- resume path gets
+                # the same smooth handoff as a fresh sign-in.
+                Invoke-LogbookFadeClose $fpWindow
             })
+            # "Bukan saya / ganti data": close instantly (no fade) and fall
+            # through to the full form, which now reuses the cached background
+            # so it appears without the old recapture lag.
             $fpWindow.FindName('ChangeBtn').Add_Click({ $script:fpChoice = 'form'; $fpWindow.Close() })
             try {
                 Set-TaskManagerDisabled -Disabled $true
+                Enable-LogbookKeyboardLockdown
                 [void]$fpWindow.ShowDialog()
             } finally {
+                Disable-LogbookKeyboardLockdown
                 Set-TaskManagerDisabled -Disabled $false
             }
             if ($script:fpChoice -eq 'resumed') { exit 0 }
@@ -203,14 +244,20 @@ $window.Add_StateChanged({
 $window.Topmost = $true
 $window.Activate() | Out-Null
 
-$bg = New-BlurredBackgroundImage
+# Reuse the fast path's frozen screenshot when present (instant "ganti data"
+# switch); only capture a fresh one when arriving at the full form directly.
+$bg = if ($script:cachedBg) { $script:cachedBg } else { New-BlurredBackgroundImage }
 if ($bg -ne $null) { $window.FindName('BgImage').Source = $bg }
 # Mascot hero: load branding.logoPath (the mascot PNG the installer lays down
 # at C:\Program Files\Logix\logo.png) into MascotImage above the wordmark. The
 # LogoText wordmark stays visible beneath it, so a missing/broken image just
-# leaves a clean wordmark-only header.
+# leaves a clean wordmark-only header. Reuse the fast path's frozen copy if we
+# already loaded it.
 $logoPath = [string]$cfg.branding.logoPath
-if (Test-Path $logoPath) {
+if ($script:cachedMascot) {
+    $window.FindName('MascotImage').Source = $script:cachedMascot
+    $window.FindName('MascotImage').Visibility = 'Visible'
+} elseif (Test-Path $logoPath) {
     try {
         $mascot = New-Object System.Windows.Media.Imaging.BitmapImage
         $mascot.BeginInit(); $mascot.UriSource = New-Object System.Uri($logoPath); $mascot.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad; $mascot.EndInit(); $mascot.Freeze()
@@ -383,7 +430,9 @@ $btn.Add_Click({
         $btn.Content = 'Menyimpan...'
         Invoke-LogbookStartSession -Nama $nama.Text -Nim $nim.Text -Access (Get-ComboText $access) -Tujuan (Get-ComboText $tujuan) -Keterangan $ket.Text | Out-Null
         $script:submitted = $true
-        $window.Close()
+        # Session is started and the timer process is launching; fade the form
+        # out so it dissolves as the timer appears centered on screen.
+        Invoke-LogbookFadeClose $window
     } catch {
         Write-LogbookError "Submit failed but form released: $($_.Exception.Message)"
         $script:submitted = $true
@@ -399,8 +448,12 @@ $btn.Add_Click({
 # unhandled exception that unwinds out of ShowDialog().
 try {
     Set-TaskManagerDisabled -Disabled $true
+    # Kiosk lockdown while the form is up (skipped in TestMode so a tester is
+    # never trapped). Always released in the finally, whatever happens.
+    if (-not $TestMode) { Enable-LogbookKeyboardLockdown }
     $nama.Focus() | Out-Null
     [void]$window.ShowDialog()
 } finally {
+    Disable-LogbookKeyboardLockdown
     Set-TaskManagerDisabled -Disabled $false
 }

@@ -303,6 +303,138 @@ function Set-TaskManagerDisabled {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Kiosk keyboard lockdown for the sign-in form. A WH_KEYBOARD_LL low-level
+# hook that swallows the window-management chords a user could otherwise use
+# to escape the fullscreen sign-in prompt before starting a session:
+#   Win (either) + any key   Win+Tab (Task View), Win+D, Win+E, Win+R, and
+#                            the bare Start menu.
+#   Alt + Tab                classic window switch.
+#   Alt + Esc / Ctrl + Esc   cycle windows / open Start.
+#   Alt + F4 / Escape        close / dismiss (the form's own KeyDown also
+#                            eats these once focused; the hook covers the
+#                            pre-focus window too).
+# It deliberately does NOT touch Ctrl+Alt+Del: the Secure Attention Sequence
+# is enforced by the OS in kernel mode and is unblockable from user mode by
+# design -- the Task Manager gate (Set-TaskManagerDisabled) is the paired
+# mitigation for that path. Pairs exactly like that gate: installed right
+# before ShowDialog and ALWAYS removed in a finally, so a crash or force-kill
+# can never leave the keyboard permanently trapped.
+#
+# The hook proc lives in a compiled C# type (not a PowerShell delegate): the
+# callback is held in a static field so the GC can never collect it mid-hook
+# (a classic cause of a hard crash), and the low-level hook is called back on
+# THIS thread -- the WPF Dispatcher message loop that ShowDialog runs pumps
+# it, so no extra message loop is needed.
+$script:LogixKioskHookType = $null
+function Initialize-LogbookKioskHookType {
+    if ($script:LogixKioskHookType) { return $true }
+    if ('LogixKioskHook' -as [type]) { $script:LogixKioskHookType = [LogixKioskHook]; return $true }
+    $src = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class LogixKioskHook {
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_SYSKEYDOWN = 0x0104;
+    private const int VK_TAB = 0x09;
+    private const int VK_ESCAPE = 0x1B;
+    private const int VK_LWIN = 0x5B;
+    private const int VK_RWIN = 0x5C;
+    private const int VK_F4 = 0x73;
+    private const int VK_CONTROL = 0x11;
+    private const int VK_MENU = 0x12;   // Alt
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KBDLLHOOKSTRUCT {
+        public uint vkCode; public uint scanCode; public uint flags; public uint time; public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    private static IntPtr _hook = IntPtr.Zero;
+    // Rooted in a static field so it is never garbage-collected while installed.
+    private static readonly LowLevelKeyboardProc _proc = HookCallback;
+
+    public static bool Install() {
+        if (_hook != IntPtr.Zero) return true;
+        _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(null), 0);
+        return _hook != IntPtr.Zero;
+    }
+
+    public static void Uninstall() {
+        if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; }
+    }
+
+    private static bool Down(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            int msg = wParam.ToInt32();
+            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+                KBDLLHOOKSTRUCT kb = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
+                int vk = (int)kb.vkCode;
+                bool alt = Down(VK_MENU);
+                bool ctrl = Down(VK_CONTROL);
+                bool win = Down(VK_LWIN) || Down(VK_RWIN);
+                if (vk == VK_LWIN || vk == VK_RWIN) return (IntPtr)1;   // any Win chord
+                if (win) return (IntPtr)1;
+                if (alt && vk == VK_TAB) return (IntPtr)1;              // Alt+Tab
+                if (alt && vk == VK_ESCAPE) return (IntPtr)1;           // Alt+Esc
+                if (ctrl && vk == VK_ESCAPE) return (IntPtr)1;          // Ctrl+Esc
+                if (alt && vk == VK_F4) return (IntPtr)1;               // Alt+F4
+                if (vk == VK_ESCAPE) return (IntPtr)1;                  // bare Escape
+            }
+        }
+        return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+}
+'@
+    try {
+        Add-Type -TypeDefinition $src -Language CSharp -ErrorAction Stop
+        $script:LogixKioskHookType = [LogixKioskHook]
+        return $true
+    } catch {
+        Write-LogbookError "Kiosk hook compile failed (lockdown disabled, form still works): $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Enable-LogbookKeyboardLockdown {
+    try {
+        if (-not (Initialize-LogbookKioskHookType)) { return $false }
+        $ok = [LogixKioskHook]::Install()
+        if ($ok) { Write-LogbookInfo 'Kiosk keyboard lockdown enabled.' }
+        else { Write-LogbookError 'Kiosk keyboard lockdown: SetWindowsHookEx returned null (continuing without it).' }
+        return $ok
+    } catch {
+        Write-LogbookError "Enable-LogbookKeyboardLockdown failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Disable-LogbookKeyboardLockdown {
+    # Idempotent and never throws -- this is the safety valve that guarantees
+    # the keyboard is released even if the caller hit an exception.
+    try {
+        if ('LogixKioskHook' -as [type]) { [LogixKioskHook]::Uninstall() }
+    } catch {
+        Write-LogbookError "Disable-LogbookKeyboardLockdown failed: $($_.Exception.Message)"
+    }
+}
+
 function Start-LogbookTimer {
     param([string]$SessionId = '')
     try {
@@ -1520,7 +1652,14 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Width="230" Height="210" WindowStyle="None" ResizeMode="NoResize"
         Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
-  <Grid>
+  <Grid Name="RootVisual" RenderTransformOrigin="0.5,0.5">
+    <Grid.RenderTransform>
+      <!-- Scaled/faded on entrance by logbook_timer.ps1 for the center-stage
+           reveal before the widget glides to its top-left dock. Origin 0.5,0.5
+           so it grows from its own center. Default 1,1 keeps the widget fully
+           visible if the entrance animation never runs. -->
+      <ScaleTransform ScaleX="1" ScaleY="1"/>
+    </Grid.RenderTransform>
     <Path Name="ShapePath" Margin="10" Fill="$widget" Stroke="$border" StrokeThickness="1.3" Data="$seedShapeData">
       <Path.Effect>
         <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.55" Color="#070C15" />
