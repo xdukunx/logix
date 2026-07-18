@@ -88,27 +88,109 @@ function New-BlurredBackgroundImage {
     }
 }
 
-# Fade the fullscreen sign-in form out, then close, so the handoff to the
-# centered timer widget reads as one smooth motion instead of a hard cut. The
-# caller must have already set its close guard ($script:submitted /
-# $script:fpChoice) so the window's Closing handler lets Close() through when
-# the fade completes. Animates the window's CONTENT (a Grid), not the Window
-# itself: Window.Opacity only takes effect with AllowsTransparency, which these
-# forms don't set, whereas a child UIElement's Opacity always animates. Falls
-# back to an immediate close if anything goes wrong -- never leaves the form
-# stuck on screen.
-function Invoke-LogbookFadeClose($win) {
+# Collapses the fullscreen sign-in form down to a point at the exact SCREEN
+# CENTER while fading it out, so it reads as the form COLLAPSING INTO the
+# timer widget that appears at that same spot next -- not two unrelated
+# animations (a form disappearing somewhere, then an unrelated box popping up
+# elsewhere). Mirrors the timer's own entrance (small -> full scale, also
+# centered) so the two halves of the handoff, in two different windows, read
+# as one continuous shrink-then-grow motion. RenderTransformOrigin is
+# (0.5,0.5) in the WINDOW's own coordinate space, and this window is
+# fullscreen, so "shrink toward 0.5,0.5" is "shrink toward the exact center of
+# the screen" -- the same point Start-LogbookTimer's new process centers
+# itself on.
+#
+# Animates the WINDOW's own Opacity/RenderTransform (not just its Content):
+# the window's XAML now sets AllowsTransparency="True" specifically so this
+# works. An earlier version animated only $win.Content's Opacity, leaving the
+# Window's own opaque $surface-colored Background fully visible underneath
+# for the animation's duration -- a solid near-black fullscreen panel that
+# LOOKED stuck (and, paired with the kiosk keyboard hook, genuinely COULDN'T
+# be Alt-Tabbed away from) whenever the close-on-Completed path didn't fire.
+#
+# The close itself does NOT depend on the animation or its Completed event at
+# all -- it is a plain DispatcherTimer fired a little after the animation's
+# own duration. This is deliberate: a WPF DoubleAnimation's Completed event
+# can go unheard for reasons that have nothing to do with whether the
+# animation itself is running fine (GC of the delegate, an exception earlier
+# in the handler chain, a dispatcher priority mismatch) -- and unlike a timer,
+# there is no way to add a "close after N ms no matter what" fallback AROUND
+# an event that might just never fire. A fullscreen, Topmost, kiosk-locked
+# window that fails to close is far worse than a purely cosmetic fade glitch,
+# so the guaranteed-fire path is the one thing that is allowed to be
+# load-bearing here.
+function Invoke-LogbookFadeClose($win, [double]$DurationMs = 380) {
     try {
-        $root = $win.Content
-        if (-not $root) { $win.Close(); return }
-        $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, [TimeSpan]::FromMilliseconds(300))
-        $ez = New-Object System.Windows.Media.Animation.CubicEase; $ez.EasingMode = 'EaseIn'
-        $fade.EasingFunction = $ez
-        $fade.Add_Completed({ try { $win.Close() } catch {} })
-        $root.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
+        $win.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 0.5)
+        $scale = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+        $win.RenderTransform = $scale
+        $dur = [TimeSpan]::FromMilliseconds($DurationMs)
+        $ease = New-Object System.Windows.Media.Animation.CubicEase; $ease.EasingMode = 'EaseIn'
+
+        $scaleAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.04, $dur)
+        $scaleAnim.EasingFunction = $ease
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $scaleAnim)
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $scaleAnim)
+
+        $fadeAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, $dur)
+        $fadeAnim.EasingFunction = $ease
+        $win.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fadeAnim)
     } catch {
-        try { $win.Close() } catch {}
+        Write-LogbookError "Fade-close animation setup failed (closing on the timer fallback regardless): $($_.Exception.Message)"
     }
+    # GetNewClosure(): a bare scriptblock referencing a FUNCTION PARAMETER
+    # (not a $script:-scope variable) does not capture it -- by the time the
+    # Dispatcher fires this Tick, Invoke-LogbookFadeClose has already
+    # returned and $win's local scope is gone, so an uncaptured reference
+    # resolves to $null and $null.Close() throws, silently swallowed by the
+    # try/catch below. That silent-null-close was the actual root cause of
+    # the stuck-window bug this function replaced. GetNewClosure() snapshots
+    # $win's current value into the scriptblock's own bound scope so it
+    # survives the parent function returning.
+    $closeTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $closeTimer.Interval = [TimeSpan]::FromMilliseconds($DurationMs + 90)
+    $closeTimer.Add_Tick({
+        $closeTimer.Stop()
+        try { $win.Close() } catch { Write-LogbookError "Fade-close fallback Close() failed: $($_.Exception.Message)" }
+    }.GetNewClosure())
+    $closeTimer.Start()
+}
+
+# Waits for the newly-spawned timer process (a SEPARATE process -- see
+# Start-LogbookTimer in logbook_common.ps1) to signal it has actually reached
+# the screen, THEN starts this form's collapse-close -- instead of closing on
+# a fixed schedule unrelated to how long the timer's own cold start (new
+# powershell.exe process, WPF/System.Xaml assembly load, XAML parse) actually
+# takes. That fixed-schedule version was the real cause of the handoff not
+# reading as smooth: on a slow/cold launch the form would already be gone
+# before the timer had rendered anything, leaving a bare-desktop gap between
+# the two windows' animations. logbook_timer.ps1 writes StateDir's
+# timer_ready.flag the moment its own window reaches Add_Loaded (about to
+# render); Start-LogbookTimer clears any stale flag right before spawning so
+# a leftover from a PREVIOUS timer can't be misread as this one's signal.
+# Polls via a DispatcherTimer (not Start-Sleep, which would freeze the WPF
+# message loop and the "Menyimpan..." button along with it). Falls back to
+# closing anyway after $MaxWaitMs so a timer that never starts, or never
+# reaches Loaded, can't leave this fullscreen kiosk-locked form stuck.
+# 1800ms default: measured cold-start latency (new conhost+powershell.exe
+# process, WPF/System.Xaml assembly load, XAML parse, first Loaded) on real
+# hardware came in around 1.0-1.3s -- an earlier, tighter 900ms default would
+# have timed out and closed the form BEFORE the timer was actually ready on
+# a cold launch, defeating the whole point of this handshake.
+function Invoke-LogbookHandoffToTimer($win, [int]$MaxWaitMs = 1800) {
+    $flagPath = Join-Path $Global:StateDir 'timer_ready.flag'
+    $deadline = (Get-Date).AddMilliseconds($MaxWaitMs)
+    $poll = New-Object System.Windows.Threading.DispatcherTimer
+    $poll.Interval = [TimeSpan]::FromMilliseconds(20)
+    $poll.Add_Tick({
+        $ready = Test-Path $flagPath
+        if ($ready -or (Get-Date) -ge $deadline) {
+            $poll.Stop()
+            if ($ready) { Remove-Item $flagPath -Force -ErrorAction SilentlyContinue }
+            Invoke-LogbookFadeClose $win
+        }
+    }.GetNewClosure())
+    $poll.Start()
 }
 
 # Cached across the fast path -> full form transition. Clicking "Bukan saya /
@@ -154,9 +236,20 @@ function Invoke-LogbookStartSession {
     # leaves the machine except via the normal START log).
     ([ordered]@{ nama = $obj.nama; nim = $obj.nim; tujuan = $obj.tujuan; keterangan = $obj.keterangan } |
         ConvertTo-Json -Depth 3) | Out-File -FilePath $profileFile -Encoding UTF8 -Force
+
+    # Spawn the timer process as early as possible -- BEFORE the WSL/Python
+    # logging round-trip below, which can easily run tens to hundreds of ms
+    # (interpreter startup + subprocess overhead). Start-Process returns
+    # immediately without waiting for the child, so moving this up costs
+    # nothing here; it just gives the timer's own cold start (new process,
+    # WPF/XAML load) a head start that overlaps with the logging call instead
+    # of stacking after it. logbook_timer.ps1 only needs session.json to
+    # exist with a matching session_id, both already true at this point --
+    # nothing below this line affects it.
+    Start-LogbookTimer -SessionId $sid | Out-Null
+
     $logged = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan
     if (-not $logged) { Write-LogbookError "START logging failed but continuing safely. sid=$sid" }
-    Start-LogbookTimer -SessionId $sid | Out-Null
     return $true
 }
 
@@ -190,16 +283,23 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
             $script:fpChoice = 'pending'
             $fpWindow.Add_Closing({ param($s, $e) if ($script:fpChoice -eq 'pending') { $e.Cancel = $true } })
             $fpWindow.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape' -or $e.SystemKey -eq 'F4') { $e.Handled = $true } })
-            $fpWindow.FindName('StartBtn').Add_Click({
+            $fpStartBtn = $fpWindow.FindName('StartBtn')
+            $fpStartBtn.Add_Click({
+                # Disabled immediately: Invoke-LogbookHandoffToTimer's poll
+                # is non-blocking and can take up to ~1.8s, and this button
+                # was never guarded before -- without this, a double-click
+                # during that wait would start a SECOND session and kill/
+                # replace the first timer mid-handoff.
+                $fpStartBtn.IsEnabled = $false
                 try {
                     $ket = [string]$fpProfile.keterangan
                     if ([string]::IsNullOrWhiteSpace($ket)) { $ket = '(lanjutan sesi)' }
                     Invoke-LogbookStartSession -Nama ([string]$fpProfile.nama) -Nim ([string]$fpProfile.nim) -Access $detectedSessionType -Tujuan ([string]$fpProfile.tujuan) -Keterangan $ket | Out-Null
                 } catch { Write-LogbookError "Fast-path start failed: $($_.Exception.Message)" }
                 $script:fpChoice = 'resumed'
-                # Fade the form out as the timer takes over -- resume path gets
-                # the same smooth handoff as a fresh sign-in.
-                Invoke-LogbookFadeClose $fpWindow
+                # Wait for the timer to actually be on screen, then fade --
+                # resume path gets the same synced handoff as a fresh sign-in.
+                Invoke-LogbookHandoffToTimer $fpWindow
             })
             # "Bukan saya / ganti data": close instantly (no fade) and fall
             # through to the full form, which now reuses the cached background
@@ -430,15 +530,23 @@ $btn.Add_Click({
         $btn.Content = 'Menyimpan...'
         Invoke-LogbookStartSession -Nama $nama.Text -Nim $nim.Text -Access (Get-ComboText $access) -Tujuan (Get-ComboText $tujuan) -Keterangan $ket.Text | Out-Null
         $script:submitted = $true
-        # Session is started and the timer process is launching; fade the form
-        # out so it dissolves as the timer appears centered on screen.
-        Invoke-LogbookFadeClose $window
+        # Session started and the timer process is launching; wait for it to
+        # actually reach the screen (Invoke-LogbookHandoffToTimer), THEN
+        # collapse this form -- so the two windows' animations line up
+        # instead of racing on unrelated fixed schedules. Deliberately no
+        # `finally` re-enabling the button on this path: Invoke-
+        # LogbookHandoffToTimer's poll is non-blocking and can take up to
+        # ~1.8s, and this form is about to fade+close anyway, so leaving
+        # the button disabled/"Menyimpan..." for that stretch is invisible
+        # to the user and closes off a double-click starting a SECOND
+        # session (a fresh session_id + a second Start-LogbookTimer, which
+        # would kill and replace the first timer mid-handoff) during the wait.
+        Invoke-LogbookHandoffToTimer $window
     } catch {
         Write-LogbookError "Submit failed but form released: $($_.Exception.Message)"
         $script:submitted = $true
-        try { $window.Close() } catch {}
-    } finally {
         try { $btn.Content = 'Mulai sesi'; $btn.IsEnabled = $true } catch {}
+        try { $window.Close() } catch {}
     }
 })
 

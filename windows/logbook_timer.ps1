@@ -411,6 +411,14 @@ $script:entranceDone = $false
 $window.Add_Loaded({
     if ($script:entranceDone) { return }
     $script:entranceDone = $true
+    # First thing, before any animation setup: signal the sign-in popup (a
+    # separate process) that this window has actually reached the screen, so
+    # it can time its own collapse-close to overlap with this appearing
+    # instead of closing on a schedule with no relationship to how long this
+    # process's cold start actually took. See Invoke-LogbookHandoffToTimer in
+    # logbook_popup.ps1 and the matching flag cleanup in Start-LogbookTimer
+    # (logbook_common.ps1).
+    try { '' | Out-File -FilePath (Join-Path $Global:StateDir 'timer_ready.flag') -Force -Encoding UTF8 } catch {}
     try {
         if ($script:rootVisual) {
             $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds(340))
@@ -419,9 +427,16 @@ $window.Add_Loaded({
             $script:rootVisual.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
         }
         if ($script:rootScale) {
-            # 0.92 -> 1.0 with a plain ease-out (no overshoot, so the shadow
-            # never spills past the transparent window bounds and clips).
-            $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.92, 1.0, [TimeSpan]::FromMilliseconds(430))
+            # 0.1 -> 1.0 (grows from near-nothing), not a subtle 0.92 -> 1.0
+            # pop: the sign-in form (logbook_popup.ps1, a separate window/
+            # process) collapses down to ~0.04 scale at this SAME screen
+            # center point as it closes (Invoke-LogbookFadeClose). Matching
+            # "shrinks to a point" with "grows from a point" at the same
+            # spot is what makes the handoff between the two windows read as
+            # one continuous shape-change instead of two unrelated
+            # animations. Plain ease-out, no overshoot, so the drop shadow
+            # never spills past the transparent window bounds and clips.
+            $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.1, 1.0, [TimeSpan]::FromMilliseconds(420))
             $ep = New-Object System.Windows.Media.Animation.CubicEase; $ep.EasingMode = 'EaseOut'
             $pop.EasingFunction = $ep
             $script:rootScale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $pop)

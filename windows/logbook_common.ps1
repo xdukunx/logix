@@ -439,6 +439,14 @@ function Start-LogbookTimer {
     param([string]$SessionId = '')
     try {
         Stop-LogbookTimers
+        # Cleared here, not just written fresh by the new process, so
+        # logbook_popup.ps1's handoff poll (Invoke-LogbookHandoffToTimer)
+        # can never read a STALE flag left by a PREVIOUS timer launch as
+        # this one's readiness signal -- there would otherwise be a window,
+        # between "old timer killed, new one about to spawn" and "the new
+        # one reaches Loaded", where a leftover flag makes the popup fade
+        # out before anything new is actually on screen.
+        Remove-Item (Join-Path $Global:StateDir 'timer_ready.flag') -Force -ErrorAction SilentlyContinue
         $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_timer.ps1')
         if ($SessionId) { $args += @('-SessionId', $SessionId) }
         $timer = Start-HiddenPowerShell -PassThru -ArgumentList $args
@@ -1232,7 +1240,7 @@ function Build-LogbookPopupXaml($cfg) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="True" Background="$surface"
-        FontFamily="Segoe UI">
+        AllowsTransparency="True" FontFamily="Segoe UI">
   <Window.Resources>
     <SolidColorBrush x:Key="PrussianBlue" Color="$primary" />
     <SolidColorBrush x:Key="Silver" Color="$muted" />
@@ -1427,7 +1435,8 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" Background="$surface"
+        AllowsTransparency="True" FontFamily="Segoe UI">
   <Grid>
     <Image Name="BgImage" Stretch="Fill" Opacity="0.88"><Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect></Image>
     <Rectangle Fill="$overlay" />
