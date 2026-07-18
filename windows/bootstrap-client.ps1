@@ -19,6 +19,9 @@
 # Like any pipe-to-shell installer, read it before you run it:
 #   iwr -useb <url> -OutFile bootstrap-client.ps1; notepad bootstrap-client.ps1
 #
+# Prefer a graphical wizard? Grab LogixAgentSetup.exe from the repo's GitHub
+# Releases page instead -- same result, no console.
+#
 # What it does: makes sure python + git are present (best-effort via winget),
 # downloads this repo into $InstallSrcDir (git clone, or a zip download if git
 # isn't available), runs install/install.py (the cross-platform core: logging
@@ -43,51 +46,120 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-function Say($msg)  { Write-Host "`n==> $msg" -ForegroundColor Cyan }
-function Warn($msg) { Write-Warning $msg }
+# ---------------------------------------------------------------------------
+# Console UI. ASCII only (repo rule): box drawing uses +--- / |, no Unicode.
+# Every step prints as  [n/4] Title  followed by indented [ OK ]/[WARN]/[FAIL]
+# detail lines, so a failed rollout screenshot immediately shows WHERE it died.
+# ---------------------------------------------------------------------------
+$script:StepTotal = 4
+$script:StartedAt = Get-Date
+
+function Write-Banner {
+    $ver = "branch: $Branch"
+    Write-Host ""
+    Write-Host "  +---------------------------------------------------------+" -ForegroundColor DarkCyan
+    Write-Host "  |                                                         |" -ForegroundColor DarkCyan
+    Write-Host "  |   L O G I X   agent installer                           |" -ForegroundColor Cyan
+    Write-Host "  |   sign-in logbook + session timer + lab monitoring      |" -ForegroundColor DarkGray
+    Write-Host ("  |   {0,-53} |" -f $ver) -ForegroundColor DarkGray
+    Write-Host "  |                                                         |" -ForegroundColor DarkCyan
+    Write-Host "  +---------------------------------------------------------+" -ForegroundColor DarkCyan
+    Write-Host ""
+}
+
+function Write-Step([int]$N, [string]$Title) {
+    Write-Host ""
+    Write-Host ("  [{0}/{1}] " -f $N, $script:StepTotal) -ForegroundColor Cyan -NoNewline
+    Write-Host $Title -ForegroundColor White
+    Write-Host ("  " + ("-" * 57)) -ForegroundColor DarkGray
+}
+
+function Write-Ok([string]$Msg)   { Write-Host "    [ OK ] " -ForegroundColor Green  -NoNewline; Write-Host $Msg }
+function Write-Warn2([string]$Msg){ Write-Host "    [WARN] " -ForegroundColor Yellow -NoNewline; Write-Host $Msg }
+function Write-Info([string]$Msg) { Write-Host "    [ .. ] " -ForegroundColor DarkGray -NoNewline; Write-Host $Msg -ForegroundColor DarkGray }
+function Write-Fail([string]$Msg) { Write-Host "    [FAIL] " -ForegroundColor Red    -NoNewline; Write-Host $Msg -ForegroundColor Red }
 function Test-Cmd($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
+
+function Write-Outro {
+    $elapsed = [int]((Get-Date) - $script:StartedAt).TotalSeconds
+    Write-Host ""
+    Write-Host "  +---------------------------------------------------------+" -ForegroundColor DarkGreen
+    Write-Host "  |   Logix agent installed                                 |" -ForegroundColor Green
+    Write-Host ("  |   {0,-53} |" -f "finished in ${elapsed}s") -ForegroundColor DarkGray
+    Write-Host "  +---------------------------------------------------------+" -ForegroundColor DarkGreen
+    Write-Host ""
+    Write-Host "    Program files : C:\Program Files\Logix" -ForegroundColor DarkGray
+    Write-Host "    Server config : C:\ProgramData\Logix\config.env" -ForegroundColor DarkGray
+    Write-Host "    Runtime state : C:\ProgramData\MindLabLogbook" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "    Next: lock and unlock this PC (Win+L) -- the sign-in" -ForegroundColor White
+    Write-Host "    popup should appear, and the device shows up on the" -ForegroundColor White
+    Write-Host "    dashboard within a few seconds." -ForegroundColor White
+    Write-Host ""
+}
+
+Write-Banner
 
 # --- 0. Must be elevated (writes Program Files + registers a scheduled task) -
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "This installer needs Administrator rights. Right-click PowerShell -> 'Run as Administrator', then re-run the command."
+    Write-Fail "This installer needs Administrator rights."
+    Write-Host ""
+    Write-Host "    Right-click PowerShell -> 'Run as Administrator', then" -ForegroundColor Yellow
+    Write-Host "    re-run the same command." -ForegroundColor Yellow
+    Write-Host ""
+    throw "Not elevated."
 }
 
+try {
+
 # --- 1. Prerequisites: python, then git (best-effort via winget) ------------
-Say "Checking prerequisites"
+Write-Step 1 "Checking prerequisites"
 $py = if (Test-Cmd "py") { "py" } elseif (Test-Cmd "python") { "python" } else { $null }
-if (-not $py) {
+if ($py) {
+    Write-Ok "Python found ($py)"
+} else {
     if (Test-Cmd "winget") {
-        Warn "Python not found; attempting 'winget install Python.Python.3.12'"
+        Write-Info "Python not found; installing via winget (this can take a minute)..."
         winget install --id Python.Python.3.12 -e --silent --accept-package-agreements --accept-source-agreements
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                     [System.Environment]::GetEnvironmentVariable("Path", "User")
         $py = if (Test-Cmd "py") { "py" } elseif (Test-Cmd "python") { "python" } else { $null }
+        if ($py) { Write-Ok "Python installed ($py)" }
     }
-    if (-not $py) { throw "Python 3 not found and could not auto-install it. Install Python 3.9+ from python.org, then re-run." }
+    if (-not $py) {
+        Write-Fail "Python 3 not found and could not auto-install it."
+        throw "Install Python 3.9+ from python.org, then re-run."
+    }
 }
 
-if (-not (Test-Cmd "git")) {
+if (Test-Cmd "git") {
+    Write-Ok "git found"
+} else {
     if (Test-Cmd "winget") {
-        Warn "git not found; attempting 'winget install Git.Git'"
+        Write-Info "git not found; installing via winget..."
         winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
                     [System.Environment]::GetEnvironmentVariable("Path", "User")
     }
-    if (-not (Test-Cmd "git")) { Warn "git still not found; will fall back to downloading a zip archive." }
+    if (Test-Cmd "git") { Write-Ok "git installed" }
+    else { Write-Warn2 "git still not found; falling back to a zip download." }
 }
 
 # --- 2. Get the code onto this machine ---------------------------------------
-Say "Fetching Logix into $InstallSrcDir"
+Write-Step 2 "Fetching Logix"
+Write-Info "source: $RepoUrl ($Branch)"
+Write-Info "target: $InstallSrcDir"
 if (Test-Cmd "git") {
     if (Test-Path (Join-Path $InstallSrcDir ".git")) {
         git -C $InstallSrcDir fetch --depth 1 origin $Branch
         git -C $InstallSrcDir checkout $Branch
         git -C $InstallSrcDir reset --hard "origin/$Branch"
-        Say "Updated existing checkout"
+        Write-Ok "Updated existing checkout"
     } else {
         New-Item -ItemType Directory -Force -Path (Split-Path $InstallSrcDir -Parent) | Out-Null
         git clone --depth 1 --branch $Branch $RepoUrl $InstallSrcDir
+        Write-Ok "Cloned fresh checkout"
     }
 } else {
     $zipUrl = ($RepoUrl -replace '\.git$', '') + "/archive/refs/heads/$Branch.zip"
@@ -101,12 +173,13 @@ if (Test-Cmd "git") {
     Move-Item $inner.FullName $InstallSrcDir -Force
     Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+    Write-Ok "Downloaded and extracted zip archive"
 }
 
 Set-Location $InstallSrcDir
 
 # --- 3. Core: logging bridge + report generator (install/install.py) --------
-Say "Installing the core (install/install.py)"
+Write-Step 3 "Installing the core (logging bridge + reports)"
 $coreArgs = @("install/install.py")
 if ($ServerUrl -or $ServerApiKey -or $DeviceName) {
     $coreArgs += "--non-interactive"
@@ -114,12 +187,14 @@ if ($ServerUrl -or $ServerApiKey -or $DeviceName) {
     if ($ServerUrl)    { $coreArgs += @("--server-url", $ServerUrl) }
     if ($ServerApiKey) { $coreArgs += @("--server-api-key", $ServerApiKey) }
 } else {
-    Warn "No -ServerUrl/-DeviceName given -- install.py will prompt for them interactively."
+    Write-Warn2 "No -ServerUrl/-DeviceName given -- install.py will prompt for them."
 }
 & $py @coreArgs
+if ($LASTEXITCODE -ne 0) { Write-Fail "install.py exited with code $LASTEXITCODE"; throw "Core install failed." }
+Write-Ok "Core installed"
 
-# --- 4. Agent: sign-in popup, timer widget, monitor (windows\install_logbook_tasks.ps1) ---
-Say "Installing the agent (windows\install_logbook_tasks.ps1)"
+# --- 4. Agent: sign-in popup, timer widget, monitor -------------------------
+Write-Step 4 "Installing the agent (popup + timer + monitor)"
 # Hashtable, NOT an array -- array-splatting a bare "-SwitchName" string does
 # NOT bind it as a switch; PowerShell treats every array element as a plain
 # positional value, so "-RunNow" ended up bound to install_logbook_tasks.ps1's
@@ -137,12 +212,35 @@ if ($ServerUrl -and $ServerApiKey) {
     $taskArgs['ServerApiKey'] = $ServerApiKey
     if ($DeviceName) { $taskArgs['DeviceName'] = $DeviceName }
 } else {
-    Warn "No -ServerUrl/-ServerApiKey given -- the interactive settings popup opens after install so you can type them in (or re-run install_logbook_tasks.ps1 -NonInteractive later)."
+    Write-Warn2 "No -ServerUrl/-ServerApiKey given -- the settings popup opens after install"
+    Write-Warn2 "(or re-run install_logbook_tasks.ps1 -NonInteractive later)."
 }
 if ($UseWSL)         { $taskArgs['UseWSL'] = $true }
 if ($SkipAnyDesk)    { $taskArgs['SkipAnyDesk'] = $true }
 if (-not $NoRunNow)  { $taskArgs['RunNow'] = $true }
 
+# No $LASTEXITCODE check here: a .ps1 called with & runs in-process, so
+# $LASTEXITCODE reflects whatever native exe ran last (git/winget above, or
+# something inside the script), not the script's outcome -- checking it gives
+# false failures on good installs. Real failures already surface as
+# exceptions ($ErrorActionPreference = Stop on both sides) and land in the
+# outer catch.
 & (Join-Path $InstallSrcDir "windows\install_logbook_tasks.ps1") @taskArgs
+Write-Ok "Agent installed and monitor task registered"
 
-Say "Done. Lock/unlock this machine (Win+L) to confirm the sign-in popup appears."
+Write-Outro
+
+} catch {
+    Write-Host ""
+    Write-Host "  +---------------------------------------------------------+" -ForegroundColor DarkRed
+    Write-Host "  |   Install did not finish                                |" -ForegroundColor Red
+    Write-Host "  +---------------------------------------------------------+" -ForegroundColor DarkRed
+    Write-Host ""
+    Write-Host "    $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "    Nothing above this point needs undoing -- the installer" -ForegroundColor DarkGray
+    Write-Host "    is safe to re-run as-is once the cause is fixed. For a" -ForegroundColor DarkGray
+    Write-Host "    clean slate first: windows\uninstall_logbook.ps1." -ForegroundColor DarkGray
+    Write-Host ""
+    throw
+}

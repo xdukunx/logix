@@ -1,0 +1,84 @@
+name: Build installer
+
+# Builds the Windows wizard installer (installer/logix-agent.iss ->
+# LogixAgentSetup.exe) on every push to the main development branches and on
+# demand, and attaches it to a GitHub Release when a v* tag is pushed -- so
+# the .exe is downloadable straight from the repo, no local Inno Setup needed.
+#
+# The AnyDesk installer (installer/assets/anydesk-7-0-0.exe) is deliberately
+# NOT in the repo (third-party binary, git-ignored), so CI builds don't bundle
+# it: the wizard's AnyDesk step self-skips and the dashboard "Remote" action
+# stays disabled until AnyDesk is installed separately. Local builds via
+# installer/build.ps1 with the staged exe still bundle it.
+
+# No paths: filter -- GitHub applies it to TAG pushes too, so a v* tag cut on
+# a commit that happens not to touch the installer files (a merge commit, a
+# docs-only release commit) would silently skip the build and ship a Release
+# with no .exe attached. Branch builds are limited to main instead; use
+# workflow_dispatch for an on-demand build of any other ref.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: write   # needed by the release step; harmless for plain builds
+
+jobs:
+  build:
+    name: LogixAgentSetup.exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Mascot branding (wizard bitmaps + icon) regenerates from
+      # installer/branding/mascot-source.png. Best-effort by design -- the
+      # .iss guards every branding directive, so a failure here just means
+      # stock Inno wizard art, not a broken build.
+      - name: Build mascot branding
+        continue-on-error: true
+        run: |
+          python -m pip install --quiet pillow
+          python installer/build_branding.py
+
+      - name: Install Inno Setup 6
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found after choco install" }
+          & $iscc installer\logix-agent.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          Get-Item installer\Output\LogixAgentSetup.exe | Format-List Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LogixAgentSetup-${{ github.sha }}
+          path: installer/Output/LogixAgentSetup.exe
+          if-no-files-found: error
+
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/LogixAgentSetup.exe
+          generate_release_notes: true
+          body: |
+            **LogixAgentSetup.exe** — Windows wizard installer for the Logix
+            agent (sign-in logbook, session timer, monitor task, native Python
+            logging core). Run as administrator on the target PC.
+
+            Note: this CI build does not bundle AnyDesk (third-party binary).
+            The dashboard "Remote" action activates once AnyDesk is installed
+            on the device — see installer/README.md.

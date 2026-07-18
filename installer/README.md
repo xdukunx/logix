@@ -11,6 +11,19 @@ unattended after the operator fills a couple of fields.
 > install logic, smaller window, mascot strip, EN/ID picker. Use whichever look
 > you prefer.
 
+## Download (no build needed)
+CI builds `LogixAgentSetup.exe` automatically (see
+`.github/workflows/build-installer.yml`):
+
+- **Tagged release** — push a `v*` tag and the `.exe` is attached to the
+  GitHub Release: <https://github.com/xdukunx/logix/releases>
+- **Any recent commit** — grab the `LogixAgentSetup-<sha>` artifact from the
+  *Build installer* run on the Actions tab.
+
+CI builds don't bundle AnyDesk (third-party binary, git-ignored) — the wizard's
+AnyDesk step self-skips; install AnyDesk separately to enable the dashboard
+**Remote** action. Local builds with the staged exe (below) do bundle it.
+
 ## What it installs
 | Path | Contents |
 |---|---|
