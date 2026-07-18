@@ -75,6 +75,59 @@ function Get-ProcessByCommandPattern {
     }
 }
 
+# Every background powershell.exe the agent spawns MUST go through this
+# helper, for two reasons discovered the hard way:
+#
+# 1) QUOTING. Windows PowerShell 5.1's Start-Process joins -ArgumentList
+#    elements with spaces WITHOUT quoting them, so
+#    @('-File','C:\Program Files\Logix\x.ps1') reaches the child as
+#    -File C:\Program Files\Logix\x.ps1 and powershell.exe exits
+#    immediately with "C:\Program does not exist" (observed exit code
+#    -196608, nothing runs). This silently broke every internal spawn the
+#    moment the install moved from C:\lab (no spaces) to
+#    C:\Program Files\Logix -- the long-unexplained field reports of "no
+#    popup or timer after lock/unlock". This helper quotes any element
+#    containing whitespace before it hits the command line.
+#
+# 2) NO WINDOW. -WindowStyle Hidden alone is not reliable on Windows 11:
+#    when Windows Terminal is the default terminal host (the out-of-box
+#    resolution of "Let Windows decide" on current builds), consoles
+#    spawned by Task Scheduler / Run keys / Start-Process can still open
+#    a visible terminal tab. Routing the launch through
+#    "conhost.exe --headless" forces a windowless pseudo-console that WT
+#    delegation never touches. --headless exists on every supported build
+#    (Windows 10 1809+; anything older is EOL and was never a lab target),
+#    so no OS-version gate -- the only fallback is conhost.exe being
+#    absent entirely, where the plain hidden launch is the best we can do.
+#
+# Resolved once at dot-source time: this helper funnels every agent spawn
+# (popup/timer/end/setup/screenshot), so a per-call Test-Path would be a
+# recurring wasted syscall.
+$script:HeadlessConhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+if (-not (Test-Path $script:HeadlessConhost)) { $script:HeadlessConhost = $null }
+
+function Start-HiddenPowerShell {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$ArgumentList,
+        [switch]$Wait,
+        [switch]$PassThru
+    )
+    $quoted = @($ArgumentList | ForEach-Object {
+        if ($_ -match '\s' -and $_ -notmatch '^".*"$') { '"{0}"' -f $_ } else { $_ }
+    })
+    if ($script:HeadlessConhost) {
+        # NOTE: with the conhost wrapper, -PassThru returns conhost's process,
+        # not the powershell child's. Everything that stops agent processes
+        # already matches on the child's command line
+        # (Get-ProcessByCommandPattern), and killing either side takes the
+        # other down with it, so that is fine -- just don't treat the returned
+        # Id as powershell's PID.
+        return Start-Process -FilePath $script:HeadlessConhost -Wait:$Wait -PassThru:$PassThru `
+            -ArgumentList (@('--headless', 'powershell.exe') + $quoted)
+    }
+    return Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -Wait:$Wait -PassThru:$PassThru -ArgumentList $quoted
+}
+
 function Stop-LogbookTimers {
     try {
         $procs = Get-ProcessByCommandPattern 'logbook_timer\.ps1'
@@ -194,33 +247,56 @@ function Grant-LogbookStateDirAccess {
 # is restored on every exit path, including exceptions.
 function Set-TaskManagerDisabled {
     param([bool]$Disabled)
-    $keyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System'
     $markerPath = Join-Path $Global:StateDir 'taskmgr_prev_value.txt'
     try {
-        if ($Disabled) {
-            $prev = 'none'
-            if (Test-Path $keyPath) {
-                $existing = Get-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue
-                if ($null -ne $existing -and $null -ne $existing.DisableTaskMgr) { $prev = "$($existing.DisableTaskMgr)" }
-            }
-            New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
-            $prev | Out-File -FilePath $markerPath -Encoding UTF8 -Force
-
-            if (-not (Test-Path $keyPath)) { New-Item -Path $keyPath -Force | Out-Null }
-            New-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -PropertyType DWord -Value 1 -Force | Out-Null
-            Write-LogbookInfo "Task Manager disabled for sign-in gate."
-        } else {
-            $restoreVal = 'none'
-            if (Test-Path $markerPath) {
-                $restoreVal = (Get-Content $markerPath -Raw -ErrorAction SilentlyContinue).Trim()
-            }
-            if ([string]::IsNullOrWhiteSpace($restoreVal) -or $restoreVal -eq 'none') {
-                if (Test-Path $keyPath) { Remove-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue }
+        # HKCU\...\Policies\System is one of the few HKCU keys the user does
+        # NOT own by default (policy keys are admin-writable only, even under
+        # HKCU). The elevated install grants this account a narrow
+        # SetValue+ReadKey ACE (Grant-LogbookTaskMgrGateAccess), but the
+        # registry provider cmdlets (New-ItemProperty/Remove-ItemProperty)
+        # open the key requesting broader rights than that ACE covers and
+        # fail with "Requested registry access is not allowed" -- observed
+        # live from the (non-elevated) popup. Open the key via .NET with
+        # exactly the rights the ACE grants instead. The key itself exists
+        # after install (the elevated grant creates it), so no create path
+        # is needed here.
+        $rights = [System.Security.AccessControl.RegistryRights]::QueryValue -bor
+                  [System.Security.AccessControl.RegistryRights]::SetValue
+        # ReadWriteSubTree (not Default): the OS-level open uses exactly
+        # $rights either way, but with Default the managed RegistryKey is
+        # flagged read-only and SetValue/DeleteValue throw "Cannot write to
+        # the registry key" before ever reaching the OS.
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey(
+            'Software\Microsoft\Windows\CurrentVersion\Policies\System',
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree, $rights)
+        if (-not $key) {
+            if ($Disabled) { Write-LogbookError 'Task Manager gate: policy key missing (run the installer to create it); leaving Task Manager enabled.' }
+            return
+        }
+        try {
+            if ($Disabled) {
+                $prevObj = $key.GetValue('DisableTaskMgr', $null)
+                $prev = if ($null -ne $prevObj) { "$prevObj" } else { 'none' }
+                New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
+                $prev | Out-File -FilePath $markerPath -Encoding UTF8 -Force
+                $key.SetValue('DisableTaskMgr', 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+                Write-LogbookInfo "Task Manager disabled for sign-in gate."
             } else {
-                New-ItemProperty -Path $keyPath -Name 'DisableTaskMgr' -PropertyType DWord -Value ([int]$restoreVal) -Force | Out-Null
+                $restoreVal = 'none'
+                if (Test-Path $markerPath) {
+                    $restoreVal = (Get-Content $markerPath -Raw -ErrorAction SilentlyContinue).Trim()
+                }
+                if ([string]::IsNullOrWhiteSpace($restoreVal) -or $restoreVal -eq 'none') {
+                    # DeleteValue needs only KEY_SET_VALUE, same as SetValue.
+                    $key.DeleteValue('DisableTaskMgr', $false)
+                } else {
+                    $key.SetValue('DisableTaskMgr', [int]$restoreVal, [Microsoft.Win32.RegistryValueKind]::DWord)
+                }
+                Remove-Item -Path $markerPath -Force -ErrorAction SilentlyContinue
+                Write-LogbookInfo "Task Manager restored to prior state."
             }
-            Remove-Item -Path $markerPath -Force -ErrorAction SilentlyContinue
-            Write-LogbookInfo "Task Manager restored to prior state."
+        } finally {
+            $key.Close()
         }
     } catch {
         Write-LogbookError "Task Manager policy toggle failed: $($_.Exception.Message)"
@@ -233,7 +309,9 @@ function Start-LogbookTimer {
         Stop-LogbookTimers
         $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_timer.ps1')
         if ($SessionId) { $args += @('-SessionId', $SessionId) }
-        $timer = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList $args
+        $timer = Start-HiddenPowerShell -PassThru -ArgumentList $args
+        # With the conhost wrapper this records the wrapper's PID, not
+        # powershell's -- fine, Stop-LogbookTimers matches on command line.
         $pidFile = Join-Path $Global:StateDir 'timer.pid'
         $timer.Id | Out-File -FilePath $pidFile -Encoding ascii -Force
         return $true
@@ -250,11 +328,11 @@ function Start-LogbookPopup {
         $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1')
         if ($ForceNew) { $args += '-ForceNew' }
         if ($TestMode) { $args += '-TestMode' }
-        # -WindowStyle Hidden hides only the powershell CONSOLE window, not the
+        # The hidden launch hides only the powershell CONSOLE window, not the
         # WPF form the popup opens with ShowDialog() -- the timer widget launches
         # exactly this way and renders fine. Keeps a stray console from sitting
         # on the user's desktop for the whole session.
-        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
+        Start-HiddenPowerShell -ArgumentList $args | Out-Null
         return $true
     } catch {
         Write-LogbookError "Popup start failed: $($_.Exception.Message)"
@@ -681,7 +759,7 @@ function Invoke-LogbookScreenshotCapture {
     param([Parameter(Mandatory=$true)][string]$CommandId)
     $script = Join-Path $Global:LabDir 'logbook_screenshot.ps1'
     if (-not (Test-Path $script)) { throw "logbook_screenshot.ps1 not found at $script" }
-    Start-Process powershell.exe -WindowStyle Hidden -Wait -ArgumentList @(
+    Start-HiddenPowerShell -Wait -ArgumentList @(
         '-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$script,'-CommandId',$CommandId) | Out-Null
 }
 
@@ -760,8 +838,8 @@ function Send-LogbookHeartbeat {
                     switch ($name) {
                         'LOCK' {
                             Write-LogbookInfo "Remote LOCK trigger execution."
-                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','LOCK') | Out-Null
-                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'),'-ForceNew') | Out-Null
+                            Start-HiddenPowerShell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','LOCK') | Out-Null
+                            Start-HiddenPowerShell -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_popup.ps1'),'-ForceNew') | Out-Null
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
                         }
                         'BROADCAST' {
@@ -800,7 +878,7 @@ function Send-LogbookHeartbeat {
                             # Close the logbook session cleanly first so hours
                             # aren't lost, then sign the user out.
                             Write-LogbookInfo "Remote LOGOFF trigger execution."
-                            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') -Wait | Out-Null
+                            Start-HiddenPowerShell -Wait -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') | Out-Null
                             & shutdown.exe /l /f | Out-Null
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'user logged off' }
                         }

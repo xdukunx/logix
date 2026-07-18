@@ -78,8 +78,16 @@ if ($ServerUrl)    { Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value $Se
 if ($ServerApiKey) { Set-LogixConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value $ServerApiKey }
 if ($DeviceName)   { Set-LogixConfigValue -Key 'LOGIX_DEVICE_NAME'    -Value $DeviceName }
 
-# Copy scripts from installer source folder to the install dir.
+# Copy scripts from installer source folder to the install dir. Includes THIS
+# script: installer/README.md tells operators to re-run
+# "C:\Program Files\Logix\install_logbook_tasks.ps1" to re-point a device, so
+# a stale copy there would re-register the task with whatever action string it
+# was built with (exactly how an old powershell.exe action -- and its
+# every-30-minutes terminal tab -- could sneak back). Self-copy is safe:
+# PowerShell parses the whole file before running it, and the -ieq guard below
+# skips the copy when already running from the install dir.
 $files = @(
+    'install_logbook_tasks.ps1',
     'logbook_common.ps1',
     'logbook_popup.ps1',
     'logbook_monitor.ps1',
@@ -191,7 +199,14 @@ try {
     }
 } catch {}
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
+# conhost --headless: on Windows 11, Windows Terminal is the default console
+# host and can open a visible terminal tab for a Task Scheduler powershell
+# launch even with -WindowStyle Hidden. With the 30-minute self-heal trigger
+# below, that meant a terminal tab popping up on the user's desktop every 30
+# minutes. The headless conhost wrapper never creates a window (see
+# Start-HiddenPowerShell in logbook_common.ps1 for the full story).
+$monitorCmd = '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
+$action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument $monitorCmd
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
 # Self-heal trigger: everything (popup on unlock, heartbeats, remote
 # commands) depends on the resident monitor, and a dead monitor previously
@@ -227,7 +242,7 @@ Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $actio
 try {
     $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $runPath -Force | Out-Null
-    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
+    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value "`"$env:SystemRoot\System32\conhost.exe`" $monitorCmd"
 } catch { Write-LogbookError "HKCU Run registration failed: $($_.Exception.Message)" }
 
 Write-Host 'OK: single monitor installed. Old duplicate Start/End tasks removed.' -ForegroundColor Green
@@ -235,7 +250,7 @@ Get-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' | Select-Object Tas
 
 if (-not $NonInteractive) {
     Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
-    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_setup.ps1') -Wait | Out-Null
+    Start-HiddenPowerShell -Wait -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_setup.ps1') | Out-Null
 }
 
 # Migrate any logo asset then remove the legacy C:\lab program dir so the app
@@ -262,5 +277,5 @@ if ($RunNow) {
     Write-Host 'Monitor launched (non-elevated via scheduled task).' -ForegroundColor Green
 }
 if ($TestPopup) {
-    Start-Process powershell.exe -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1','-TestMode') | Out-Null
+    Start-HiddenPowerShell -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1','-TestMode') | Out-Null
 }

@@ -7,12 +7,16 @@
 # before invoking this.
 param([Parameter(Mandatory=$true)][string]$CommandId, [switch]$STAChild)
 $ErrorActionPreference = 'Stop'
+# Common loaded before the STA shim so the relaunch can use
+# Start-HiddenPowerShell -- see the shim comment in logbook_popup.ps1. (The
+# AMSI isolation is the other direction: the capture code stays OUT of
+# common; common itself is safe to load here.)
+. 'C:\Program Files\Logix\logbook_common.ps1'
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and -not $STAChild) {
-    Start-Process powershell.exe -WindowStyle Hidden -Wait -ArgumentList @(
+    Start-HiddenPowerShell -Wait -ArgumentList @(
         '-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-CommandId',$CommandId,'-STAChild') | Out-Null
     exit 0
 }
-. 'C:\Program Files\Logix\logbook_common.ps1'
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen

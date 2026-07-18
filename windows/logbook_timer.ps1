@@ -1,12 +1,14 @@
 param([string]$SessionId = '', [switch]$STAChild)
 $ErrorActionPreference = 'Stop'
+# Common loaded before the STA shim so the relaunch can use
+# Start-HiddenPowerShell -- see the shim comment in logbook_popup.ps1.
+. 'C:\Program Files\Logix\logbook_common.ps1'
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and -not $STAChild) {
     $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-STAChild')
     if ($SessionId) { $args += @('-SessionId', $SessionId) }
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
+    Start-HiddenPowerShell -ArgumentList $args | Out-Null
     exit 0
 }
-. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 
 try {

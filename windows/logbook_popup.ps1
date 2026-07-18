@@ -1,6 +1,12 @@
 param([switch]$TestMode, [switch]$ForceNew, [switch]$STAChild)
 $ErrorActionPreference = 'Stop'
 
+# Dot-sourced BEFORE the STA shim on purpose: common's top level only sets
+# globals and defines functions (no window, no STA dependency), so loading it
+# first lets the relaunch reuse Start-HiddenPowerShell -- the one place that
+# owns the conhost --headless + argument-quoting launch contract.
+. 'C:\Program Files\Logix\logbook_common.ps1'
+
 # WPF must run in STA. If Task Scheduler/Run launches normal PowerShell, relaunch safely.
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and -not $STAChild) {
     $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-STAChild')
@@ -8,11 +14,10 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
     if ($ForceNew) { $args += '-ForceNew' }
     # Hidden console only -- the WPF sign-in form still shows (same pattern the
     # timer uses). Avoids a stray powershell window on the desktop.
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $args | Out-Null
+    Start-HiddenPowerShell -ArgumentList $args | Out-Null
     exit 0
 }
 
-. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 $cfg = Get-LogbookConfig
 # Combo dropdowns render as a light control (white surface, dark text) for

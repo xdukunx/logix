@@ -76,7 +76,10 @@ try {
     # IDs was done", 0x80070534). A SID needs no name resolution. $TaskUser
     # itself stays name-based above, since NTAccount/ownership needs a name.
     $taskUserSid = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
+    # conhost --headless action, same as install_logbook_tasks.ps1 -- keep the
+    # two registrations identical, or a repair quietly reintroduces the
+    # every-30-minutes Windows Terminal tab the conhost wrapper eliminates.
+    $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUserSid
     # Mirrors install_logbook_tasks.ps1: 30-min self-heal trigger, no
     # execution time limit, auto-restart on failure -- see the comments there.

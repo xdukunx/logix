@@ -58,10 +58,15 @@ try {
     if (Test-Path $tmKey) { Remove-ItemProperty -Path $tmKey -Name 'DisableTaskMgr' -ErrorAction SilentlyContinue }
 } catch {}
 
-# Kill any stray popup/timer PowerShell hosts still holding a WPF window.
+# Kill any stray popup/timer hosts still holding a WPF window. No
+# Name='powershell.exe' filter: since the conhost --headless launch wrapper,
+# each agent process is a conhost.exe + powershell.exe pair and BOTH carry the
+# script name on their command line -- filtering to powershell would leave the
+# conhost wrappers invisible to this fallback (which must work even when
+# logbook_common.ps1 is already gone).
 try {
     foreach ($pat in @('logbook_popup\.ps1', 'logbook_timer\.ps1', 'logbook_monitor\.ps1')) {
-        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -match $pat -and [int]$_.ProcessId -ne [int]$PID } |
             ForEach-Object { Stop-Process -Id ([int]$_.ProcessId) -Force -ErrorAction SilentlyContinue }
     }

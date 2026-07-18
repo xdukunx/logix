@@ -72,7 +72,12 @@ $action = {
         # A real departure signal (user switch, RDP disconnect, sign-out) --
         # unlike a plain lock, ends the session outright.
         Remove-Item $lockedFlag -Force -ErrorAction SilentlyContinue
-        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_end.ps1','-Reason','END') | Out-Null
+        # Same launch contract as Start-HiddenPowerShell in logbook_common.ps1
+        # (conhost --headless so no terminal tab appears, and the spaced
+        # Program Files path pre-quoted because Start-Process won't quote it),
+        # inlined here because this scriptblock deliberately uses built-in
+        # cmdlets only -- see the NOTE above $action.
+        Start-Process "$env:SystemRoot\System32\conhost.exe" -WindowStyle Hidden -ArgumentList @('--headless','powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File','"C:\Program Files\Logix\logbook_end.ps1"','-Reason','END') | Out-Null
     } elseif ($reason -eq 'SessionLock') {
         # Locking is a pause, not a departure -- product decision: the
         # session stays open across any lock/sleep duration and just
@@ -98,7 +103,7 @@ $action = {
             # normal lock/unlock case) this just resumes its timer with no
             # re-prompt; a fresh popup only appears if no session is on
             # disk (already closed via sign-out/idle-timeout/SELESAI/reboot).
-            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1') | Out-Null
+            Start-Process "$env:SystemRoot\System32\conhost.exe" -WindowStyle Hidden -ArgumentList @('--headless','powershell.exe','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','"C:\Program Files\Logix\logbook_popup.ps1"') | Out-Null
         } else {
             try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
         }
@@ -121,7 +126,7 @@ $endingAction = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
     try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_end.ps1','-Reason','END') | Out-Null
+    Start-Process "$env:SystemRoot\System32\conhost.exe" -WindowStyle Hidden -ArgumentList @('--headless','powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File','"C:\Program Files\Logix\logbook_end.ps1"','-Reason','END') | Out-Null
 }
 try {
     Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionEnding -SourceIdentifier MindLabLogbookSessionEnding -Action $endingAction | Out-Null
@@ -157,7 +162,7 @@ $powerAction = {
             $alreadyShowing = (($procs | Measure-Object).Count -gt 0)
         } catch {}
         if (-not $alreadyShowing) {
-            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','C:\Program Files\Logix\logbook_popup.ps1') | Out-Null
+            Start-Process "$env:SystemRoot\System32\conhost.exe" -WindowStyle Hidden -ArgumentList @('--headless','powershell.exe','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','"C:\Program Files\Logix\logbook_popup.ps1"') | Out-Null
         }
     }
 }

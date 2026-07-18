@@ -1,14 +1,17 @@
 param([switch]$STAChild)
 $ErrorActionPreference = 'Stop'
 
+# Common loaded before the STA shim so the relaunch can use
+# Start-HiddenPowerShell -- see the shim comment in logbook_popup.ps1.
+. 'C:\Program Files\Logix\logbook_common.ps1'
+
 # WPF must run in STA mode. If Task Scheduler or another launch is non-STA, relaunch safely.
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and -not $STAChild) {
     $args = @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-STAChild')
-    Start-Process powershell.exe -ArgumentList $args | Out-Null
+    Start-HiddenPowerShell -ArgumentList $args | Out-Null
     exit 0
 }
 
-. 'C:\Program Files\Logix\logbook_common.ps1'
 Ensure-LogbookDirs
 
 try {
