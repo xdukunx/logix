@@ -120,6 +120,20 @@ $script:HEIGHT_EXPANDED  = 235   # + Nama/Tujuan/Device + accent bar, on top
                                  # of SELESAI. Same real-window measurement,
                                  # same +7 delta (228 -> 235) to keep the
                                  # gap identical in both collapsed/expanded.
+$script:HEIGHT_PREDOCK   = 211   # InfoSection visible, SELESAI Collapsed --
+                                 # the center-stage/glide state before the
+                                 # widget reaches its dock (see
+                                 # Show-LogbookSelesaiButton below). Same
+                                 # real-shown-window measurement technique:
+                                 # 210.65px raw, rounded up. Coincidentally
+                                 # close to this file's ORIGINAL fixed XAML
+                                 # seed height (still 210, unchanged) from
+                                 # before SELESAI had a hidden state to be
+                                 # in -- that seed already happened to be
+                                 # roughly the right resting height for
+                                 # "info shown, no button"; it just used to
+                                 # visibly grow to HEIGHT_EXPANDED on the
+                                 # very first tick instead of staying put.
 $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
                                  # (see Show-LogbookPendingMessage); this is
                                  # only the pre-first-message default
@@ -130,7 +144,13 @@ $script:MESSAGE_EXTRA    = 110   # replaced per-message by a measured value
 function Get-LogbookTimerTargetSize {
     $infoShown = $infoSection.Visibility -eq 'Visible'
     $msgShown = $messageSection.Visibility -eq 'Visible'
-    $h = if ($infoShown) { $script:HEIGHT_EXPANDED } else { $script:HEIGHT_COLLAPSED }
+    $btnShown = $selesaiBtn.Visibility -eq 'Visible'
+    # Pre-dock (SELESAI not yet revealed) has exactly one shape regardless of
+    # InfoSection -- which stays forced Visible until docking anyway (see
+    # Update-LogbookInfoVisibility's early-return below).
+    $h = if (-not $btnShown) { $script:HEIGHT_PREDOCK }
+         elseif ($infoShown) { $script:HEIGHT_EXPANDED }
+         else { $script:HEIGHT_COLLAPSED }
     if ($msgShown) { $h += $script:MESSAGE_EXTRA }
     return @{ Width = $window.Width; Height = $h }
 }
@@ -192,9 +212,15 @@ function Update-LogbookTimerSize {
 # session, or on hover -- collapsed the rest of the time so the widget is
 # just the clock, letting the user focus on time, not data. SELESAI lives in
 # its own row (a sibling of InfoSection, not nested inside it -- see
-# Build-LogbookTimerXaml), so it stays visible at all times regardless of
-# this toggle. The window then animates to the matching size.
+# Build-LogbookTimerXaml). Before docking, SELESAI is deliberately hidden
+# (see Show-LogbookSelesaiButton) and InfoSection is held statically Visible
+# by the entrance/dwell/glide sequence in the "Entrance + center-to-dock
+# glide" block further down -- this function has nothing to decide yet, so
+# it no-ops until $script:isDocked, rather than fighting that fixed
+# pre-dock state on every clock tick or hover event. The window then
+# animates to the matching size.
 function Update-LogbookInfoVisibility {
+    if (-not $script:isDocked) { return }
     $elapsedSec = ((Get-Date) - $start).TotalSeconds
     $shouldShow = $script:isHovering -or ($elapsedSec -le 10)
     $isShown = $infoSection.Visibility -eq 'Visible'
@@ -365,6 +391,26 @@ $timer.Add_Tick({
 # device-independent units as Window.Left/Top.
 $script:rootVisual = $window.FindName('RootVisual')
 $script:rootScale  = if ($script:rootVisual) { $script:rootVisual.RenderTransform } else { $null }
+# Gates Update-LogbookInfoVisibility (held off pre-dock, see that function)
+# and Get-LogbookTimerTargetSize's PREDOCK height branch. Flips once, when
+# the slide-to-dock animation below completes.
+$script:isDocked = $false
+
+# Reveals SELESAI once the widget has settled into its dock -- fade-in
+# timed to roughly track the window's own grow animation (Update-
+# LogbookTimerSize, ~384ms at the existing 24-step/16ms cadence) so the
+# button's appearance and the card's extra space arrive together rather
+# than the button popping into space that isn't there yet.
+function Show-LogbookSelesaiButton {
+    $selesaiBtn.Opacity = 0
+    $selesaiBtn.Visibility = 'Visible'
+    Update-LogbookTimerSize
+    $fadeIn = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds(360))
+    $ef = New-Object System.Windows.Media.Animation.CubicEase; $ef.EasingMode = 'EaseOut'
+    $fadeIn.EasingFunction = $ef
+    $selesaiBtn.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fadeIn)
+}
+
 $work = [System.Windows.SystemParameters]::WorkArea
 $script:dockLeft   = $work.Left + 18
 $script:dockTop    = $work.Top + 18
@@ -386,6 +432,12 @@ $script:slideTimer.Add_Tick({
         $window.Left = $script:dockLeft
         $window.Top  = $script:dockTop
         $script:slideTimer.Stop()
+        # Docked: hand InfoSection's first-10s/hover toggling over to
+        # Update-LogbookInfoVisibility (was held off until now) and reveal
+        # SELESAI -- the widget only gains its "end session" control once
+        # it has actually settled into its resting spot.
+        $script:isDocked = $true
+        Show-LogbookSelesaiButton
         return
     }
     # Ease-in-out cubic: eases away from center, eases into the dock -- reads

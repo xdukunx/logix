@@ -88,69 +88,207 @@ function New-BlurredBackgroundImage {
     }
 }
 
-# Collapses the fullscreen sign-in form down to a point at the exact SCREEN
-# CENTER while fading it out, so it reads as the form COLLAPSING INTO the
-# timer widget that appears at that same spot next -- not two unrelated
-# animations (a form disappearing somewhere, then an unrelated box popping up
-# elsewhere). Mirrors the timer's own entrance (small -> full scale, also
-# centered) so the two halves of the handoff, in two different windows, read
-# as one continuous shrink-then-grow motion. RenderTransformOrigin is
-# (0.5,0.5) in the WINDOW's own coordinate space, and this window is
-# fullscreen, so "shrink toward 0.5,0.5" is "shrink toward the exact center of
-# the screen" -- the same point Start-LogbookTimer's new process centers
-# itself on.
+# "Card implosion" close: the backdrop (blurred desktop screenshot + scrim --
+# everything in the root Grid except MainCard) fades on its own, slightly
+# longer timeline as a soft lingering vignette, while MainCard (the actual
+# sign-in panel) gets the dramatic exit -- a quick confirm "pop", then an
+# accelerating shrink + twist + blur + fade into the exact SCREEN CENTER
+# (MainCard is itself screen-centered, so its own RenderTransformOrigin
+# 0.5,0.5 IS the screen center -- the same point the timer's entrance grows
+# FROM, so the handoff between the two windows still reads as one continuous
+# motion, just richer than a flat whole-window shrink). Manual per-frame
+# DispatcherTimer easing rather than WPF Storyboards/KeyFrames, matching how
+# every other custom-eased animation in this codebase is built (see
+# $script:animTimer / $script:slideTimer in logbook_timer.ps1) -- easier to
+# reason about and to verify by sampling live property values mid-flight.
 #
-# Animates the WINDOW's own Opacity/RenderTransform (not just its Content):
-# the window's XAML now sets AllowsTransparency="True" specifically so this
-# works. An earlier version animated only $win.Content's Opacity, leaving the
-# Window's own opaque $surface-colored Background fully visible underneath
-# for the animation's duration -- a solid near-black fullscreen panel that
-# LOOKED stuck (and, paired with the kiosk keyboard hook, genuinely COULDN'T
-# be Alt-Tabbed away from) whenever the close-on-Completed path didn't fire.
-#
-# The close itself does NOT depend on the animation or its Completed event at
-# all -- it is a plain DispatcherTimer fired a little after the animation's
-# own duration. This is deliberate: a WPF DoubleAnimation's Completed event
-# can go unheard for reasons that have nothing to do with whether the
-# animation itself is running fine (GC of the delegate, an exception earlier
-# in the handler chain, a dispatcher priority mismatch) -- and unlike a timer,
-# there is no way to add a "close after N ms no matter what" fallback AROUND
-# an event that might just never fire. A fullscreen, Topmost, kiosk-locked
-# window that fails to close is far worse than a purely cosmetic fade glitch,
-# so the guaranteed-fire path is the one thing that is allowed to be
-# load-bearing here.
-function Invoke-LogbookFadeClose($win, [double]$DurationMs = 380) {
+# The close itself does NOT depend on any of these animations or their
+# Completed events at all -- it is a plain DispatcherTimer fired a little
+# after the total animation duration. This is deliberate: a WPF animation's
+# Completed event can go unheard for reasons that have nothing to do with
+# whether the animation itself is running fine (GC of the delegate, an
+# exception earlier in the handler chain, a dispatcher priority mismatch) --
+# and unlike a timer, there is no way to add a "close after N ms no matter
+# what" fallback AROUND an event that might just never fire. A fullscreen,
+# Topmost, kiosk-locked window that fails to close is far worse than a
+# cosmetic animation glitch, so the guaranteed-fire path is the one thing
+# that is allowed to be load-bearing here. (The window's own XAML still sets
+# AllowsTransparency="True" from the earlier stuck-window fix -- unused by
+# this version directly, but cheap insurance: if MainCard or the backdrop
+# children are ever missing/renamed, an unanimated but still-transparent
+# window is a far less alarming failure mode than an opaque one.)
+function Invoke-LogbookFadeClose($win, [double]$DurationMs = 460) {
+    $root = $win.Content
+    $card = $null
+    try { $card = $win.FindName('MainCard') } catch {}
+
+    # Backdrop: every direct child of the root Grid except the card (BgImage,
+    # the scrim Rectangle) -- found structurally rather than by name, so this
+    # works unchanged for both window layouts that share this Image+
+    # Rectangle+Border pattern (the main sign-in form and the returning-user
+    # welcome-back card) without hardcoding either one's exact child list.
     try {
-        $win.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 0.5)
-        $scale = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
-        $win.RenderTransform = $scale
-        $dur = [TimeSpan]::FromMilliseconds($DurationMs)
-        $ease = New-Object System.Windows.Media.Animation.CubicEase; $ease.EasingMode = 'EaseIn'
+        if ($root -and $card) {
+            foreach ($child in @($root.Children)) {
+                if ($child -ne $card -and $child -is [System.Windows.UIElement]) {
+                    $bgFade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, [TimeSpan]::FromMilliseconds($DurationMs + 80))
+                    $bgEase = New-Object System.Windows.Media.Animation.CubicEase; $bgEase.EasingMode = 'EaseIn'
+                    $bgFade.EasingFunction = $bgEase
+                    $child.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $bgFade)
+                }
+            }
+        }
+    } catch { Write-LogbookError "Fade-close backdrop animation failed (non-fatal): $($_.Exception.Message)" }
 
-        $scaleAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.04, $dur)
-        $scaleAnim.EasingFunction = $ease
-        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $scaleAnim)
-        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $scaleAnim)
+    if ($card) {
+        try {
+            $card.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 0.5)
+            $group = New-Object System.Windows.Media.TransformGroup
+            $scale = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+            $rotate = New-Object System.Windows.Media.RotateTransform(0.0)
+            [void]$group.Children.Add($scale)
+            [void]$group.Children.Add($rotate)
+            $card.RenderTransform = $group
+            # Swaps out the card's resting drop shadow for the duration of the
+            # close: an element carries only one Effect at a time, and the
+            # shadow stops reading the instant the card is mid-shrink anyway
+            # -- the blur is what actually sells "dissolving", not just
+            # "shrinking".
+            $blur = New-Object System.Windows.Media.Effects.BlurEffect
+            $blur.Radius = 0
+            $card.Effect = $blur
 
-        $fadeAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, $dur)
-        $fadeAnim.EasingFunction = $ease
-        $win.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fadeAnim)
-    } catch {
-        Write-LogbookError "Fade-close animation setup failed (closing on the timer fallback regardless): $($_.Exception.Message)"
+            $popMs = 110.0
+            $implodeMs = [Math]::Max($DurationMs - $popMs, 100.0)
+            # $script: scope, NOT .GetNewClosure(): PowerShell's
+            # GetNewClosure() snapshots a scriptblock's captured variables
+            # ONCE, and a mutation made to a plain scalar inside one
+            # invocation (e.g. "$cardStep += 1") does NOT persist into the
+            # NEXT invocation of that same delegate -- confirmed directly
+            # (an isolated counter that should reach 5 across 5 ticks
+            # instead read 1 on every single tick, forever). Reference-type
+            # mutations (calling a method on a captured object, like the
+            # close timer's own "$win.Close()") are unaffected -- only a
+            # rebinding scalar accumulator like this step counter is. The
+            # rest of this codebase's own custom-eased animations
+            # ($script:animStep in Update-LogbookTimerSize,
+            # $script:slideStep in the center-to-dock glide, both in
+            # logbook_timer.ps1) already use $script: scope for exactly
+            # this reason -- matching that here instead of GetNewClosure().
+            #
+            # Progress is driven by a Stopwatch's actual elapsed time, NOT
+            # by counting ticks and assuming each one represents exactly
+            # 16ms: a DispatcherTimer's real firing interval is only a
+            # request, not a guarantee, and drifts under load or (measured
+            # directly while building this) when the window isn't the
+            # foreground/focused one -- ticks landing every 60-100ms+
+            # instead of 16ms is well within normal Windows behavior, not a
+            # bug. Counting ticks would make the WHOLE animation run in
+            # slow motion whenever that happens; reading elapsed wall-clock
+            # time on every tick keeps the total duration correct
+            # regardless -- fewer intermediate frames on a busy system, but
+            # never a stuck-looking crawl, and it always finishes on time
+            # (which the independent close-guarantee timer below assumes).
+            $script:cardStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            $script:cardScale = $scale
+            $script:cardRotate = $rotate
+            $script:cardBlur = $blur
+            $script:cardEl = $card
+            $script:cardPopMs = $popMs
+            $script:cardImplodeMs = $implodeMs
+            $script:cardTimer = New-Object System.Windows.Threading.DispatcherTimer
+            $script:cardTimer.Interval = [TimeSpan]::FromMilliseconds(16)
+            $script:cardTimer.Add_Tick({
+                $elapsedMs = $script:cardStopwatch.Elapsed.TotalMilliseconds
+                if ($elapsedMs -le $script:cardPopMs) {
+                    # Phase 1 (~110ms): a small confirm "pop" -- 1.0 -> 1.03,
+                    # ease-out -- acknowledges the click before the card
+                    # commits to leaving.
+                    $t = $elapsedMs / $script:cardPopMs
+                    $eased = 1.0 - (1.0 - $t) * (1.0 - $t)
+                    $s = 1.0 + 0.03 * $eased
+                    $script:cardScale.ScaleX = $s; $script:cardScale.ScaleY = $s
+                } elseif ($elapsedMs -ge ($script:cardPopMs + $script:cardImplodeMs)) {
+                    $script:cardScale.ScaleX = 0.03; $script:cardScale.ScaleY = 0.03
+                    $script:cardRotate.Angle = 7.0
+                    $script:cardEl.Opacity = 0.0
+                    $script:cardBlur.Radius = 16.0
+                    $script:cardTimer.Stop()
+                } else {
+                    # Phase 2 (~350ms): accelerating shrink + twist + blur +
+                    # fade toward the screen center, ease-in cubic -- reads
+                    # as being pulled into the point rather than just
+                    # deflating in place.
+                    $t = ($elapsedMs - $script:cardPopMs) / $script:cardImplodeMs
+                    $eased = $t * $t * $t
+                    $script:cardScale.ScaleX = 1.03 + (0.03 - 1.03) * $eased
+                    $script:cardScale.ScaleY = $script:cardScale.ScaleX
+                    $script:cardRotate.Angle = 7.0 * $eased
+                    $script:cardEl.Opacity = 1.0 - $eased
+                    $script:cardBlur.Radius = 16.0 * $eased
+                }
+            })
+            $script:cardTimer.Start()
+        } catch {
+            Write-LogbookError "Fade-close card-implosion animation failed (closing on the timer fallback regardless): $($_.Exception.Message)"
+        }
+    } else {
+        # No MainCard found (a future XAML edit renamed/removed it) -- fall
+        # back to the previous whole-window shrink so the close still looks
+        # deliberate instead of just vanishing.
+        try {
+            $win.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 0.5)
+            $wscale = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+            $win.RenderTransform = $wscale
+            $dur = [TimeSpan]::FromMilliseconds($DurationMs)
+            $ease = New-Object System.Windows.Media.Animation.CubicEase; $ease.EasingMode = 'EaseIn'
+            $scaleAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.04, $dur)
+            $scaleAnim.EasingFunction = $ease
+            $wscale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $scaleAnim)
+            $wscale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $scaleAnim)
+            $fadeAnim = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, $dur)
+            $fadeAnim.EasingFunction = $ease
+            $win.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fadeAnim)
+        } catch { Write-LogbookError "Fade-close fallback animation failed (closing on the timer fallback regardless): $($_.Exception.Message)" }
     }
+
     # GetNewClosure(): a bare scriptblock referencing a FUNCTION PARAMETER
     # (not a $script:-scope variable) does not capture it -- by the time the
     # Dispatcher fires this Tick, Invoke-LogbookFadeClose has already
     # returned and $win's local scope is gone, so an uncaptured reference
     # resolves to $null and $null.Close() throws, silently swallowed by the
     # try/catch below. That silent-null-close was the actual root cause of
-    # the stuck-window bug this function replaced. GetNewClosure() snapshots
-    # $win's current value into the scriptblock's own bound scope so it
-    # survives the parent function returning.
+    # an earlier stuck-window bug. GetNewClosure() snapshots $win's current
+    # value into the scriptblock's own bound scope so it survives the
+    # parent function returning -- fine here (unlike the card timer's own
+    # step counter) because this only reads/calls methods on captured
+    # object REFERENCES, and only fires once; it never needs a mutation to
+    # persist across repeated invocations of the same delegate.
+    #
+    # A DispatcherTimer's nominal interval is a request, not a guarantee --
+    # measured directly while building this, ticks can land 200-400ms+ late
+    # under load (or simply when the window isn't the foreground/focused
+    # one). The card's own implosion timer is Stopwatch-driven so each tick
+    # computes the CORRECT value for whenever it happens to fire, but sparse
+    # ticks mean it might not get a FINAL tick in before this guaranteed
+    # close fires, cutting the animation off mid-flight (caught live: closing
+    # at ~53% opacity instead of fully faded). So this snaps MainCard's
+    # scale/rotation/opacity/blur straight to their fully-collapsed end
+    # values immediately before Close() -- independent of whatever the card
+    # timer's own ticks managed to reach -- so the very last visible frame is
+    # always the correct "fully gone" state, never a half-finished one.
     $closeTimer = New-Object System.Windows.Threading.DispatcherTimer
     $closeTimer.Interval = [TimeSpan]::FromMilliseconds($DurationMs + 90)
     $closeTimer.Add_Tick({
         $closeTimer.Stop()
+        try {
+            if ($card) {
+                $scale.ScaleX = 0.03; $scale.ScaleY = 0.03
+                $rotate.Angle = 7.0
+                $card.Opacity = 0.0
+                if ($blur) { $blur.Radius = 16.0 }
+            }
+        } catch {}
         try { $win.Close() } catch { Write-LogbookError "Fade-close fallback Close() failed: $($_.Exception.Message)" }
     }.GetNewClosure())
     $closeTimer.Start()

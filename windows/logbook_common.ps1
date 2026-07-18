@@ -1303,7 +1303,7 @@ function Build-LogbookPopupXaml($cfg) {
     </Image>
     <Rectangle Fill="$overlay" />
 
-    <Border Width="790" CornerRadius="18" BorderBrush="$border" BorderThickness="1" Background="$primary"
+    <Border Name="MainCard" Width="790" CornerRadius="18" BorderBrush="$border" BorderThickness="1" Background="$primary"
             HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True">
       <Border.Effect><DropShadowEffect BlurRadius="32" ShadowDepth="0" Opacity="0.42" Color="$accent" /></Border.Effect>
       <Grid>
@@ -1440,7 +1440,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
   <Grid>
     <Image Name="BgImage" Stretch="Fill" Opacity="0.88"><Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect></Image>
     <Rectangle Fill="$overlay" />
-    <Border Width="430" CornerRadius="16" BorderBrush="$border" BorderThickness="1" Background="$elevated"
+    <Border Name="MainCard" Width="430" CornerRadius="16" BorderBrush="$border" BorderThickness="1" Background="$elevated"
             HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30,34,28">
       <Border.Effect><DropShadowEffect BlurRadius="40" ShadowDepth="0" Opacity="0.5" Color="#070C15" /></Border.Effect>
       <StackPanel>
@@ -1727,16 +1727,23 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
       </StackPanel>
 
       <!-- SELESAI lives in its OWN row, a sibling of InfoSection (NOT nested
-           inside it): always present regardless of whether Nama/Tujuan/
-           Device are shown or collapsed (hover / first-10s only). Two-step to
-           prevent misclicks. Filled soft surface + icon (not a hollow outline
-           pill) so it reads as a real, deliberate control at a glance;
-           stretches to the same 18px inset every other row in this card
-           uses, so it aligns with the layout instead of floating centered.
-           Warms to the brand accent (blue) on hover; the controller
-           (logbook_timer.ps1) arms it red on first press and ends the
-           session on a confirming second press within 3s. -->
+           inside it): once revealed, present regardless of whether Nama/
+           Tujuan/Device are shown or collapsed (hover / first-10s only).
+           Two-step to prevent misclicks. Filled soft surface + icon (not a
+           hollow outline pill) so it reads as a real, deliberate control at
+           a glance; stretches to the same 18px inset every other row in
+           this card uses, so it aligns with the layout instead of floating
+           centered. Warms to the brand accent (blue) on hover; the
+           controller (logbook_timer.ps1) arms it red on first press and
+           ends the session on a confirming second press within 3s.
+           Starts Collapsed/Opacity 0: the center-stage + glide-to-dock
+           sequence shows only the clock and session data, deliberately
+           withholding the "end session" action until the widget is fully
+           settled in its resting corner. logbook_timer.ps1's
+           Show-LogbookSelesaiButton reveals it (fade + the window growing
+           to fit) right when the dock animation completes. -->
       <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,12"
+              Visibility="Collapsed" Opacity="0"
               Padding="0,10" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
               FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
         <Button.Template>
