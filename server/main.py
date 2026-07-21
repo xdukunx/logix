@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Query, Body, Cookie, Request
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +20,19 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, HTML
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="Logix Central Admin Server")
+
+# Lifespan handler -- the modern FastAPI replacement for the deprecated
+# @app.on_event("startup"). The actual startup work lives in startup_event()
+# further down, next to the init_db/init_control_tables helpers it calls;
+# lifespan only invokes it when the server actually starts, so referencing a
+# function defined later in the module resolves fine at call time.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    startup_event()
+    yield
+
+
+app = FastAPI(title="Logix Central Admin Server", lifespan=lifespan)
 
 
 # --- Logging ----------------------------------------------------------------
@@ -1025,8 +1038,9 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing X-API-Key")
 
 
-@app.on_event("startup")
 def startup_event():
+    # Invoked from the lifespan handler at the top of this module (was
+    # @app.on_event("startup"), now deprecated in FastAPI).
     init_db()
     init_control_tables()
     rehydrate_pending_commands()
