@@ -1,0 +1,11 @@
+packaging/bin/logix          usr/bin
+logix/paths.py               opt/software/logix
+logix/log_physical.py        opt/software/logix
+logix/logbook_report.py      opt/software/logix
+logix/logbook_sql.py         opt/software/logix
+logix/logbook_ssh_login.py   opt/software/logix
+logix/gsheet_sync.py         opt/software/logix
+install/install.py           opt/software/logix
+VERSION                      opt/software/logix
+docs/PRIVACY.md              usr/share/doc/logix
+README.md                    usr/share/doc/logix

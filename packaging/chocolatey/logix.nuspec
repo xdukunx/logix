@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>logix</id>
+    <version>1.1.0</version>
+    <packageSourceUrl>https://github.com/xdukunx/logix/tree/main/packaging/chocolatey</packageSourceUrl>
+    <owners>MindLab</owners>
+    <title>Logix Agent</title>
+    <authors>MindLab</authors>
+    <projectUrl>https://github.com/xdukunx/logix</projectUrl>
+    <licenseUrl>https://github.com/xdukunx/logix/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/xdukunx/logix</projectSourceUrl>
+    <docsUrl>https://github.com/xdukunx/logix/blob/main/docs/GETTING_STARTED.md</docsUrl>
+    <bugTrackerUrl>https://github.com/xdukunx/logix/issues</bugTrackerUrl>
+    <tags>logix logbook lab sign-in privacy monitoring admin</tags>
+    <summary>Privacy-first sign-in logbook agent for shared Windows lab computers.</summary>
+    <description>
+Logix records who used a shared computer, when, and for what purpose -- never
+screen contents or keystrokes. This package installs the Windows agent: the
+lock/unlock sign-in prompt, the session timer widget, the resident monitor
+scheduled task, and the native Python logging core. Wraps the official
+LogixAgentSetup.exe wizard installer from the project's GitHub Releases.
+
+After install, configure the server with package parameters or via the Logix
+settings popup:
+
+    choco install logix --params "'/ServerUrl:https://logix.example.org /ApiKey:INGEST_KEY /DeviceName:WS-07'"
+
+Note: this package does not bundle AnyDesk (a separate app). The dashboard
+"Remote" action activates once AnyDesk is installed on the device.
+    </description>
+    <releaseNotes>https://github.com/xdukunx/logix/releases/tag/v1.1.0</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

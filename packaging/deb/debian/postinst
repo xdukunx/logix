@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    echo ""
+    echo "Logix core installed. One-time setup:  sudo logix configure"
+    echo "SSH capture (Linux): sudo ln -sf /opt/software/logix/logix-ssh-hook.sh /etc/profile.d/zz_logbook_ssh.sh"
+    echo "Privacy: records who/how/when only -- see /usr/share/doc/logix/PRIVACY.md"
+    echo ""
+fi
+
+#DEBHELPER#
+
+exit 0

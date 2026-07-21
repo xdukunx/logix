@@ -1,0 +1,55 @@
+#!/bin/sh
+# Logix command-line entry point for package-manager installs (deb / rpm /
+# Homebrew). Thin dispatcher over the installed core in $LOGIX_LIB -- all the
+# real logic lives in the core Python files, so this stays a stable, tiny
+# shim. LOGIX_LIB defaults to the system install dir the packages target and
+# the core's own paths.py resolves to (_system_data_home() on Linux); the
+# Homebrew formula overrides it to the formula's libexec.
+set -eu
+
+LOGIX_LIB="${LOGIX_LIB:-/opt/software/logix}"
+
+PY="$(command -v python3 || command -v python || true)"
+if [ -z "$PY" ]; then
+    echo "logix: Python 3 not found on PATH. Install Python 3.9+ and retry." >&2
+    exit 1
+fi
+
+usage() {
+    cat >&2 <<EOF
+usage: logix <command> [args]
+
+  configure [flags]   set up this device (device name, server, privacy mode);
+                      run once after install. Flags mirror install.py, e.g.
+                      --non-interactive --device-name "Lab PC 3"
+                      --server-url https://logix.example.org
+  query "SQL"         run a read-only query against the session database
+  report              generate an .xlsx session report
+  log [flags]         write a session event (advanced / scripting)
+  sync [flags]        Google Sheets sync (respects the redaction gate)
+  version             print the installed Logix version
+
+Config, database, and reports live under \$LOGIX_HOME (default: $LOGIX_LIB).
+See: https://github.com/xdukunx/logix
+EOF
+}
+
+cmd="${1:-}"
+[ "$#" -gt 0 ] && shift || true
+
+case "$cmd" in
+    configure) exec "$PY" "$LOGIX_LIB/install.py" "$@" ;;
+    query)     exec "$PY" "$LOGIX_LIB/logbook_sql.py" "$@" ;;
+    report)    exec "$PY" "$LOGIX_LIB/logbook_report.py" "$@" ;;
+    log)       exec "$PY" "$LOGIX_LIB/log_physical.py" "$@" ;;
+    sync)      exec "$PY" "$LOGIX_LIB/gsheet_sync.py" "$@" ;;
+    version|--version|-V)
+        if [ -f "$LOGIX_LIB/VERSION" ]; then
+            printf 'logix %s\n' "$(cat "$LOGIX_LIB/VERSION")"
+        else
+            echo "logix (version unknown)"
+        fi
+        ;;
+    ""|help|-h|--help) usage; [ -z "$cmd" ] && exit 2 || exit 0 ;;
+    *) echo "logix: unknown command '$cmd'" >&2; usage; exit 2 ;;
+esac

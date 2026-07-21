@@ -1,0 +1,8 @@
+logix (1.1.0) noble; urgency=medium
+
+  * Initial Debian/Ubuntu packaging of the Logix cross-platform core + CLI.
+    Installs the logging bridge, report generator, SQL helper, Google Sheets
+    sync, the SSH-login hook, and the "logix" command. Run "sudo logix
+    configure" once after install.
+
+ -- MindLab <noreply@github.com>  Mon, 21 Jul 2026 00:00:00 +0000

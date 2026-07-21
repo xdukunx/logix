@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: MindLab.Logix
+PackageVersion: 1.1.0
+InstallerType: inno
+Scope: machine
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+# Inno Setup silent switches are well-known to winget, but pin them so the
+# server-settings wizard page is skipped on silent installs (configure after
+# install via the Logix settings popup or by re-running install_logbook_tasks).
+InstallerSwitches:
+  Silent: /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+  SilentWithProgress: /SILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+ProductCode: '{B7A0C1D4-5E2F-4A63-9C58-1F0D2E7A8B3C}_is1'
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/xdukunx/logix/releases/download/v1.1.0/LogixAgentSetup.exe
+    # SHA256 of the v1.1.0 release asset (computed from the published .exe).
+    # If the release asset is ever rebuilt/replaced, recompute:
+    #   (Get-FileHash LogixAgentSetup.exe -Algorithm SHA256).Hash
+    InstallerSha256: 767AF69145B02706F917640F30A270CFBE9C3E5962EB7916FE0400E5F0F4DCF7
+ManifestType: installer
+ManifestVersion: 1.6.0

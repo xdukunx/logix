@@ -1,0 +1,20 @@
+Source: logix
+Section: utils
+Priority: optional
+Maintainer: MindLab <noreply@github.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/xdukunx/logix
+Rules-Requires-Root: no
+
+Package: logix
+Architecture: all
+Depends: ${misc:Depends}, python3
+Description: Privacy-first sign-in logbook for shared lab computers (core + CLI)
+ Logix records who used a shared computer, when, and for what purpose --
+ never screen contents or keystrokes. This package installs the
+ cross-platform logging core, report generator, Google Sheets sync (with a
+ redaction gate), the SSH-login hook, and the "logix" command.
+ .
+ Run "sudo logix configure" once after install. The physical at-keyboard
+ sign-in prompt is Windows-only (shipped separately as LogixAgentSetup.exe).

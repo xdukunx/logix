@@ -230,8 +230,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # Copy the core files into the install dir -- UNLESS we're already running
+    # from it. A package-manager install (deb/rpm/homebrew) lays the core files
+    # down itself and then runs this script in-place as `logix configure`, so
+    # SRC and dest are the same directory; copying a file onto itself throws
+    # SameFileError. In the normal repo/one-liner install, SRC (repo/logix) and
+    # dest (the OS data home) differ, so the copy runs as before -- which is
+    # what the install tests exercise.
     for f in CORE_FILES:
-        shutil.copy2(SRC / f, dest / f)
+        src, dst = SRC / f, dest / f
+        if src.resolve() == dst.resolve():
+            continue
+        shutil.copy2(src, dst)
         print(f"  copied {f}")
 
     cfg = dest / "config.env"

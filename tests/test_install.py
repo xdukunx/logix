@@ -153,6 +153,31 @@ def test_redeem_enrollment_code_writes_device_identity(monkeypatch, tmp_path):
     assert saved["api_key"] == "key-abc"
 
 
+def test_configure_in_place_skips_copy_when_src_equals_dest(monkeypatch, tmp_path):
+    """Package-manager `logix configure` path: install.py runs from the very
+    directory the core files already live in (a deb/rpm/homebrew install lays
+    them down, then invokes install.py in place), so SRC == dest. The copy
+    step must SKIP cleanly -- no shutil.SameFileError from copying a file onto
+    itself -- and still write config.env and initialize the DB in place. This
+    locks in the copy-guard that makes install.py reusable as the package
+    configure tool."""
+    import shutil
+    import install
+    src_repo = Path(install.__file__).resolve().parent.parent / "logix"
+    for f in install.CORE_FILES:
+        shutil.copy2(src_repo / f, tmp_path / f)
+    # Make SRC and the OS data home both the pre-populated dir -> src == dst.
+    monkeypatch.setattr(install, "SRC", tmp_path)
+    monkeypatch.setattr(install.paths, "_system_data_home", lambda: tmp_path)
+    monkeypatch.setenv("LOGIX_HOME", str(tmp_path))
+    rc = install.main(["--non-interactive", "--device-name", "Pkg PC", "--privacy-mode", "local_only"])
+    assert rc == 0
+    cfg = (tmp_path / "config.env").read_text(encoding="utf-8")
+    assert "LOGIX_DEVICE_NAME=Pkg PC" in cfg
+    assert "LOGIX_PRIVACY_MODE=local_only" in cfg
+    assert (tmp_path / "logix.db").exists()  # migration ran in place
+
+
 def test_redeem_enrollment_code_returns_false_on_network_failure(monkeypatch, tmp_path):
     import install
 

@@ -4,3 +4,22 @@
 *.ps1  text eol=crlf
 # Python tolerates either; normalize to LF for clean diffs.
 *.py   text eol=lf
+
+# --- Packaging: files consumed by Linux/macOS build tooling MUST be LF, even
+# though they have no .sh extension. A stray CR breaks a shebang, a debian
+# control field, an rpm spec, or a Homebrew formula. (Chocolatey's *.ps1 run
+# on Windows and keep CRLF via the rule above.)
+packaging/bin/logix           text eol=lf
+packaging/deb/debian/rules    text eol=lf
+packaging/deb/debian/postinst text eol=lf
+packaging/deb/debian/control  text eol=lf
+packaging/deb/debian/changelog text eol=lf
+packaging/deb/debian/copyright text eol=lf
+packaging/deb/debian/install  text eol=lf
+packaging/deb/debian/source/format text eol=lf
+packaging/rpm/*.spec          text eol=lf
+packaging/homebrew/*.rb       text eol=lf
+packaging/*.yaml              text eol=lf
+packaging/winget/*.yaml       text eol=lf
+# Read verbatim by `logix version` (cat) -- a trailing CR would show up.
+VERSION                       text eol=lf

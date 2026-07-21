@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+# Pure-Python (stdlib only), nothing to compile -- dh handles the file
+# placement from debian/install; the only override is making the CLI
+# executable (dh_install preserves source perms, and packaging/bin/logix may
+# land as 0644 depending on the checkout's exec bit).
+
+%:
+	dh $@
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0755 debian/logix/usr/bin/logix

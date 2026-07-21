@@ -1,0 +1,81 @@
+# nfpm config -- one source of truth that builds BOTH the .deb and the .rpm.
+#   nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
+#   nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/
+# Run from the repo root. Version comes from the top-level VERSION file via the
+# ${VERSION} env var (CI: `export VERSION=$(cat VERSION)`).
+#
+# This packages the cross-platform CORE (logging bridge, report generator, SQL
+# helper, GSheet sync, SSH-login hook) plus the `logix` CLI and the configure
+# wizard. It does NOT package the Windows-only sign-in agent (that ships as
+# LogixAgentSetup.exe / choco / winget).
+name: logix
+# noarch: pure Python (stdlib only). nfpm emits "all" for deb and "noarch"
+# for rpm from this single value.
+arch: all
+platform: linux
+version: ${VERSION}
+release: "1"
+section: utils
+priority: optional
+maintainer: MindLab <noreply@github.com>
+description: |
+  Privacy-first sign-in logbook for shared lab computers (core + CLI).
+  Records who/how/when -- never screen contents or keystrokes. This package
+  installs the cross-platform logging core, report generator, Google Sheets
+  sync, the SSH-login hook, and the `logix` command. Run `sudo logix
+  configure` once after install. Physical at-keyboard sign-in is Windows-only.
+vendor: MindLab
+homepage: https://github.com/xdukunx/logix
+license: MIT
+
+depends:
+  - python3
+
+contents:
+  # CLI entry point
+  - src: packaging/bin/logix
+    dst: /usr/bin/logix
+    file_info:
+      mode: 0755
+
+  # Cross-platform core (read at runtime; data/config created alongside)
+  - src: logix/paths.py
+    dst: /opt/software/logix/paths.py
+  - src: logix/log_physical.py
+    dst: /opt/software/logix/log_physical.py
+  - src: logix/logbook_report.py
+    dst: /opt/software/logix/logbook_report.py
+  - src: logix/logbook_sql.py
+    dst: /opt/software/logix/logbook_sql.py
+  - src: logix/logbook_ssh_login.py
+    dst: /opt/software/logix/logbook_ssh_login.py
+  - src: logix/gsheet_sync.py
+    dst: /opt/software/logix/gsheet_sync.py
+
+  # Configure wizard (invoked by `logix configure`)
+  - src: install/install.py
+    dst: /opt/software/logix/install.py
+
+  # Version marker (read by `logix version`)
+  - src: VERSION
+    dst: /opt/software/logix/VERSION
+
+  # Docs
+  - src: docs/PRIVACY.md
+    dst: /usr/share/doc/logix/PRIVACY.md
+  - src: README.md
+    dst: /usr/share/doc/logix/README.md
+
+overrides:
+  rpm:
+    depends:
+      - python3
+  deb:
+    depends:
+      - python3
+
+# After install, tell the operator to run the one-time setup. (nfpm runs this
+# as a package scriptlet; keep it POSIX sh and side-effect-free beyond the
+# notice.)
+scripts:
+  postinstall: packaging/scripts/postinstall.sh

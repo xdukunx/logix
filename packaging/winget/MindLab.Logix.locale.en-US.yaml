@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: MindLab.Logix
+PackageVersion: 1.1.0
+PackageLocale: en-US
+Publisher: MindLab
+PublisherUrl: https://github.com/xdukunx
+PublisherSupportUrl: https://github.com/xdukunx/logix/issues
+PackageName: Logix Agent
+PackageUrl: https://github.com/xdukunx/logix
+License: MIT
+LicenseUrl: https://github.com/xdukunx/logix/blob/main/LICENSE
+Copyright: MindLab
+ShortDescription: Privacy-first sign-in logbook agent for shared Windows lab computers.
+Description: |-
+  Logix records who used a shared computer, when, and for what purpose --
+  never screen contents or keystrokes. This installs the Windows agent: the
+  lock/unlock sign-in prompt, the session timer widget, the resident monitor
+  scheduled task, and the native Python logging core. Configure the server via
+  the Logix settings popup after install. AnyDesk is not bundled (the
+  dashboard "Remote" action activates once AnyDesk is installed separately).
+Moniker: logix
+Tags:
+  - logbook
+  - lab
+  - sign-in
+  - privacy
+  - monitoring
+  - admin
+ReleaseNotesUrl: https://github.com/xdukunx/logix/releases/tag/v1.1.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
