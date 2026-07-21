@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: MindLab.Logix
-PackageVersion: 1.1.0
+PackageVersion: 1.1.1
 InstallerType: inno
 Scope: machine
 InstallModes:
@@ -16,10 +16,10 @@ InstallerSwitches:
 ProductCode: '{B7A0C1D4-5E2F-4A63-9C58-1F0D2E7A8B3C}_is1'
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/xdukunx/logix/releases/download/v1.1.0/LogixAgentSetup.exe
-    # SHA256 of the v1.1.0 release asset (computed from the published .exe).
+    InstallerUrl: https://github.com/xdukunx/logix/releases/download/v1.1.1/LogixAgentSetup.exe
+    # SHA256 of the v1.1.1 release asset (computed from the published .exe).
     # If the release asset is ever rebuilt/replaced, recompute:
     #   (Get-FileHash LogixAgentSetup.exe -Algorithm SHA256).Hash
-    InstallerSha256: 767AF69145B02706F917640F30A270CFBE9C3E5962EB7916FE0400E5F0F4DCF7
+    InstallerSha256: REPLACE_WITH_RELEASE_EXE_SHA256
 ManifestType: installer
 ManifestVersion: 1.6.0

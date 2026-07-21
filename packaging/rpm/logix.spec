@@ -10,7 +10,7 @@
 %global logixlib /opt/software/logix
 
 Name:           logix
-Version:        1.1.0
+Version:        1.1.1
 Release:        1%{?dist}
 Summary:        Privacy-first sign-in logbook for shared lab computers (core + CLI)
 
@@ -78,5 +78,8 @@ echo "Privacy: records who/how/when only -- see %{_docdir}/logix/PRIVACY.md"
 echo ""
 
 %changelog
+* Mon Jul 21 2026 MindLab <noreply@github.com> - 1.1.1-1
+- Attach deb/rpm to the GitHub Release on this tag (packaging work merged
+  after v1.1.0 was cut).
 * Mon Jul 21 2026 MindLab <noreply@github.com> - 1.1.0-1
 - Initial RPM packaging of the Logix core + CLI.

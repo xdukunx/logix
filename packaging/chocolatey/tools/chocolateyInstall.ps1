@@ -10,10 +10,10 @@ $ErrorActionPreference = 'Stop'
 # publishing to the Chocolatey community feed (moderation requires it). Get it
 # from the release, e.g.:
 #   (Get-FileHash LogixAgentSetup.exe -Algorithm SHA256).Hash
-$version   = '1.1.0'
+$version   = '1.1.1'
 $url64      = "https://github.com/xdukunx/logix/releases/download/v$version/LogixAgentSetup.exe"
-# SHA256 of the v1.1.0 release asset. Recompute if the asset is rebuilt.
-$checksum64 = '767AF69145B02706F917640F30A270CFBE9C3E5962EB7916FE0400E5F0F4DCF7'
+# SHA256 of the v1.1.1 release asset. Recompute if the asset is rebuilt.
+$checksum64 = 'REPLACE_WITH_RELEASE_EXE_SHA256'
 
 $packageArgs = @{
     packageName    = 'logix'

@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>logix</id>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
     <packageSourceUrl>https://github.com/xdukunx/logix/tree/main/packaging/chocolatey</packageSourceUrl>
     <owners>MindLab</owners>
     <title>Logix Agent</title>
@@ -30,7 +30,7 @@ settings popup:
 Note: this package does not bundle AnyDesk (a separate app). The dashboard
 "Remote" action activates once AnyDesk is installed on the device.
     </description>
-    <releaseNotes>https://github.com/xdukunx/logix/releases/tag/v1.1.0</releaseNotes>
+    <releaseNotes>https://github.com/xdukunx/logix/releases/tag/v1.1.1</releaseNotes>
   </metadata>
   <files>
     <file src="tools\**" target="tools" />

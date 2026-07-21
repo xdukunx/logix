@@ -1,3 +1,10 @@
+logix (1.1.1) noble; urgency=medium
+
+  * Re-tag to attach the .deb/.rpm to the GitHub Release -- the packaging
+    work landed on main after v1.1.0 was already cut.
+
+ -- MindLab <noreply@github.com>  Mon, 21 Jul 2026 00:00:00 +0000
+
 logix (1.1.0) noble; urgency=medium
 
   * Initial Debian/Ubuntu packaging of the Logix cross-platform core + CLI.

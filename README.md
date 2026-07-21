@@ -3,6 +3,13 @@
 [![CI][ci-shield]][ci-url]
 [![License: MIT][license-shield]][license-url]
 [![PII: local by default][pii-shield]][pii-url]
+[![Latest release][release-shield]][release-url]
+
+[![Debian/Ubuntu][deb-shield]][releases-url]
+[![Fedora/RHEL][rpm-shield]][releases-url]
+[![Homebrew][brew-shield]][packaging-url]
+[![Chocolatey][choco-shield]][packaging-url]
+[![Winget][winget-shield]][packaging-url]
 
 <br />
 <div align="center">
@@ -38,6 +45,7 @@
       <ul>
         <li><a href="#is-this-for-you">Is this for you?</a></li>
         <li><a href="#quick-start">Quick start</a></li>
+        <li><a href="#install-via-a-package-manager">Install via a package manager</a></li>
       </ul>
     </li>
     <li>
@@ -141,6 +149,26 @@ python logbook_report.py     # writes an .xlsx into <data-dir>/reports
 
 Either installer also asks (or takes flags) to point the device at a central
 server. Full walkthrough, flags, and mass-deployment: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+### Install via a package manager
+
+| Platform | Ships | Command |
+|---|---|---|
+| 🐧 **Debian / Ubuntu** | core + `logix` CLI | `curl -fsSLO "$(curl -fsSL https://api.github.com/repos/xdukunx/logix/releases/latest \| grep -oE 'https://[^"]+\.deb')" && sudo apt install ./logix_*_all.deb` |
+| 🎩 **Fedora / RHEL** | core + `logix` CLI | `sudo dnf install "$(curl -fsSL https://api.github.com/repos/xdukunx/logix/releases/latest \| grep -oE 'https://[^"]+\.rpm')"` |
+| 🍺 **Homebrew** (macOS/Linux) | core + `logix` CLI | `brew install xdukunx/logix/logix` *(tap not published yet — formula's ready, see below)* |
+| 🍫 **Chocolatey** (Windows) | full sign-in agent | `choco install logix` *(pending community-feed moderation — see below)* |
+| 🪟 **Winget** (Windows) | full sign-in agent | `winget install MindLab.Logix` *(pending winget-pkgs PR — see below)* |
+
+`.deb`/`.rpm` are built and attached to every [Release][releases-url]
+automatically — grab the latest and run **`sudo logix configure`** once.
+Homebrew/Chocolatey/Winget manifests are already written and checksummed
+against the current release; only the publish step (pushing to each
+ecosystem's registry, which needs an account on that service) is pending.
+Full matrix, local build/test commands, and exact publish steps for each:
+[packaging/README.md](packaging/README.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -251,6 +279,15 @@ Found a security issue? Please report it privately — see [SECURITY.md](SECURIT
 [license-url]: LICENSE
 [pii-shield]: https://img.shields.io/badge/PII-local%20by%20default-critical.svg?style=for-the-badge
 [pii-url]: #privacy-read-this
+[release-shield]: https://img.shields.io/github/v/release/xdukunx/logix?style=for-the-badge&label=release&color=success
+[release-url]: https://github.com/xdukunx/logix/releases/latest
+[releases-url]: https://github.com/xdukunx/logix/releases/latest
+[packaging-url]: packaging/README.md
+[deb-shield]: https://img.shields.io/badge/Debian%2FUbuntu-.deb-A81D33?style=for-the-badge&logo=debian&logoColor=white
+[rpm-shield]: https://img.shields.io/badge/Fedora%2FRHEL-.rpm-51A2DA?style=for-the-badge&logo=fedora&logoColor=white
+[brew-shield]: https://img.shields.io/badge/Homebrew-manifest%20ready-FBB040?style=for-the-badge&logo=homebrew&logoColor=white
+[choco-shield]: https://img.shields.io/badge/Chocolatey-manifest%20ready-80B5E3?style=for-the-badge&logo=chocolatey&logoColor=white
+[winget-shield]: https://img.shields.io/badge/Winget-manifest%20ready-0078D4?style=for-the-badge&logo=windowsterminal&logoColor=white
 [Python.badge]: https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white
 [Python-url]: https://www.python.org/
 [FastAPI.badge]: https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white
