@@ -16,7 +16,7 @@ class Logix < Formula
   desc "Privacy-first sign-in logbook for shared lab computers (core + CLI)"
   homepage "https://github.com/xdukunx/logix"
   url "https://github.com/xdukunx/logix/archive/refs/tags/v1.1.1.tar.gz"
-  sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"
+  sha256 "5773c9cca13e08cd642d37b71598d0030afb63ecd22fc8f63b0cde60268013b9"
   license "MIT"
 
   depends_on "python@3.12"

@@ -13,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $version   = '1.1.1'
 $url64      = "https://github.com/xdukunx/logix/releases/download/v$version/LogixAgentSetup.exe"
 # SHA256 of the v1.1.1 release asset. Recompute if the asset is rebuilt.
-$checksum64 = 'REPLACE_WITH_RELEASE_EXE_SHA256'
+$checksum64 = '51DDC119E867C72A581F03050E97575056685B7224FD99A4525D4B1D9ACF32E6'
 
 $packageArgs = @{
     packageName    = 'logix'
