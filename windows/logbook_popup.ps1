@@ -117,7 +117,7 @@ function New-BlurredBackgroundImage {
 # this version directly, but cheap insurance: if MainCard or the backdrop
 # children are ever missing/renamed, an unanimated but still-transparent
 # window is a far less alarming failure mode than an opaque one.)
-function Invoke-LogbookFadeClose($win, [double]$DurationMs = 460) {
+function Invoke-LogbookFadeClose($win, [double]$DurationMs = 380) {
     $root = $win.Content
     $card = $null
     try { $card = $win.FindName('MainCard') } catch {}
@@ -158,8 +158,29 @@ function Invoke-LogbookFadeClose($win, [double]$DurationMs = 460) {
             $blur.Radius = 0
             $card.Effect = $blur
 
-            $popMs = 110.0
+            # Timing rebalanced against Material Design's Container Transform
+            # spec (the exact "one element hands off to another at the same
+            # screen point" pattern this is): its outgoing duration (250ms) is
+            # SHORTER than its incoming duration (300ms), and outgoing content
+            # opacity only fades in the FINAL portion of the transition (its
+            # documented enter/return fade thresholds sit at the START or END
+            # of the timeline, never spread across the whole thing) -- staying
+            # fully opaque while it shrinks/rotates/blurs keeps it visually
+            # PRESENT for the outgoing element's own overlap with the incoming
+            # one. The previous version fought both of these: a slower ~460ms
+            # outgoing animation with opacity fading across its ENTIRE length
+            # meant the card was already faint well before the timer (a
+            # separate process, entrance ~420ms) had time to become visibly
+            # recognizable -- read as "form closes, THEN timer appears"
+            # instead of one continuous handoff.
+            $popMs = 90.0
             $implodeMs = [Math]::Max($DurationMs - $popMs, 100.0)
+            # Opacity holds at 1.0 through this fraction of the implode phase
+            # (matching Material's "content stays opaque, then fades" idea),
+            # THEN fades over the remainder -- so the card stays visually
+            # present, mid-shrink, for most of the motion instead of fading
+            # out in lockstep with it.
+            $opacityHoldFrac = 0.65
             # $script: scope, NOT .GetNewClosure(): PowerShell's
             # GetNewClosure() snapshots a scriptblock's captured variables
             # ONCE, and a mutation made to a plain scalar inside one
@@ -196,6 +217,7 @@ function Invoke-LogbookFadeClose($win, [double]$DurationMs = 460) {
             $script:cardEl = $card
             $script:cardPopMs = $popMs
             $script:cardImplodeMs = $implodeMs
+            $script:cardOpacityHoldFrac = $opacityHoldFrac
             $script:cardTimer = New-Object System.Windows.Threading.DispatcherTimer
             $script:cardTimer.Interval = [TimeSpan]::FromMilliseconds(16)
             $script:cardTimer.Add_Tick({
@@ -215,16 +237,26 @@ function Invoke-LogbookFadeClose($win, [double]$DurationMs = 460) {
                     $script:cardBlur.Radius = 16.0
                     $script:cardTimer.Stop()
                 } else {
-                    # Phase 2 (~350ms): accelerating shrink + twist + blur +
-                    # fade toward the screen center, ease-in cubic -- reads
-                    # as being pulled into the point rather than just
-                    # deflating in place.
+                    # Phase 2 (~260ms): accelerating shrink + twist + blur
+                    # toward the screen center, ease-in cubic -- reads as
+                    # being pulled into the point rather than just deflating
+                    # in place. Opacity does NOT track $eased directly: it
+                    # holds at 1.0 through cardOpacityHoldFrac of this phase,
+                    # then fades over the remainder, so the card stays
+                    # visually present (shrinking/rotating/blurring, but
+                    # still opaque) for most of its own motion -- see the
+                    # Material Design Container Transform comment above.
                     $t = ($elapsedMs - $script:cardPopMs) / $script:cardImplodeMs
                     $eased = $t * $t * $t
                     $script:cardScale.ScaleX = 1.03 + (0.03 - 1.03) * $eased
                     $script:cardScale.ScaleY = $script:cardScale.ScaleX
                     $script:cardRotate.Angle = 7.0 * $eased
-                    $script:cardEl.Opacity = 1.0 - $eased
+                    if ($t -le $script:cardOpacityHoldFrac) {
+                        $script:cardEl.Opacity = 1.0
+                    } else {
+                        $fadeT = ($t - $script:cardOpacityHoldFrac) / (1.0 - $script:cardOpacityHoldFrac)
+                        $script:cardEl.Opacity = 1.0 - ($fadeT * $fadeT * $fadeT)
+                    }
                     $script:cardBlur.Radius = 16.0 * $eased
                 }
             })
