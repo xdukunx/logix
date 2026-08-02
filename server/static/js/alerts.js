@@ -48,7 +48,6 @@ const renderAlerts = (alerts) => {
     if (alerts.length === 0) {
         panelBody.innerHTML = `
             <div class="empty-state">
-                <i class="fa-solid fa-circle-check"></i>
                 <p class="empty-title">Tidak ada peringatan aktif.</p>
             </div>
         `;
@@ -60,7 +59,7 @@ const renderAlerts = (alerts) => {
         const isAcknowledged = a.status === "acknowledged";
         return `
             <div class="alert-item ${isAcknowledged ? "acknowledged" : ""}" data-alert-id="${a.id}">
-                <div class="alert-item-icon" style="color: ${badgeInfo.color}"><i class="fa-solid ${badgeInfo.icon}"></i></div>
+                <div class="alert-item-icon"><span class="status-dot" style="background: ${badgeInfo.color}"></span></div>
                 <div class="alert-item-body">
                     <div class="alert-item-title">${escapeHtml(a.title)}</div>
                     <div class="alert-item-message">${escapeHtml(a.message)}</div>
@@ -76,7 +75,6 @@ export const fetchAlerts = async () => {
     if (!hasLoadedOnce) {
         panelBody.innerHTML = `
             <div class="loading-placeholder">
-                <i class="fa-solid fa-circle-notch fa-spin"></i>
                 <p>Memuat peringatan...</p>
             </div>
         `;

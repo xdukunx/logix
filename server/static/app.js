@@ -21,9 +21,9 @@ const serverStatusText = document.getElementById("server-status-text");
 
 const TABS = {
     monitoring: { title: "Monitoring", onShow: () => { fetchActiveWorkstations(); fetchReplies(); } },
-    analytics: { title: "Analytics", onShow: () => { fetchAnalytics(); fetchSessionLogs(); fetchAuditLog(); } },
-    devices: { title: "Devices", onShow: () => { fetchDevices(); fetchBacklogCount(); } },
-    settings: { title: "Settings", onShow: () => loadConfiguration() },
+    analytics: { title: "Riwayat", onShow: () => { fetchAnalytics(); fetchSessionLogs(); fetchAuditLog(); } },
+    devices: { title: "Perangkat", onShow: () => { fetchDevices(); fetchBacklogCount(); } },
+    settings: { title: "Pengaturan", onShow: () => loadConfiguration() },
 };
 
 let currentTab = "monitoring";

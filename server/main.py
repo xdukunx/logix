@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import re
 import sqlite3
 import subprocess
 import secrets
@@ -2498,17 +2499,85 @@ def favicon():
 # falls back to the legacy vanilla-JS dashboard in server/static/ so a
 # checkout without Node still serves a working UI.
 _react_dist = BASE_DIR.parent / "frontend" / "dist"
-if (_react_dist / "index.html").exists():
+_react_dist_in_use = (_react_dist / "index.html").exists()
+if _react_dist_in_use:
     static_dir = _react_dist
+    logger.info("dashboard: serving the built React app from %s", _react_dist)
 else:
     static_dir = BASE_DIR / "static"
     static_dir.mkdir(exist_ok=True)
+    logger.info("dashboard: frontend/dist not found, serving the no-Node fallback UI")
+
+# App version, used to cache-bust the fallback dashboard's assets.
+try:
+    APP_VERSION = (BASE_DIR.parent / "VERSION").read_text(encoding="utf-8").strip() or "dev"
+except OSError:
+    APP_VERSION = "dev"
+
+
+# Cache policy for the dashboard.
+#
+# The React build emits content-hashed filenames (index-<hash>.js), so those are
+# safe to cache hard and forever. The fallback UI in server/static/ does NOT --
+# its app.js / style.css / js/*.js keep the same URL across releases, so a
+# browser that cached them will happily run last release's JavaScript against
+# this release's API after an upgrade. That was reproduced here: after editing
+# app.js the browser kept executing the previous copy straight from disk cache.
+#
+# `no-cache` alone does not fix it, because an entry cached BEFORE the header
+# existed still has heuristic freshness. So this does two things: `no-store` on
+# the fallback's assets stops any new entry being kept, and read_root() below
+# stamps the two entry points with ?v=<version>, which changes their URL on
+# every release and therefore cannot hit a stale entry at all.
+@app.middleware("http")
+async def set_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/api/"):
+        return response
+    if _react_dist_in_use and "/assets/" in path:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
+
 
 @app.get("/")
 def read_root():
     index_file = static_dir / "index.html"
-    if index_file.exists():
-        return FileResponse(str(index_file))
-    return JSONResponse({"message": "Logix Central Server Active. Static Dashboard missing."})
+    if not index_file.exists():
+        return JSONResponse({"message": "Logix Central Server Active. Static Dashboard missing."})
+
+    headers = {"Cache-Control": "no-store, must-revalidate"}
+    # The React build already hashes its filenames; only the fallback UI needs
+    # its entry points stamped.
+    if _react_dist_in_use:
+        return FileResponse(str(index_file), headers=headers)
+
+    html = index_file.read_text(encoding="utf-8")
+    html = html.replace('href="style.css"', f'href="style.css?v={APP_VERSION}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={APP_VERSION}"')
+    return HTMLResponse(html, headers=headers)
+
+
+@app.get("/app.js", include_in_schema=False)
+def read_fallback_entry():
+    """Serve the fallback UI's entry module with its own imports version-stamped.
+
+    Stamping index.html alone is not enough: a fresh app.js still imports
+    "./js/api.js" etc. at their unversioned URLs, so an upgrade could pair new
+    entry code with modules left over from the previous release. Rewriting the
+    specifiers here means one version bump invalidates the whole module graph.
+    """
+    entry = BASE_DIR / "static" / "app.js"
+    if _react_dist_in_use or not entry.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    src = re.sub(r'(from\s+"\./js/[A-Za-z0-9_.-]+\.js)"', rf'\1?v={APP_VERSION}"',
+                 entry.read_text(encoding="utf-8"))
+    return Response(
+        content=src,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 app.mount("/", StaticFiles(directory=str(static_dir)), name="static")

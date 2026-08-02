@@ -43,7 +43,7 @@ const renderEditableList = (containerId, items) => {
     container.innerHTML = items.map(item => `
         <div class="editable-list-item">
             <input type="text" value="${escapeHtml(item)}" data-list-input>
-            <button type="button" class="btn-icon-danger" data-remove title="Hapus"><i class="fa-solid fa-trash"></i></button>
+            <button type="button" class="btn-icon-danger" data-remove title="Hapus"></button>
         </div>
     `).join("");
 };
@@ -59,7 +59,7 @@ const addEditableListItem = (containerId, value = "") => {
     const container = document.getElementById(containerId);
     const div = document.createElement("div");
     div.className = "editable-list-item";
-    div.innerHTML = `<input type="text" value="${escapeHtml(value)}" data-list-input><button type="button" class="btn-icon-danger" data-remove title="Hapus"><i class="fa-solid fa-trash"></i></button>`;
+    div.innerHTML = `<input type="text" value="${escapeHtml(value)}" data-list-input><button type="button" class="btn-icon-danger" data-remove title="Hapus"></button>`;
     container.appendChild(div);
     div.querySelector("input").focus();
 };
