@@ -1222,6 +1222,86 @@ function Build-LogbookClientResources($cfg) {
       <Setter Property="Foreground" Value="{StaticResource LxText}"/>
     </Style>
 
+    <!-- Dark dropdown. WPF's stock ComboBox chrome is light-themed and
+         unreadable on this surface, so the whole control is re-templated:
+         a hairline Border, a chevron, and a dark popup list. PART_EditableTextBox
+         is present because the Tujuan dropdown is editable (the "Lainnya"
+         free-text escape hatch types straight into it). -->
+    <Style x:Key="LxComboItem" TargetType="ComboBoxItem">
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="ItemBg" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="ItemBg" Property="Background" Value="{StaticResource LxElevated}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="LxCombo" TargetType="ComboBox">
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="ItemContainerStyle" Value="{StaticResource LxComboItem}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid>
+              <ToggleButton x:Name="ToggleBtn" Focusable="False" ClickMode="Press"
+                            IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="ComboBg" CornerRadius="12" Background="{StaticResource LxSurface}"
+                            BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+                      <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"
+                            Data="M 2,3.5 L 5,6.5 L 8,3.5" Stroke="{StaticResource LxMuted}" StrokeThickness="1.5"
+                            StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Border>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
+                                Content="{TemplateBinding SelectionBoxItem}"
+                                Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+              <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" Background="Transparent"
+                       BorderThickness="0" Foreground="{StaticResource LxText}"
+                       CaretBrush="{StaticResource LxAccent}" Margin="{TemplateBinding Padding}"
+                       VerticalAlignment="Center"/>
+              <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom"
+                     IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="None">
+                <Border Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
+                        BorderThickness="1" CornerRadius="12" Padding="6"
+                        MinWidth="{TemplateBinding ActualWidth}" MaxHeight="240">
+                  <ScrollViewer><ItemsPresenter/></ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsEditable" Value="True">
+                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                <Setter TargetName="ContentSite" Property="Visibility" Value="Collapsed"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.75"/>
+                <Setter TargetName="ToggleBtn" Property="Visibility" Value="Collapsed"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- Pill button: fully rounded, no gradient, no glow. Outline by default;
          the caller sets Background/Foreground for the primary + armed forms. -->
     <Style x:Key="LxPill" TargetType="Button">
@@ -1321,6 +1401,7 @@ function Build-LogbookPopupXaml($cfg) {
     $tKet     = ConvertTo-LogbookXmlText ([string]$cfg.text.ketLabel)
     $tSubmit  = ConvertTo-LogbookXmlText ([string]$cfg.text.submit)
     $tHint    = ConvertTo-LogbookXmlText ([string]$cfg.text.hint)
+    $tHeading = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'signinTitle' 'Mulai sesi')
 
     $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
     $purposeItems = (@($cfg.purposes)    | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
@@ -1336,162 +1417,135 @@ function Build-LogbookPopupXaml($cfg) {
     # ShowInTaskbar=True is the safer, lower-risk direction to try first.
     # Same change applied to every other fullscreen/topmost window this
     # client shows (welcome-back, lock, emergency overlay, timer widget).
+    $res = Build-LogbookClientResources $cfg
+    # v3 sign-in popup (design: docs/design_handoff_logix_v3/
+    # "LogiX Sign-in Popup.dc.html", README section 6).
+    #
+    # A 320px dark dialog (radius 22) centred over a dimmed full-screen scrim,
+    # matching the pill's visual language. Shown for PHYSICAL access only --
+    # SSH/AnyDesk sessions are logged from remote-login credentials and never
+    # raise this window.
+    #
+    # Deviation from the prototype, deliberate: the design draws three fields
+    # (NIM, Tujuan, read-only access type). This build also renders Nama and
+    # Keterangan because `requiredFields` in config can demand them and the
+    # session schema (which we must not change) stores them -- dropping the
+    # inputs would leave those columns permanently empty in every report. The
+    # layout, spacing and type scale are otherwise the design's.
+    #
+    # Element names are the existing contract logbook_popup.ps1 binds to
+    # (NamaBox / NimBox / AccessBox / TujuanBox / KetBox / SubmitBtn /
+    # HintText / StartTimeText / MainCard / BgImage / MascotImage); only the
+    # presentation changed, so the controller keeps working untouched.
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" Background="$surface"
-        AllowsTransparency="True" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True"
+        Background="$overlay" FontFamily="Segoe UI">
   <Window.Resources>
-    <SolidColorBrush x:Key="PrussianBlue" Color="$primary" />
-    <SolidColorBrush x:Key="Silver" Color="$muted" />
-    <SolidColorBrush x:Key="Pompadour" Color="$accent" />
-    <SolidColorBrush x:Key="WhiteBrush" Color="$text" />
-
-    <Style x:Key="LabelTextStyle" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="13" />
-      <Setter Property="Foreground" Value="$text" />
-      <Setter Property="Margin" Value="0,0,0,7" />
+$res
+    <!-- Dark field: hairline border, radius 12, accent ring on focus. -->
+    <Style x:Key="LxField" TargetType="TextBox">
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="CaretBrush" Value="{StaticResource LxAccent}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="FieldBg" CornerRadius="12" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="FieldBg" Property="BorderBrush" Value="{StaticResource LxAccent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
-
-    <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
-      <Setter Property="Height" Value="44" />
-      <Setter Property="Padding" Value="12,8" />
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="Medium" />
-      <Setter Property="BorderBrush" Value="$muted" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Background" Value="$primary" />
-      <Setter Property="Foreground" Value="$text" />
-      <Setter Property="CaretBrush" Value="$text" />
-      <Setter Property="SelectionBrush" Value="$accent" />
-      <Setter Property="SelectionTextBrush" Value="$text" />
-    </Style>
-
-    <Style x:Key="ReadableComboBoxItemStyle" TargetType="ComboBoxItem">
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Background" Value="$text" />
-      <Setter Property="Foreground" Value="$accent" />
-      <Setter Property="Padding" Value="10,7" />
-      <Setter Property="MinHeight" Value="36" />
-      <Setter Property="BorderBrush" Value="#E6E6E6" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-    </Style>
-
-    <Style x:Key="ReadableComboBoxStyle" TargetType="ComboBox">
-      <Setter Property="Height" Value="44" />
-      <Setter Property="Padding" Value="8,6" />
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Background" Value="$text" />
-      <Setter Property="Foreground" Value="$accent" />
-      <Setter Property="BorderBrush" Value="$muted" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="TextElement.Foreground" Value="$accent" />
-      <Setter Property="ItemContainerStyle" Value="{StaticResource ReadableComboBoxItemStyle}" />
+    <Style x:Key="LxFieldLabel" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{StaticResource LxMuted}"/>
+      <Setter Property="Margin" Value="0,0,0,6"/>
     </Style>
   </Window.Resources>
 
   <Grid>
-    <Image Name="BgImage" Stretch="Fill" Opacity="0.88">
-      <Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect>
-    </Image>
-    <Rectangle Fill="$overlay" />
+    <!-- Kept for the controller's optional wallpaper/mascot hooks; the v3
+         dialog itself is chrome-free, so both start collapsed. -->
+    <Image Name="BgImage" Stretch="UniformToFill" Opacity="0.18" Visibility="Collapsed"/>
 
-    <Border Name="MainCard" Width="790" CornerRadius="18" BorderBrush="$border" BorderThickness="1" Background="$primary"
-            HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True">
-      <Border.Effect><DropShadowEffect BlurRadius="32" ShadowDepth="0" Opacity="0.42" Color="$accent" /></Border.Effect>
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <Border Name="MainCard" Width="320" CornerRadius="22" Padding="28,26"
+            Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="24" Opacity="0.55" Color="#000000"/></Border.Effect>
+      <StackPanel>
 
-        <Border Grid.Row="0" CornerRadius="18,18,0,0" Padding="30,26,30,24" BorderBrush="$text" BorderThickness="0,0,0,1">
-          <!-- Mascot hero: the faculty mascot (MascotImage, populated from
-               branding.logoPath in logbook_popup.ps1) sits centred above the
-               wordmark and title. LogoText stays the wordmark fallback and is
-               always shown beneath the mascot. -->
-          <StackPanel HorizontalAlignment="Center">
-            <Image Name="MascotImage" Height="132" MaxWidth="240" Stretch="Uniform" HorizontalAlignment="Center"
-                   SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" Margin="0,0,0,12" />
-            <TextBlock Name="LogoText" Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="30"
-                       FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
-            <TextBlock Text="$title" FontFamily="Segoe UI" FontSize="20" FontWeight="SemiBold"
-                       Foreground="$text" HorizontalAlignment="Center" Margin="0,4,0,0" />
-            <TextBlock Text="$subtitle" FontFamily="Segoe UI" FontSize="13" Foreground="$muted"
-                       HorizontalAlignment="Center" Margin="0,2,0,0" />
-          </StackPanel>
-        </Border>
-
-        <StackPanel Grid.Row="1" Margin="36,28,36,34">
-          <TextBlock Text="$tIntro" FontFamily="Segoe UI" FontSize="12.5"
-                     FontWeight="SemiBold" Foreground="$text" Margin="0,0,0,7" />
-          <TextBlock Name="StartTimeText" Text="$tStart" FontFamily="Segoe UI"
-                     FontSize="12" Foreground="$muted" Margin="0,0,0,18" />
-
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-              <TextBlock Text="$tNama" Style="{StaticResource LabelTextStyle}" />
-              <TextBox Name="NamaBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-              <TextBlock Text="$tNim" Style="{StaticResource LabelTextStyle}" />
-              <TextBox Name="NimBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
-            </StackPanel>
-          </Grid>
-
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="230" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-              <TextBlock Text="$tAccess" Style="{StaticResource LabelTextStyle}" />
-              <ComboBox Name="AccessBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
-$accessItems
-              </ComboBox>
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-              <TextBlock Text="$tPurpose" Style="{StaticResource LabelTextStyle}" />
-              <ComboBox Name="TujuanBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
-$purposeItems
-              </ComboBox>
-            </StackPanel>
-          </Grid>
-
-          <TextBlock Text="$tKet" Style="{StaticResource LabelTextStyle}" />
-          <TextBox Name="KetBox" Style="{StaticResource InputTextBoxStyle}" Height="122" Padding="12,10" TextWrapping="Wrap" AcceptsReturn="True"
-                   VerticalScrollBarVisibility="Auto" Margin="0,0,0,20" />
-
-          <Grid Margin="0,0,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="198" />
-            </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="$primary" CornerRadius="10" Padding="12,9" BorderBrush="$border" BorderThickness="1">
-              <TextBlock Name="HintText" Text="$tHint"
-                         FontFamily="Segoe UI" FontSize="11.5" FontWeight="SemiBold" Foreground="$muted" TextWrapping="Wrap" />
-            </Border>
-            <Button Grid.Column="2" Name="SubmitBtn" Height="48" Content="$tSubmit" FontFamily="Segoe UI"
-                    FontSize="21" FontWeight="Bold" Background="$accent" Foreground="$text" BorderBrush="$border"
-                    BorderThickness="1" IsEnabled="False" Opacity="0.45" />
-          </Grid>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+          <Border Width="26" Height="26" CornerRadius="8" Background="{StaticResource LxAccent}" Margin="0,0,9,0">
+            <TextBlock Text="&gt;_" FontFamily="Consolas" FontSize="12" FontWeight="Bold"
+                       Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Name="LogoText" Text="$logoText" FontFamily="Consolas" FontSize="13"
+                     Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+          <Image Name="MascotImage" Width="0" Height="0" Visibility="Collapsed"/>
         </StackPanel>
-      </Grid>
+
+        <!-- Short heading + the configured intro as supporting copy. The
+             design's heading is two words; `text.intro` is a full sentence,
+             so it reads as body rather than clipping the title. -->
+        <TextBlock Text="$tHeading" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Foreground="{StaticResource LxText}" Margin="0,0,0,4"/>
+        <TextBlock Text="$tIntro" FontSize="12" TextWrapping="Wrap" LineHeight="17"
+                   Foreground="{StaticResource LxMuted}" Margin="0,0,0,18"/>
+
+        <TextBlock Text="$tNim" Style="{StaticResource LxFieldLabel}"/>
+        <TextBox Name="NimBox" Style="{StaticResource LxField}" FontFamily="Consolas" Margin="0,0,0,14"/>
+
+        <TextBlock Text="$tNama" Style="{StaticResource LxFieldLabel}"/>
+        <TextBox Name="NamaBox" Style="{StaticResource LxField}" Margin="0,0,0,14"/>
+
+        <TextBlock Text="$tPurpose" Style="{StaticResource LxFieldLabel}"/>
+        <ComboBox Name="TujuanBox" Style="{StaticResource LxCombo}" IsEditable="True" Margin="0,0,0,14">
+$purposeItems
+          <ComboBoxItem Content="Lainnya - tulis sendiri..." />
+        </ComboBox>
+
+        <TextBlock Text="$tKet" Style="{StaticResource LxFieldLabel}"/>
+        <TextBox Name="KetBox" Style="{StaticResource LxField}" Margin="0,0,0,14"/>
+
+        <!-- Access type is auto-detected, never a user choice: the control is
+             present so the controller can select the detected value, but it is
+             disabled and reads as a status line with a dot. -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+          <Ellipse Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <TextBlock Text="$tAccess" FontSize="12" Foreground="{StaticResource LxMuted}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <ComboBox Name="AccessBox" Style="{StaticResource LxCombo}" IsEnabled="False" FontSize="12" BorderThickness="0" Padding="0" VerticalAlignment="Center">
+$accessItems
+          </ComboBox>
+        </StackPanel>
+
+        <Button Name="SubmitBtn" Content="$tSubmit" Style="{StaticResource LxPill}"
+                Padding="0,11" HorizontalContentAlignment="Center" FontSize="13"
+                Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                Foreground="#FFFFFF" Margin="0,0,0,14"/>
+
+        <!-- Inline validation: one sentence telling the user how to fix it.
+             No shake, no separate dialog. -->
+        <TextBlock Name="HintText" Text="$tHint" FontSize="11.5" TextWrapping="Wrap"
+                   TextAlignment="Center" Foreground="{StaticResource LxMuted}" Margin="0,0,0,10"/>
+
+        <TextBlock Name="StartTimeText" Text="$tStart" FontSize="11" TextWrapping="Wrap"
+                   TextAlignment="Center" LineHeight="16" Foreground="{StaticResource LxMuted}"/>
+      </StackPanel>
     </Border>
   </Grid>
 </Window>
@@ -2066,7 +2120,36 @@ function Get-LogbookHeartbeatSeconds {
     return 5
 }
 
+# Idle auto-end threshold, in seconds. RETURNS 0 WHEN THE POLICY IS OFF -- every
+# caller must treat 0 as "never auto-close", not as "close immediately".
+#
+# Resolution order:
+#   1. devices.idle_auto_end.<category> from the server-delivered config
+#      (Settings > Perangkat). Ships disabled for every category, so an
+#      upgrade never starts closing sessions on its own.
+#   2. LOGIX_IDLE_TIMEOUT_HOURS, the pre-existing env override.
+#   3. The historical 4-hour default.
 function Get-LogbookIdleTimeoutSeconds {
+    try {
+        $cfg = Get-LogbookConfig
+        $policy = $null
+        if ($cfg -and $cfg.devices -and $cfg.devices.idle_auto_end) {
+            $category = [string]$cfg.devices.category
+            if (-not $category) { $category = 'custom' }
+            $map = $cfg.devices.idle_auto_end
+            if ($map.Contains($category)) { $policy = $map[$category] }
+        }
+        if ($null -ne $policy) {
+            if (-not $policy.enabled) { return 0 }
+            $h = 0.0
+            if ([double]::TryParse([string]$policy.hours, [ref]$h) -and $h -gt 0) {
+                return [int]($h * 3600)
+            }
+        }
+    } catch {
+        Write-LogbookError "Idle policy lookup failed: $($_.Exception.Message)"
+    }
+
     $hours = Get-LogbookConfigEnv 'LOGIX_IDLE_TIMEOUT_HOURS'
     $parsed = 0.0
     if ($hours -and [double]::TryParse($hours, [ref]$parsed) -and $parsed -gt 0) {

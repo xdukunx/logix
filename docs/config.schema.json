@@ -94,6 +94,30 @@
         "naming_pattern": {
           "type": "string",
           "description": "Suggested template for device display names, e.g. \"{type} - {room} - {number}\"."
+        },
+        "category": {
+          "type": "string",
+          "description": "This device's category, delivered by the server. Selects which idle_auto_end policy applies."
+        },
+        "idle_auto_end": {
+          "type": "object",
+          "description": "Per-category idle auto-end policy (Settings > Perangkat). Ships disabled for every category so an upgrade never starts closing sessions on its own. Idle is measured from input AND compute load, so long-running jobs stay 'active'. The user is warned 5 minutes before the session closes.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "When false the category never auto-ends; the client reads the threshold as 0 = never."
+              },
+              "hours": {
+                "type": "number",
+                "minimum": 0.25,
+                "description": "Idle hours before the session is closed automatically."
+              }
+            },
+            "required": ["enabled"],
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false

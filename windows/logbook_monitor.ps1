@@ -214,7 +214,10 @@ while ($true) {
         if ((Test-Path $Global:SessionFile) -and -not (Test-Path $Global:LockedFlagPath)) {
             $idleSec = Get-LogbookIdleSeconds
             $limitSec = Get-LogbookIdleTimeoutSeconds
-            if ($null -ne $idleSec -and $idleSec -ge $limitSec) {
+            # A limit of 0 means the policy is OFF for this device's category.
+            # Without the -gt 0 guard that would read as "idle >= 0" and close
+            # every session on the very first check.
+            if ($null -ne $idleSec -and $limitSec -gt 0 -and $idleSec -ge $limitSec) {
                 Write-LogbookInfo "Idle timeout reached (${idleSec}s >= ${limitSec}s); auto-closing session."
                 Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
             }

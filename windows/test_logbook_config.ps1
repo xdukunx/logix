@@ -14,11 +14,21 @@ Write-Host "default config -> XAML"
 $cfg = Get-LogbookDefaultConfig
 $xaml = Build-LogbookPopupXaml $cfg
 $doc = [xml]$xaml
-Assert ($doc.Window.Background -eq '#070C15') "default deep-navy surface on fullscreen popup background (Client Foundation)"
+# v3: the fullscreen window is now a translucent scrim over the lock screen and
+# the dialog itself is a 320px card, rather than the window being the surface.
+Assert ($doc.Window.Background -eq '#D8070C15') "fullscreen popup is a dimmed scrim, not an opaque surface (v3 section 6)"
+$mainCard = $doc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MainCard' }
+Assert ($mainCard.Width -eq '320') "sign-in dialog is 320px wide"
+Assert ($mainCard.CornerRadius -eq '22') "sign-in dialog uses radius 22, matching the pill language"
 $logo = ($doc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'LogoText' }).Text
 Assert ($logo -eq 'Logix') "default logo text Logix"
 $items = $doc.SelectNodes("//*[local-name()='ComboBoxItem']")
-Assert ($items.Count -eq 5) "2 access + 3 purpose = 5 combo items"
+Assert ($items.Count -eq 6) "2 access + 3 purpose + the 'Lainnya' free-text escape = 6 combo items"
+$accessBox = $doc.SelectNodes("//*[local-name()='ComboBox']") | Where-Object { $_.Name -eq 'AccessBox' }
+Assert ($accessBox.IsEnabled -eq 'False') "access type is auto-detected and read-only, never a user choice"
+$nimBox = $doc.SelectNodes("//*[local-name()='TextBox']") | Where-Object { $_.Name -eq 'NimBox' }
+Assert ($nimBox.FontFamily -eq 'Consolas') "NIM input is mono"
+Assert ($xaml -match 'Tanpa perekaman layar' -or $xaml -match 'StartTimeText') "privacy line is always visible, not behind a link"
 
 Write-Host "partial override -> deep-merge keeps sibling defaults"
 $tmp = Join-Path $env:TEMP ("logix_cfgtest_" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".json")
@@ -39,7 +49,7 @@ try {
     $logo2 = ($doc2.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'LogoText' }).Text
     Assert ($logo2 -eq 'CHEM & BIO') "ampersand in logo text escaped and round-trips"
     $purpose2 = $doc2.SelectNodes("//*[local-name()='ComboBox'][@Name='TujuanBox']/*")
-    Assert ($purpose2.Count -eq 4) "4 purpose items rendered"
+    Assert ($purpose2.Count -eq 5) "4 configured purposes + the 'Lainnya' free-text escape hatch"
 } finally {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 }
@@ -99,6 +109,19 @@ Assert ($timerXaml -notmatch 'GradientBrush') "no gradient anywhere in the timer
 Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status dot is static"
 $mono = $timerDoc.SelectNodes("//*[local-name()='TextBlock'][@FontFamily='Consolas']")
 Assert ($mono.Count -ge 4) "time / ID values render in Consolas (mono tabular)"
+
+Write-Host "idle auto-end policy"
+# Safety-critical: Get-LogbookIdleTimeoutSeconds returns 0 for a DISABLED
+# category. A caller that compares "idle >= limit" without guarding limit > 0
+# would then close every session on its first check. Assert the guard is
+# present rather than trusting a comment.
+$monitorSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_monitor.ps1')
+Assert ($monitorSrc -match '\$limitSec -gt 0 -and \$idleSec -ge \$limitSec') "monitor treats a 0 idle limit as 'never', not 'close now'"
+$commonSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_common.ps1')
+Assert ($commonSrc -match 'if \(-not \$policy\.enabled\) \{ return 0 \}') "a disabled category resolves to 0 (never auto-end)"
+$schema = Get-Content -Raw (Join-Path $PSScriptRoot '..\docs\config.schema.json') | ConvertFrom-Json
+Assert ($null -ne $schema.properties.devices.properties.idle_auto_end) "config schema documents devices.idle_auto_end"
+Assert ($null -ne $schema.properties.devices.properties.category) "config schema documents the device category the policy keys on"
 
 Write-Host "strip posture -> XAML"
 $stripDoc = [xml](Build-LogbookStripXaml $cfg)
