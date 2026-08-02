@@ -1696,6 +1696,7 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
     $accent = $theme.accent; $text = $theme.text; $muted = $theme.muted
     $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
     $warn   = $theme.signalWarning
+    $res    = Build-LogbookClientResources $cfg
     $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
     $namaX  = ConvertTo-LogbookXmlText $Nama
     $reasonX = ConvertTo-LogbookXmlText $Reason
@@ -1712,6 +1713,9 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="Segoe UI">
+  <Window.Resources>
+$res
+  </Window.Resources>
   <Grid>
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
       <Image Name="MascotImage" Height="96" Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,10"/>
@@ -1719,12 +1723,14 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
       <TextBlock Name="LockClock" Text="--:--" FontFamily="Consolas" FontSize="15" Foreground="$muted" HorizontalAlignment="Center" Margin="0,6,0,22"/>
       <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="20" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" TextAlignment="Center"/>
       <TextBlock Text="$tPaused" FontSize="14" Foreground="$muted" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,20"/>
-      <Border Background="$elevated" CornerRadius="12" BorderBrush="$border" BorderThickness="1" Padding="20,16" Margin="0,0,0,20">
+      <Border Background="$elevated" CornerRadius="22" BorderBrush="$border" BorderThickness="1" Padding="20,16" Margin="0,0,0,20">
         <StackPanel>
+          <!-- v3: status is a dot plus a label, never a tinted pill. The
+               amber fill this badge used to carry was the one guard-rail
+               violation left on this screen. -->
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,10">
-            <Border Background="#22F59E0B" CornerRadius="999" Padding="9,3" Margin="0,0,10,0">
-              <TextBlock Text="$tBadge" FontFamily="Segoe UI Semibold" FontSize="11" FontWeight="Bold" Foreground="$warn"/>
-            </Border>
+            <Ellipse Width="8" Height="8" Fill="$warn" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock Text="$tBadge" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$text" VerticalAlignment="Center" Margin="0,0,10,0"/>
             <TextBlock Text="$tElapsed" FontSize="12" Foreground="$muted" VerticalAlignment="Center"/>
           </StackPanel>
           <TextBlock Name="LockElapsed" Text="00:00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" Margin="0,0,0,12"/>
@@ -1741,8 +1747,9 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
         </StackPanel>
       </Border>
       <TextBlock Text="$tHint" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-      <Button Name="UnlockBtn" Content="$tUnlock" Height="46" MinWidth="220" HorizontalAlignment="Center" Cursor="Hand"
-              Background="$accent" Foreground="#FFFFFF" BorderThickness="0" FontFamily="Segoe UI Semibold" FontSize="15" FontWeight="Bold"/>
+      <Button Name="UnlockBtn" Content="$tUnlock" Style="{StaticResource LxPill}" MinWidth="220"
+              HorizontalAlignment="Center" Padding="24,12" FontSize="14"
+              Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}" Foreground="#FFFFFF"/>
     </StackPanel>
   </Grid>
 </Window>
