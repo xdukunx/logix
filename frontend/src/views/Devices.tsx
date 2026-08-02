@@ -1,475 +1,338 @@
-// Devices tab: fleet-summary stats, the persistent device registry table,
-// and the Device Detail dialog (sync health, recent commands with retry,
-// latest screenshot, Rename/Screenshot/Revoke). Ported from
-// server/static/js/devices.js.
-import { useCallback, useEffect, useState } from "react";
-import type { ComponentType, SVGProps } from "react";
-import { Badge } from "@astryxdesign/core/Badge";
-import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { Dialog } from "@astryxdesign/core/Dialog";
-import { Grid } from "@astryxdesign/core/Grid";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
-import { Table } from "@astryxdesign/core/Table";
-import { Heading, Text } from "@astryxdesign/core/Text";
-import { useToast } from "@astryxdesign/core/Toast";
-import {
-  ClockIcon,
-  QueueListIcon,
-  ServerStackIcon,
-  ShieldCheckIcon,
-  SignalIcon,
-  SignalSlashIcon,
-} from "@heroicons/react/24/outline";
+// Perangkat -- the device registry. Design: docs/design_handoff_logix_v3/
+// LogiX Devices & Settings v2.dc.html (D-05) + README section 3.
+//
+// A flat table plus a 330px detail drawer. The 7-day sync sparkline column was
+// explicitly cut: sync status is now just a dot plus a "X ago" timestamp. The
+// one-time, 15-minute invite-code flow keeps its behaviour exactly and is only
+// restyled.
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { fetchWithAuth, getJson, postEmpty, sendJson } from "../api";
-import EnrollDialog from "../components/EnrollDialog";
-import StatCard from "../components/StatCard";
-import ConfirmModal from "../components/modals/ConfirmModal";
-import RenameModal from "../components/modals/RenameModal";
-import ScreenshotRequestModal from "../components/modals/ScreenshotRequestModal";
-import EmptyState from "../components/states/EmptyState";
-import ErrorState from "../components/states/ErrorState";
-import { SkeletonGrid } from "../components/states/Skeleton";
-import type { CommandStatus, Device, DeviceDetail, DeviceScreenshot, SyncStatus } from "../types";
-import { formatDateTime, timeAgo, usePolling } from "../util";
+import { getJson, sendJson } from "../api";
+import type { StationStatus } from "../tokens";
+import type { Device, DeviceDetail, SyncStatus } from "../types";
+import { Mono, PageHeader, SectionLabel, StatusDot } from "../ui/base";
+import { Button, PillSelect, SearchChip } from "../ui/controls";
+import { useBreakpoint } from "../ui/hooks";
+import { Drawer, Modal, ModalActions, useToast } from "../ui/overlays";
+import { Table, type Column } from "../ui/table";
+import { splitDeviceName, timeAgo, useTicker } from "../util";
 
-const SYNC_BADGE: Record<SyncStatus, { label: string; variant: "success" | "warning" | "neutral" }> = {
-  online: { label: "Online", variant: "success" },
-  stale: { label: "Stale", variant: "warning" },
-  offline: { label: "Offline", variant: "neutral" },
-  never_seen: { label: "Never Seen", variant: "neutral" },
+const SYNC_STATUS: Record<SyncStatus, StationStatus> = {
+  online: "active",
+  stale: "locked",
+  offline: "offline",
+  never_seen: "idle",
 };
 
-const COMMAND_BADGE: Record<CommandStatus, { label: string; variant: "success" | "warning" | "error" | "neutral" }> = {
-  queued: { label: "Menunggu", variant: "warning" },
-  done: { label: "Selesai", variant: "success" },
-  failed: { label: "Gagal", variant: "error" },
-  expired: { label: "Kedaluwarsa", variant: "neutral" },
+const CATEGORIES = [
+  { value: "gpu", label: "GPU" },
+  { value: "cpu", label: "CPU" },
+  { value: "custom", label: "Umum" },
+];
+
+/** Countdown to the invite's expiry, in the mm:ss the design shows. */
+const expiryLabel = (expiresAt: string | null | undefined): string => {
+  if (!expiresAt) return "-";
+  const left = Math.max(0, (new Date(expiresAt).getTime() - Date.now()) / 1000);
+  if (left <= 0) return "kedaluwarsa";
+  return `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
 };
-
-const DEVICES_PER_PAGE = 15;
-
-const syncBadge = (status: SyncStatus) => {
-  const info = SYNC_BADGE[status] ?? { label: status, variant: "neutral" as const };
-  return <Badge variant={info.variant} label={info.label} />;
-};
-
-const commandBadge = (status: CommandStatus) => {
-  const info = COMMAND_BADGE[status] ?? { label: status, variant: "neutral" as const };
-  return <Badge variant={info.variant} label={info.label} />;
-};
-
 
 export default function Devices() {
   const toast = useToast();
+  const isDesktop = useBreakpoint() === "desktop";
   const [devices, setDevices] = useState<Device[] | null>(null);
-  const [backlog, setBacklog] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<DeviceDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [screenshot, setScreenshot] = useState<DeviceScreenshot | null>(null);
-  // Action modals (replace native prompt()/confirm()).
-  const [isRenameOpen, setRenameOpen] = useState(false);
-  const [isScreenshotOpen, setScreenshotOpen] = useState(false);
-  const [isRevokeOpen, setRevokeOpen] = useState(false);
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
 
-  const notify = useCallback(
-    (message: string, isError = false) =>
-      toast({ body: message, type: isError ? "error" : "info" }),
-    [toast],
-  );
+  const [isInviteOpen, setInviteOpen] = useState(false);
+  const [inviteCategory, setInviteCategory] = useState("cpu");
+  const [invite, setInvite] = useState<{ invite_code: string; expires_at: string } | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<Device | null>(null);
+
+  useTicker(1000); // keeps the invite countdown and the "X ago" column live
 
   const refresh = useCallback(async () => {
     try {
-      setDevices(await getJson<Device[]>("/api/devices", "Gagal memuat data devices"));
-      setError(null);
+      setDevices(await getJson<Device[]>("/api/devices", "Gagal memuat daftar perangkat"));
     } catch (err) {
-      setError((err as Error).message);
+      toast((err as Error).message, "alert");
     }
-    try {
-      const data = await getJson<{ total: number }>(
-        "/api/audit-log?status=queued&limit=1",
-        "Gagal memuat antrean perintah",
-      );
-      setBacklog(data.total);
-    } catch {
-      // stat stays at its last value on transient failure, like the legacy UI
-    }
-  }, []);
-
-  usePolling(refresh, 10000);
-
-  const loadDetail = useCallback(async (deviceId: string) => {
-    setDetail(null);
-    setDetailError(null);
-    setScreenshot(null);
-    try {
-      setDetail(await getJson<DeviceDetail>(`/api/devices/${deviceId}`, "Gagal memuat detail device"));
-    } catch (err) {
-      setDetailError((err as Error).message);
-      return;
-    }
-    // 404/403 are normal ("no capture yet" / no screenshot permission) --
-    // the section just stays hidden.
-    try {
-      const res = await fetchWithAuth(`/api/devices/${deviceId}/screenshot`);
-      if (res.ok) setScreenshot(await res.json());
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
-    if (detailId) loadDetail(detailId);
-  }, [detailId, loadDetail]);
+    refresh();
+  }, [refresh]);
 
-  const submitRename = async (display_name: string) => {
-    if (!detail) return;
-    try {
-      await sendJson(
-        "/api/devices/rename",
-        "PUT",
-        { hostname: detail.device.hostname, display_name },
-        "Gagal mengubah nama device",
-      );
-      notify(`Device diganti nama menjadi "${display_name}"`);
-      if (detailId) loadDetail(detailId);
-      refresh();
-    } catch (err) {
-      notify((err as Error).message, true);
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      return;
     }
-  };
-
-  const submitRevoke = async () => {
-    if (!detailId || !detail) return;
-    try {
-      await postEmpty(`/api/devices/${detailId}/revoke`, "Gagal mencabut API key device");
-      notify(`API key untuk ${detail.device.hostname} telah dicabut.`);
-      loadDetail(detailId);
-      refresh();
-    } catch (err) {
-      notify((err as Error).message, true);
-    }
-  };
-
-  const submitScreenshot = async (reason: string) => {
-    if (!detail) return;
-    const hostname = detail.device.hostname;
-    const prevAt = screenshot?.captured_at ?? "";
-    try {
-      await sendJson("/api/control/screenshot", "POST", { hostname, reason }, "Gagal meminta screenshot");
-      notify("Permintaan screenshot dikirim. Menunggu device merespons...");
-      // Poll for the new capture so it appears here without reopening.
-      if (!detailId) return;
-      for (let i = 0; i < 12; i++) {
-        await new Promise((r) => setTimeout(r, 1500));
-        try {
-          const res = await fetchWithAuth(`/api/devices/${detailId}/screenshot`);
-          if (res.ok) {
-            const shot: DeviceScreenshot = await res.json();
-            if (shot.captured_at !== prevAt) {
-              setScreenshot(shot);
-              return;
-            }
-          }
-        } catch {
-          /* keep polling */
-        }
-      }
-    } catch (err) {
-      notify((err as Error).message, true);
-    }
-  };
-
-  const retryAction = (deviceId: string, actionId: number) => {
-    postEmpty(`/api/devices/${deviceId}/actions/${actionId}/retry`, "Gagal mengulangi perintah")
-      .then(() => {
-        notify("Perintah diulang dan dimasukkan ke antrean.");
-        loadDetail(deviceId);
-        refresh();
+    let isCurrent = true;
+    getJson<DeviceDetail>(`/api/devices/${selected}`, "Gagal memuat detail perangkat")
+      .then((d) => {
+        if (isCurrent) setDetail(d);
       })
-      .catch((err) => notify(err.message, true));
+      .catch(() => {
+        /* the row still renders from the list payload */
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [selected]);
+
+  const rows = useMemo(() => {
+    const list = devices ?? [];
+    const needle = search.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter((d) =>
+      `${d.hostname} ${d.display_name ?? ""} ${d.category}`.toLowerCase().includes(needle),
+    );
+  }, [devices, search]);
+
+  const onlineCount = (devices ?? []).filter((d) => d.currently_online).length;
+
+  const createInvite = async () => {
+    try {
+      const res = await sendJson(
+        "/api/enroll/invite",
+        "POST",
+        { category: inviteCategory },
+        "Gagal membuat kode undangan",
+      );
+      setInvite(await res.json());
+    } catch (err) {
+      toast((err as Error).message, "alert");
+    }
   };
 
-  const counts = { total: 0, online: 0, stale: 0, offline: 0 };
-  for (const d of devices ?? []) {
-    counts.total++;
-    if (d.sync_status === "online") counts.online++;
-    else if (d.sync_status === "stale") counts.stale++;
-    else counts.offline++; // offline + never_seen both read as "not reachable"
-  }
+  const revoke = async (device: Device) => {
+    try {
+      await sendJson(`/api/devices/${device.device_id}/revoke`, "POST", {}, "Gagal menghapus perangkat");
+      toast("Perangkat dihapus dari registri.");
+      setRevokeTarget(null);
+      setSelected(null);
+      refresh();
+    } catch (err) {
+      toast((err as Error).message, "alert");
+    }
+  };
 
-  // Client-side pagination for the registry table (the fleet can grow to
-  // hundreds; /api/devices returns the full list). Clamp the page so a
-  // shrinking list never leaves us stranded past the end.
-  const totalPages = Math.max(1, Math.ceil(counts.total / DEVICES_PER_PAGE));
-  const safePage = Math.min(page, totalPages);
-  const pagedDevices = (devices ?? []).slice(
-    (safePage - 1) * DEVICES_PER_PAGE,
-    safePage * DEVICES_PER_PAGE,
+  const columns: Column<Device>[] = [
+    {
+      key: "id",
+      header: "ID",
+      width: "120px",
+      phone: "primary",
+      render: (d) => (
+        <Mono style={{ fontSize: 12.5, fontWeight: 600 }}>
+          {splitDeviceName(d.display_name || d.hostname).id}
+        </Mono>
+      ),
+    },
+    {
+      key: "spec",
+      header: "Spesifikasi",
+      width: "1fr",
+      phone: "secondary",
+      render: (d) => (
+        <span style={{ color: "var(--lx-muted)" }}>
+          {splitDeviceName(d.display_name || d.hostname).spec || d.hostname}
+        </span>
+      ),
+    },
+    { key: "kategori", header: "Kategori", width: "100px", phone: "secondary", render: (d) => d.category },
+    {
+      key: "sync",
+      header: "Sinkronisasi",
+      width: "170px",
+      phone: "secondary",
+      // Dot + "X ago" only -- the 7-day sparkline that lived here was cut.
+      render: (d) => (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <StatusDot status={SYNC_STATUS[d.sync_status] ?? "idle"} label={d.sync_status} />
+          <Mono style={{ fontSize: 12 }}>{timeAgo(d.last_seen)}</Mono>
+        </span>
+      ),
+    },
+    {
+      key: "versi",
+      header: "Versi client",
+      width: "130px",
+      render: (d) => <Mono style={{ fontSize: 12 }}>{String(d.client_version ?? "-")}</Mono>,
+    },
+  ];
+
+  const selectedDevice = (devices ?? []).find((d) => d.device_id === selected) ?? null;
+  const selectedName = selectedDevice
+    ? splitDeviceName(selectedDevice.display_name || selectedDevice.hostname)
+    : null;
+
+  const detailRow = (label: string, value: ReactNode) => (
+    <div style={{ display: "flex", fontSize: 12.5 }}>
+      <span style={{ color: "var(--lx-muted)", width: 110, flexShrink: 0 }}>{label}</span>
+      <span style={{ minWidth: 0 }}>{value}</span>
+    </div>
   );
-  const rangeStart = counts.total === 0 ? 0 : (safePage - 1) * DEVICES_PER_PAGE + 1;
-  const rangeEnd = (safePage - 1) * DEVICES_PER_PAGE + pagedDevices.length;
+
+  const inviteBox = (fontSize: number) => (
+    <div
+      style={{
+        border: "1px dashed var(--lx-border-dashed)",
+        borderRadius: "var(--lx-radius-menu)",
+        padding: 14,
+        textAlign: "center",
+        marginBottom: 10,
+      }}
+    >
+      <div className="lx-mono" style={{ fontSize, letterSpacing: ".18em" }}>
+        {invite?.invite_code}
+      </div>
+      <div className="lx-mono" style={{ fontSize: 11, color: "var(--lx-status-locked)", marginTop: 4 }}>
+        kedaluwarsa dalam {expiryLabel(invite?.expires_at)}
+      </div>
+    </div>
+  );
 
   return (
-    <VStack gap={6}>
-      <HStack gap={3} align="center" justify="between" wrap="wrap">
-        <VStack gap={1}>
-          <Heading level={3}>Devices</Heading>
-          <Text type="supporting" color="secondary">
-            {counts.total} perangkat terdaftar · {counts.online} online
-          </Text>
-        </VStack>
-        <EnrollDialog onEnrolled={refresh} />
-      </HStack>
-
-      <Grid columns={{ minWidth: 170, repeat: "fit" }} gap={4}>
-        <StatCard label="Total Devices" value={counts.total} icon={ServerStackIcon} variant="blue" />
-        <StatCard label="Online" value={counts.online} icon={SignalIcon} variant="green" />
-        <StatCard label="Stale" value={counts.stale} icon={ClockIcon} variant="yellow" />
-        <StatCard label="Offline" value={counts.offline} icon={SignalSlashIcon} variant="muted" />
-        <StatCard label="Antrean Perintah" value={backlog ?? "-"} icon={QueueListIcon} variant="orange" />
-      </Grid>
-
-      {error ? (
-        <ErrorState description={error} onRetry={refresh} />
-      ) : devices === null ? (
-        <SkeletonGrid count={3} />
-      ) : devices.length === 0 ? (
-        <EmptyState
-          title="Belum ada perangkat"
-          description="Perangkat muncul di sini setelah mengirim heartbeat pertama. Daftarkan satu untuk mulai."
-        />
-      ) : (
-        <VStack gap={3}>
-        <Table<Device>
-          data={pagedDevices}
-          idKey="device_id"
-          hasHover
-          density="balanced"
-          columns={[
-            {
-              key: "display_name",
-              header: "Nama",
-              renderCell: (d) => <strong>{(d.display_name as string) || d.hostname}</strong>,
-            },
-            { key: "hostname", header: "Hostname" },
-            { key: "category", header: "Kategori" },
-            {
-              key: "sync_status",
-              header: "Status",
-              renderCell: (d) => syncBadge(d.sync_status),
-            },
-            {
-              key: "last_seen",
-              header: "Terakhir Terlihat",
-              renderCell: (d) => timeAgo(d.last_seen),
-            },
-            {
-              key: "policy_profile",
-              header: "Policy",
-              renderCell: (d) => (d.policy_profile as string) || "-",
-            },
-            {
-              key: "actions",
-              header: "",
-              renderCell: (d) => (
-                <Button label="Detail" size="sm" variant="ghost" onClick={() => setDetailId(d.device_id)} />
-              ),
-            },
-          ]}
-        />
-        {counts.total > DEVICES_PER_PAGE && (
-          <HStack gap={3} align="center" justify="between">
-            <Text type="supporting" color="secondary">
-              {rangeStart}–{rangeEnd} dari {counts.total} perangkat
-            </Text>
-            <HStack gap={2} align="center">
-              <Button label="‹" size="sm" variant="secondary" isDisabled={safePage === 1} onClick={() => setPage((p) => Math.max(1, p - 1))} />
-              <Text type="supporting" color="secondary">Halaman {safePage} / {totalPages}</Text>
-              <Button label="›" size="sm" variant="secondary" isDisabled={safePage >= totalPages} onClick={() => setPage((p) => p + 1)} />
-            </HStack>
-          </HStack>
-        )}
-        </VStack>
-      )}
-
-      <Dialog isOpen={detailId !== null} onOpenChange={(open) => !open && setDetailId(null)} width={720}>
-        <VStack gap={4}>
-          <Heading level={4}>
-            {detail ? (detail.device.display_name as string) || detail.device.hostname : "Device Detail"}
-          </Heading>
-
-          {detailError ? (
-            <ErrorState description={detailError} onRetry={() => detailId && loadDetail(detailId)} />
-          ) : !detail ? (
-            <Text type="body">Memuat detail device…</Text>
+    <>
+      <PageHeader
+        title="Perangkat"
+        summary={
+          devices === null ? (
+            "Memuat..."
           ) : (
             <>
-              <Grid columns={3} gap={4}>
-                <VStack gap={1}>
-                  <Text type="supporting" color="secondary">Hostname</Text>
-                  <Text type="body"><strong>{detail.device.hostname}</strong></Text>
-                </VStack>
-                <VStack gap={1}>
-                  <Text type="supporting" color="secondary">Category</Text>
-                  <Text type="body"><strong>{detail.device.category}</strong></Text>
-                </VStack>
-                <VStack gap={1}>
-                  <Text type="supporting" color="secondary">Status</Text>
-                  <HStack gap={1}>{syncBadge(detail.device.sync_status)}</HStack>
-                </VStack>
-                <VStack gap={1}>
-                  <Text type="supporting" color="secondary">Last Seen</Text>
-                  <Text type="body"><strong>{timeAgo(detail.device.last_seen)}</strong></Text>
-                </VStack>
-                <VStack gap={1}>
-                  <Text type="supporting" color="secondary">Policy</Text>
-                  <Text type="body">
-                    <strong>{(detail.device.policy_profile as string) || "-"}</strong>
-                    {detail.policy ? ` (${detail.policy.description})` : ""}
-                  </Text>
-                </VStack>
-                <VStack gap={1}>
-                  <Text type="supporting" color="secondary">Privacy Mode</Text>
-                  <Text type="body"><strong>{(detail.device.privacy_mode as string) || "-"}</strong></Text>
-                </VStack>
-              </Grid>
-
-              <HStack gap={2} align="start" style={{ background: "var(--lx-accent-weak)", border: "1px solid var(--color-border)", borderRadius: 8, padding: "11px 13px" }}>
-                <ShieldCheckIcon style={{ width: 18, height: 18, color: "var(--lx-accent)", flexShrink: 0, marginTop: 1 }} />
-                <Text type="supporting">
-                  Kebijakan privasi: cuplikan memberi tahu pengguna. Tanpa perekaman keystroke. Log
-                  penuh &amp; dapat diaudit.
-                </Text>
-              </HStack>
-
-              <VStack gap={2}>
-                <Heading level={6}>Sync Health</Heading>
-                <HStack gap={4}>
-                  {(Object.keys(COMMAND_BADGE) as CommandStatus[]).map((s) => (
-                    <HStack key={s} gap={1} align="center">
-                      {commandBadge(s)}
-                      <Text type="body">{detail.sync_health[s] ?? 0}</Text>
-                    </HStack>
-                  ))}
-                </HStack>
-              </VStack>
-
-              <VStack gap={2}>
-                <Heading level={6}>Recent Commands</Heading>
-                {detail.recent_actions.length === 0 ? (
-                  <Text type="body" color="secondary">Belum ada tindakan tercatat.</Text>
-                ) : (
-                  <Table
-                    data={detail.recent_actions}
-                    idKey="action_id"
-                    density="compact"
-                    columns={[
-                      {
-                        key: "timestamp",
-                        header: "Timestamp",
-                        renderCell: (a) => formatDateTime(a.timestamp as string),
-                      },
-                      {
-                        key: "action_type",
-                        header: "Tindakan",
-                        renderCell: (a) => (
-                          <VStack gap={0.5}>
-                            <Text type="body">{a.action_type as string}</Text>
-                            {(a.retry_count as number) > 0 && (
-                              <Text type="supporting" color="secondary">Percobaan ke-{a.retry_count as number}</Text>
-                            )}
-                          </VStack>
-                        ),
-                      },
-                      {
-                        key: "status",
-                        header: "Status",
-                        renderCell: (a) => commandBadge(a.status as CommandStatus),
-                      },
-                      {
-                        key: "result_summary",
-                        header: "Ringkasan",
-                        renderCell: (a) =>
-                          (a.result_summary as string) || (a.error_message as string) || "-",
-                      },
-                      {
-                        key: "retry",
-                        header: "",
-                        renderCell: (a) =>
-                          a.retryable ? (
-                            <Button
-                              label="Retry"
-                              size="sm"
-                              onClick={() => detailId && retryAction(detailId, a.action_id as number)}
-                            />
-                          ) : null,
-                      },
-                    ]}
-                  />
-                )}
-              </VStack>
-
-              {screenshot && (
-                <VStack gap={2}>
-                  <Heading level={6}>Tangkapan Layar Terakhir</Heading>
-                  <img
-                    src={`data:${screenshot.content_type || "image/jpeg"};base64,${screenshot.image_base64}`}
-                    alt={`Screenshot ${screenshot.hostname}`}
-                    style={{ maxWidth: "100%", borderRadius: "var(--radius-container, 8px)" }}
-                  />
-                  <Text type="supporting" color="secondary">
-                    Diambil {formatDateTime(screenshot.captured_at)} — hanya tangkapan terbaru yang disimpan;
-                    pengguna di perangkat selalu diberi tahu saat layar diambil.
-                  </Text>
-                </VStack>
-              )}
-
-              <HStack gap={2}>
-                <Button label="Rename" size="sm" onClick={() => setRenameOpen(true)} />
-                <Button label="Ambil Screenshot" size="sm" onClick={() => setScreenshotOpen(true)} />
-                <Button
-                  label="Revoke API Key"
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => setRevokeOpen(true)}
-                />
-              </HStack>
+              <Mono style={{ color: "var(--lx-text)" }}>{devices.length}</Mono> terdaftar ·{" "}
+              <Mono style={{ color: "var(--lx-text)" }}>{onlineCount}</Mono> online
             </>
-          )}
-        </VStack>
-      </Dialog>
+          )
+        }
+        action={
+          <Button
+            label="Tambah perangkat"
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setInvite(null);
+              setInviteOpen(true);
+            }}
+          />
+        }
+      />
 
-      {detail && (
-        <>
-          <RenameModal
-            isOpen={isRenameOpen}
-            onClose={() => setRenameOpen(false)}
-            hostname={detail.device.hostname}
-            currentName={(detail.device.display_name as string) || detail.device.hostname}
-            onSubmit={submitRename}
+      <div style={{ marginBottom: 16 }}>
+        <SearchChip value={search} onChange={setSearch} placeholder="Cari ID / spesifikasi" width={280} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Table
+            columns={columns}
+            rows={rows}
+            getRowKey={(d) => d.device_id}
+            selectedKey={selected}
+            onRowClick={(d) => setSelected(d.device_id === selected ? null : d.device_id)}
+            emptyLabel="Belum ada perangkat terdaftar."
           />
-          <ScreenshotRequestModal
-            isOpen={isScreenshotOpen}
-            onClose={() => setScreenshotOpen(false)}
-            deviceLabel={(detail.device.display_name as string) || detail.device.hostname}
-            onSubmit={submitScreenshot}
+        </div>
+
+        {isDesktop && selectedDevice && selectedName && (
+          <Drawer
+            isOpen
+            onClose={() => setSelected(null)}
+            title={
+              <>
+                <StatusDot status={SYNC_STATUS[selectedDevice.sync_status] ?? "idle"} />
+                <Mono style={{ fontSize: 16, fontWeight: 600 }}>{selectedName.id}</Mono>
+              </>
+            }
+            subtitle={selectedName.spec || selectedDevice.hostname}
+          >
+            <div style={{ display: "grid", rowGap: 10, marginBottom: 24 }}>
+              {detailRow("Sinkronisasi", <Mono>{timeAgo(selectedDevice.last_seen)}</Mono>)}
+              {detailRow("Versi client", <Mono>{String(selectedDevice.client_version ?? "-")}</Mono>)}
+              {detailRow("Kategori", selectedDevice.category)}
+              {detailRow("Kebijakan", detail?.policy?.description ?? "-")}
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <SectionLabel>Invite code — sekali pakai</SectionLabel>
+            </div>
+            {invite && inviteBox(20)}
+            <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--lx-muted)", margin: "0 0 20px" }}>
+              {invite
+                ? "Masukkan kode ini di client Windows untuk mengikat ulang perangkat. Berlaku 15 menit, satu kali pakai."
+                : "Buat kode sekali-pakai untuk mengikat ulang perangkat ini ke server."}
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button
+                label="Buat kode baru"
+                variant="secondary"
+                size="sm"
+                style={{ flex: 1 }}
+                onClick={createInvite}
+              />
+              <Button
+                label="Hapus"
+                variant="secondary"
+                size="sm"
+                style={{ flex: 1, color: "var(--lx-status-alert)" }}
+                onClick={() => setRevokeTarget(selectedDevice)}
+              />
+            </div>
+          </Drawer>
+        )}
+      </div>
+
+      {/* Enrolment: pick a category, get a one-time code. */}
+      <Modal
+        isOpen={isInviteOpen}
+        onClose={() => setInviteOpen(false)}
+        title="Tambah perangkat"
+        description="Pilih kategori, lalu masukkan kode yang muncul di client Windows perangkat baru."
+        footer={
+          invite ? (
+            <Button label="Selesai" variant="primary" size="sm" onClick={() => setInviteOpen(false)} />
+          ) : (
+            <ModalActions
+              onCancel={() => setInviteOpen(false)}
+              confirmLabel="Buat kode"
+              onConfirm={createInvite}
+            />
+          )
+        }
+      >
+        {invite ? (
+          inviteBox(22)
+        ) : (
+          <PillSelect
+            label="Kategori"
+            value={inviteCategory}
+            options={CATEGORIES}
+            onChange={setInviteCategory}
+            width={180}
           />
-          <ConfirmModal
-            isOpen={isRevokeOpen}
-            onClose={() => setRevokeOpen(false)}
-            title={`Cabut API key ${detail.device.hostname}?`}
-            subtitle="Revoke API Key"
-            body="Device ini tidak akan bisa mengirim heartbeat sampai didaftarkan ulang."
-            confirmLabel="Cabut API Key"
-            onConfirm={submitRevoke}
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={revokeTarget !== null}
+        onClose={() => setRevokeTarget(null)}
+        title={`Hapus ${revokeTarget ? splitDeviceName(revokeTarget.display_name || revokeTarget.hostname).id : ""}?`}
+        description="Perangkat kehilangan kredensialnya dan berhenti melapor. Riwayat sesinya tetap tersimpan."
+        accentEdge="alert"
+        footer={
+          <ModalActions
+            onCancel={() => setRevokeTarget(null)}
+            confirmLabel="Hapus perangkat"
+            variant="danger"
+            onConfirm={() => revoke(revokeTarget!)}
           />
-        </>
-      )}
-    </VStack>
+        }
+      />
+    </>
   );
 }

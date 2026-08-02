@@ -914,11 +914,20 @@ function Send-LogbookHeartbeat {
         if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
 
         $username = $env:USERNAME
+        # Session context for the dashboard's Monitoring card -- start time,
+        # access type and purpose. Read from the same session file the timer
+        # uses; the schema is untouched, these fields already live there.
+        $sessionStart = ''
+        $accessType = ''
+        $purpose = ''
         if (Test-Path $Global:SessionFile) {
             try {
                 $s = Get-ActiveLogbookSession
                 if ($s -and $s.nama) { $username = $s.nama }
                 elseif ($s -and $s.username) { $username = $s.username }
+                if ($s -and $s.start_time) { $sessionStart = [string]$s.start_time }
+                if ($s -and $s.session_type) { $accessType = [string]$s.session_type }
+                if ($s -and $s.tujuan) { $purpose = [string]$s.tujuan }
             } catch {}
         }
 
@@ -947,6 +956,9 @@ function Send-LogbookHeartbeat {
             username    = $username
             anydesk_id  = $anydeskId
         }
+        if ($sessionStart) { $payload['session_started_at'] = $sessionStart }
+        if ($accessType)   { $payload['access_type'] = $accessType }
+        if ($purpose)      { $payload['purpose'] = $purpose }
         if ($pendingAcks.Count -gt 0) { $payload['acks'] = $pendingAcks }
 
         $headers = @{

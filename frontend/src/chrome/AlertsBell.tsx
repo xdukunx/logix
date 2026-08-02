@@ -1,118 +1,143 @@
-// System Alerts: bell button + panel, global chrome polled every 30s
-// regardless of the visible tab. Ported from server/static/js/alerts.js.
+// Active-alert surface, polled every 30s regardless of the visible tab.
+// The v3 canvases don't draw an alerts control, so this deliberately borrows
+// the existing vocabulary -- an 8px dot plus a mono count -- rather than
+// inventing a filled badge, which the guard rails forbid. It renders nothing
+// at all when there is nothing to report.
 import { useCallback, useState } from "react";
-import { Badge } from "@astryxdesign/core/Badge";
-import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { Dialog } from "@astryxdesign/core/Dialog";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { IconButton } from "@astryxdesign/core/IconButton";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
-import { useToast } from "@astryxdesign/core/Toast";
-import { BellIcon } from "@heroicons/react/24/outline";
 
 import { getJson, postEmpty } from "../api";
 import type { Alert } from "../types";
-import { timeAgo, usePolling } from "../util";
+import type { StationStatus } from "../tokens";
+import { StatusDot } from "../ui/base";
+import { Button } from "../ui/controls";
+import { Modal, useToast } from "../ui/overlays";
+import { formatLogTime, usePolling } from "../util";
 
-const SEVERITY_VARIANT: Record<Alert["severity"], "accent" | "warning" | "error"> = {
-  info: "accent",
-  warning: "warning",
-  critical: "error",
+const SEVERITY_STATUS: Record<Alert["severity"], StationStatus> = {
+  info: "idle",
+  warning: "locked",
+  critical: "alert",
 };
 
 export default function AlertsBell() {
   const toast = useToast();
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const data = await getJson<{ alerts: Alert[] }>("/api/alerts?active=true", "Gagal memuat peringatan");
-      setAlerts(data.alerts);
+      setAlerts(data.alerts || []);
     } catch {
-      // transient failure: keep last known alerts
+      // Roles without alert access get a 403; keep the last known list rather
+      // than flashing an error into the app chrome.
     }
   }, []);
 
   usePolling(refresh, 30000);
 
-  const acknowledge = async (alertId: number) => {
+  const act = async (fn: Promise<unknown>, message: string) => {
     try {
-      await postEmpty(`/api/alerts/${alertId}/acknowledge`, "Gagal menandai peringatan");
-      toast({ body: "Peringatan ditandai sebagai diketahui." });
+      await fn;
+      toast(message);
       refresh();
     } catch (err) {
-      toast({ body: (err as Error).message, type: "error" });
-    }
-  };
-
-  const resolve = async (alertId: number) => {
-    try {
-      await postEmpty(`/api/alerts/${alertId}/resolve`, "Gagal menyelesaikan peringatan");
-      toast({ body: "Peringatan diselesaikan." });
-      refresh();
-    } catch (err) {
-      toast({ body: (err as Error).message, type: "error" });
+      toast((err as Error).message, "alert");
     }
   };
 
   const unacknowledged = alerts.filter((a) => a.status === "active").length;
+  if (alerts.length === 0) return null;
 
   return (
     <>
-      <HStack gap={1} align="center">
-        <IconButton
-          label="Peringatan sistem"
-          variant="ghost"
-          icon={<BellIcon style={{ width: 18, height: 18 }} />}
-          onClick={() => {
-            setIsOpen(true);
-            refresh();
-          }}
-        />
-        {unacknowledged > 0 && <Badge variant="error" label={String(unacknowledged)} />}
-      </HStack>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true);
+          refresh();
+        }}
+        style={{
+          font: "inherit",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          fontSize: 12,
+          color: "var(--lx-muted)",
+          background: "transparent",
+          border: "none",
+          padding: "4px 0",
+          cursor: "pointer",
+        }}
+      >
+        <StatusDot status={unacknowledged > 0 ? "alert" : "idle"} />
+        <span className="lx-mono">{unacknowledged || alerts.length}</span> peringatan
+      </button>
 
-      <Dialog isOpen={isOpen} onOpenChange={setIsOpen} width={440}>
-        <VStack gap={3}>
-          <Heading level={5}>Peringatan Sistem</Heading>
-          {alerts.length === 0 ? (
-            <EmptyState title="Tidak ada peringatan aktif." isCompact />
-          ) : (
-            <VStack gap={2}>
-              {alerts.map((a) => {
-                const isAcknowledged = a.status === "acknowledged";
-                return (
-                  <Card key={a.id} padding={3} variant={isAcknowledged ? "muted" : "default"}>
-                    <VStack gap={1}>
-                      <HStack gap={2} align="center" justify="between">
-                        <HStack gap={2} align="center">
-                          <StatusDot variant={SEVERITY_VARIANT[a.severity] ?? "accent"} label={a.severity} />
-                          <Text type="label">{a.title}</Text>
-                        </HStack>
-                        <HStack gap={2} align="center">
-                          {!isAcknowledged && (
-                            <Button label="Tandai Diketahui" size="sm" onClick={() => acknowledge(a.id)} />
-                          )}
-                          <Button label="Selesaikan" size="sm" variant="ghost" onClick={() => resolve(a.id)} />
-                        </HStack>
-                      </HStack>
-                      <Text type="body">{a.message}</Text>
-                      <Text type="supporting" color="secondary">
-                        {timeAgo(a.created_at)}
-                        {isAcknowledged ? " · Diketahui" : ""}
-                      </Text>
-                    </VStack>
-                  </Card>
-                );
-              })}
-            </VStack>
-          )}
-        </VStack>
-      </Dialog>
+      <Modal
+        isOpen={isOpen}
+        onClose={() => setOpen(false)}
+        title="Peringatan sistem"
+        description="Kejadian yang perlu ditinjau admin."
+        width={460}
+        footer={<Button label="Tutup" variant="secondary" size="sm" onClick={() => setOpen(false)} />}
+      >
+        <div style={{ display: "grid" }}>
+          {alerts.map((a, i) => {
+            const isAcknowledged = a.status === "acknowledged";
+            return (
+              <div
+                key={a.id}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  padding: "12px 0",
+                  borderTop: i === 0 ? undefined : "1px solid var(--lx-hairline)",
+                }}
+              >
+                <span style={{ marginTop: 5 }}>
+                  <StatusDot status={SEVERITY_STATUS[a.severity] ?? "idle"} label={a.severity} />
+                </span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{a.title}</div>
+                  <div style={{ fontSize: 12.5, color: "var(--lx-muted)", lineHeight: 1.5 }}>{a.message}</div>
+                  <div className="lx-mono" style={{ fontSize: 11, color: "var(--lx-muted)", marginTop: 4 }}>
+                    {formatLogTime(a.created_at)}
+                    {isAcknowledged ? " · diketahui" : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  {!isAcknowledged && (
+                    <Button
+                      label="Tandai"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() =>
+                        act(
+                          postEmpty(`/api/alerts/${a.id}/acknowledge`, "Gagal menandai peringatan"),
+                          "Peringatan ditandai.",
+                        )
+                      }
+                    />
+                  )}
+                  <Button
+                    label="Selesaikan"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      act(
+                        postEmpty(`/api/alerts/${a.id}/resolve`, "Gagal menyelesaikan peringatan"),
+                        "Peringatan diselesaikan.",
+                      )
+                    }
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Modal>
     </>
   );
 }

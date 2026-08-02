@@ -8,6 +8,13 @@ export interface ActiveWorkstation {
   username: string | null;
   anydesk_id: string;
   last_seen: string;
+  /** When `status` last changed -- drives "Dikunci admin · 14:02". */
+  status_since: string | null;
+  /** Session start, for the card's live duration. Null when nobody is signed in. */
+  session_started_at: string | null;
+  /** "Fisik" | "SSH" | "AnyDesk" as reported by the agent. */
+  access_type: string | null;
+  purpose: string | null;
 }
 
 export type SyncStatus = "online" | "stale" | "offline" | "never_seen";
@@ -81,6 +88,22 @@ export interface SessionLog extends Record<string, unknown> {
   keterangan: string | null;
 }
 
+/**
+ * One paired session (GET /api/sessions/spans): a START matched with its
+ * close event. `duration_seconds` is null while the session is still running.
+ */
+export interface SessionSpan extends Record<string, unknown> {
+  session_id: string;
+  timestamp: string;
+  hostname: string;
+  nama: string;
+  nim: string;
+  username: string;
+  tujuan: string;
+  session_type: string;
+  duration_seconds: number | null;
+}
+
 export interface AuditAction extends Record<string, unknown> {
   timestamp: string;
   actor_email: string;
@@ -120,6 +143,13 @@ export interface LogixConfig {
     include_purpose_summary?: boolean;
     include_device_summary?: boolean;
   };
-  privacy?: { notice?: string; collected?: string[]; not_collected?: string[] };
+  privacy?: {
+    notice?: string;
+    collected?: string[];
+    not_collected?: string[];
+    /** Settings > Privasi: suppress user names on the /wall TV display. */
+    hide_names_on_wall?: boolean;
+    [k: string]: unknown;
+  };
   [k: string]: unknown;
 }

@@ -1,4 +1,6 @@
 import os
+import csv
+import io
 import json
 import logging
 import sqlite3
@@ -444,6 +446,14 @@ class HeartbeatPayload(BaseModel):
     # rides the next one instead. Each entry: {command_id, status
     # ("done"|"failed"), detail}.
     acks: Optional[List[Dict[str, Any]]] = None
+    # Session context for the Monitoring station card (v3 design D-03): the
+    # card's second line is "{user} · {access type} · {duration}", which needs
+    # a start time and an access type the server did not previously receive.
+    # All optional -- an older agent build simply omits them and the card
+    # degrades to the username alone.
+    session_started_at: Optional[str] = None
+    access_type: Optional[str] = None
+    purpose: Optional[str] = None
 
 class ControlRequest(BaseModel):
     hostname: str
@@ -1198,12 +1208,27 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
     except Exception:
         logger.warning("heartbeat: upsert_device failed for %s", payload.hostname, exc_info=True)
 
+    now = datetime.now()
+    status = payload.status.upper()
+    # "Dikunci admin · 14:02" needs the moment the status last CHANGED, not the
+    # last heartbeat -- carry the previous timestamp forward while it holds.
+    previous = HEARTBEATS.get(payload.hostname)
+    status_since = (
+        previous["status_since"]
+        if previous and previous.get("status_since") and previous.get("status") == status
+        else now
+    )
+
     HEARTBEATS[payload.hostname] = {
-        "status": payload.status.upper(),
+        "status": status,
+        "status_since": status_since,
         "username": payload.username,
         "anydesk_id": ad_id,
         "device_name": device_name,
-        "last_seen": datetime.now()
+        "session_started_at": payload.session_started_at or "",
+        "access_type": payload.access_type or "",
+        "purpose": payload.purpose or "",
+        "last_seen": now,
     }
 
     # Apply any outcomes the agent is reporting for commands delivered on a
@@ -1254,13 +1279,18 @@ def get_active_workstations(email: str = Depends(verify_token)):
     active_pcs = []
     for host, info in HEARTBEATS.items():
         if compute_sync_status(categories.get(host), info["last_seen"], now) == "online":
+            status_since = info.get("status_since")
             active_pcs.append({
                 "hostname": host,
                 "device_name": info["device_name"],
                 "status": info["status"],
                 "username": info["username"],
                 "anydesk_id": info["anydesk_id"],
-                "last_seen": info["last_seen"].isoformat()
+                "last_seen": info["last_seen"].isoformat(),
+                "status_since": status_since.isoformat() if status_since else None,
+                "session_started_at": info.get("session_started_at") or None,
+                "access_type": info.get("access_type") or None,
+                "purpose": info.get("purpose") or None,
             })
     return active_pcs
 
@@ -2058,12 +2088,136 @@ def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
     return {"status": "success", "inserted": inserted}
 
 
+# Riwayat (v3) filters the session log by a period preset, so both log
+# endpoints take an inclusive YYYY-MM-DD range. `timestamp` is stored as an
+# ISO string, so a lexical compare on its date prefix is both correct and
+# index-friendly. Returns the SQL fragment plus its args.
+def _date_range_clause(column: str, start_date: Optional[str], end_date: Optional[str]):
+    clause, args = "", []
+    for label, value, op in (("start_date", start_date, ">="), ("end_date", end_date, "<=")):
+        if not value:
+            continue
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid {label}, expected YYYY-MM-DD")
+        clause += f" AND substr({column}, 1, 10) {op} ?"
+        args.append(value)
+    return clause, args
+
+
+# Pairs each session's START with whichever close event came first and yields
+# one span per session. Shared by the Riwayat summary and the CSV exports so
+# "148 j total / 96 sesi / 31 pengguna" and the downloaded file can never
+# disagree about what counts as a session.
+def _session_spans(conn, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    clause, args = _date_range_clause("timestamp", start_date, end_date)
+    rows = conn.execute(
+        "SELECT session_id, event, timestamp, hostname, nama, nim, username, tujuan, session_type "
+        f"FROM physical_log WHERE session_id IS NOT NULL AND session_id != ''{clause} "
+        "ORDER BY session_id, timestamp ASC",
+        args,
+    ).fetchall()
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        grouped.setdefault(r["session_id"], []).append(dict(r))
+
+    closing = {"END", "LOCK", "AUTO_FINISH", "AUTO_CLOSE", "DISCONNECT", "LOGOFF"}
+    spans = []
+    for session_id, events in grouped.items():
+        start_row = next((e for e in events if e["event"] == "START"), None)
+        if not start_row:
+            continue
+        close_row = next((e for e in events if e["event"] in closing), None)
+        duration = None
+        if close_row:
+            try:
+                duration = max(
+                    0.0,
+                    (
+                        datetime.fromisoformat(close_row["timestamp"])
+                        - datetime.fromisoformat(start_row["timestamp"])
+                    ).total_seconds(),
+                )
+            except Exception:
+                duration = None
+        spans.append({
+            "session_id": session_id,
+            "timestamp": start_row["timestamp"],
+            "hostname": start_row["hostname"] or "",
+            "nama": start_row["nama"] or "",
+            "nim": start_row["nim"] or "",
+            "username": start_row["username"] or "",
+            "tujuan": start_row["tujuan"] or "",
+            "session_type": start_row["session_type"] or "",
+            "duration_seconds": duration,
+        })
+    return spans
+
+
+# The three inline summary numbers on Riwayat. Deliberately derived from
+# _session_spans rather than a separate aggregation, so the sentence always
+# matches a manual count of the table below it.
+@app.get("/api/sessions/summary")
+def get_sessions_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    email: str = Depends(require_permission("sessions_read")),
+):
+    conn = get_db()
+    try:
+        spans = _session_spans(conn, start_date, end_date)
+    finally:
+        conn.close()
+    total_seconds = sum(s["duration_seconds"] or 0 for s in spans)
+    users = {s["nim"] or s["nama"] or s["username"] for s in spans}
+    users.discard("")
+    return {
+        "hours": round(total_seconds / 3600, 1),
+        "sessions": len(spans),
+        "users": len(users),
+    }
+
+
+# Riwayat's "Log Sesi" table is one row PER SESSION with a real duration, not
+# one row per physical_log event -- /api/sessions below still returns the raw
+# event stream for anything that needs it (and for backward compatibility).
+@app.get("/api/sessions/spans")
+def get_session_spans(
+    limit: int = 25,
+    offset: int = 0,
+    hostname: Optional[str] = None,
+    username: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    email: str = Depends(require_permission("sessions_read")),
+):
+    conn = get_db()
+    try:
+        spans = _session_spans(conn, start_date, end_date)
+    finally:
+        conn.close()
+
+    if hostname:
+        needle = hostname.lower()
+        spans = [s for s in spans if needle in s["hostname"].lower()]
+    if username:
+        needle = username.lower()
+        spans = [s for s in spans if needle in f"{s['nama']} {s['username']} {s['nim']}".lower()]
+
+    spans.sort(key=lambda s: s["timestamp"], reverse=True)
+    return {"total": len(spans), "sessions": spans[offset:offset + limit]}
+
+
 @app.get("/api/sessions")
 def get_sessions(
-    limit: int = 100, 
-    offset: int = 0, 
-    hostname: Optional[str] = None, 
+    limit: int = 100,
+    offset: int = 0,
+    hostname: Optional[str] = None,
     username: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     email: str = Depends(require_permission("sessions_read"))
 ):
     conn = get_db()
@@ -2071,7 +2225,7 @@ def get_sessions(
         query = "SELECT * FROM physical_log WHERE 1=1"
         count_query = "SELECT COUNT(*) FROM physical_log WHERE 1=1"
         args = []
-        
+
         if hostname:
             query += " AND hostname LIKE ?"
             count_query += " AND hostname LIKE ?"
@@ -2081,7 +2235,12 @@ def get_sessions(
             count_query += " AND (nama LIKE ? OR username LIKE ?)"
             args.append(f"%{username}%")
             args.append(f"%{username}%")
-            
+
+        date_clause, date_args = _date_range_clause("timestamp", start_date, end_date)
+        query += date_clause
+        count_query += date_clause
+        args.extend(date_args)
+
         total = conn.execute(count_query, args).fetchone()[0]
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         args.extend([limit, offset])
@@ -2101,6 +2260,8 @@ def get_audit_log(
     offset: int = 0,
     target_device: Optional[str] = None,
     status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     email: str = Depends(require_permission("audit_log_read"))
 ):
     conn = get_db()
@@ -2118,6 +2279,13 @@ def get_audit_log(
             query += " AND status = ?"
             count_query += " AND status = ?"
             args.append(status)
+
+        # Same period preset as the session log, so switching sub-tabs keeps
+        # the range the admin already chose.
+        date_clause, date_args = _date_range_clause("timestamp", start_date, end_date)
+        query += date_clause
+        count_query += date_clause
+        args.extend(date_args)
 
         total = conn.execute(count_query, args).fetchone()[0]
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
@@ -2213,6 +2381,7 @@ def download_report(
     full: bool = False,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    format: str = "xlsx",
     email: str = Depends(require_permission("reports_read")),
 ):
     # start_date/end_date map directly onto logbook_report.py's existing
@@ -2225,6 +2394,55 @@ def download_report(
                     datetime.strptime(value, "%Y-%m-%d")
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"Invalid {label}, expected YYYY-MM-DD")
+
+    if format not in ("xlsx", "csv", "per_user"):
+        raise HTTPException(status_code=400, detail="Invalid format, expected xlsx, csv or per_user")
+
+    # The two CSV shapes Riwayat's Unduh menu offers. Both are built from
+    # _session_spans -- the same pairing the summary sentence uses -- so an
+    # export can never disagree with the numbers on screen. The xlsx path
+    # below is untouched, keeping the existing report byte-identical.
+    if format in ("csv", "per_user"):
+        conn = get_db()
+        try:
+            spans = _session_spans(conn, start_date, end_date)
+        finally:
+            conn.close()
+        spans.sort(key=lambda s: s["timestamp"], reverse=True)
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        if format == "csv":
+            writer.writerow(["Waktu", "Perangkat", "Pengguna", "NIM", "Tipe akses", "Tujuan", "Durasi (menit)"])
+            for s in spans:
+                writer.writerow([
+                    s["timestamp"], s["hostname"], s["nama"] or s["username"], s["nim"],
+                    s["session_type"], s["tujuan"],
+                    "" if s["duration_seconds"] is None else round(s["duration_seconds"] / 60),
+                ])
+            stem = "sesi"
+        else:
+            per_user: Dict[str, Dict[str, Any]] = {}
+            for s in spans:
+                key = s["nim"] or s["nama"] or s["username"] or "-"
+                entry = per_user.setdefault(key, {
+                    "nama": s["nama"] or s["username"], "nim": s["nim"], "sessions": 0, "seconds": 0.0,
+                })
+                entry["sessions"] += 1
+                entry["seconds"] += s["duration_seconds"] or 0
+            writer.writerow(["Nama", "NIM", "Jumlah sesi", "Total jam"])
+            for entry in sorted(per_user.values(), key=lambda e: e["seconds"], reverse=True):
+                writer.writerow([entry["nama"], entry["nim"], entry["sessions"], round(entry["seconds"] / 3600, 2)])
+            stem = "rekap-per-pengguna"
+
+        filename = f"{stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        # utf-8-sig: Excel on Windows needs the BOM to read the Indonesian
+        # names as UTF-8 rather than the system codepage.
+        return Response(
+            content=buffer.getvalue().encode("utf-8-sig"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     out_file = REPORTS_DIR / f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
     cmd = [

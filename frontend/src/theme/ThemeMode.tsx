@@ -1,9 +1,10 @@
-// Dark-mode plumbing. A single mode state (light | dark | system, default
-// system, persisted to localStorage) drives Astryx's <Theme mode>. Both
-// Astryx's --color-* and our --lx-* tokens use light-dark(), so flipping this
-// switches the whole app -- no per-component dark styling needed. We also mirror
-// the mode onto documentElement.style.colorScheme so light-dark() resolves
-// correctly for anything rendered outside the <Theme> subtree (e.g. body).
+// Dark-mode plumbing. A single mode (light | dark | system, default system,
+// persisted to localStorage) is mirrored onto documentElement's `data-theme`
+// attribute, which tokens.css keys its dark ramp off. An attribute is what
+// makes the switch reliable: overriding the custom properties themselves is
+// plain cascade and always invalidates, whereas a light-dark() value baked
+// into a property does not re-resolve when color-scheme changes at runtime.
+// There is no per-component dark styling anywhere.
 import {
   createContext,
   useCallback,
@@ -13,9 +14,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Theme } from "@astryxdesign/core/theme";
-
-import { logixTheme } from "../theme";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -41,7 +39,7 @@ const readInitialMode = (): ThemeMode => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "light" || stored === "dark" || stored === "system") return stored;
   } catch {
-    /* localStorage unavailable (private mode / SSR) -- fall through */
+    /* localStorage unavailable (private mode) -- fall through */
   }
   return "system";
 };
@@ -55,26 +53,35 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore persistence failures */
     }
-    document.documentElement.style.colorScheme = mode === "system" ? "light dark" : mode;
+    // "system" removes the attribute entirely so the prefers-color-scheme
+    // media query in tokens.css is what decides.
+    if (mode === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", mode);
   }, [mode]);
 
   const setMode = useCallback((next: ThemeMode) => setModeState(next), []);
   const cycleMode = useCallback(
-    () =>
-      setModeState((m) => (m === "light" ? "dark" : m === "dark" ? "system" : "light")),
+    () => setModeState((m) => (m === "light" ? "dark" : m === "dark" ? "system" : "light")),
     [],
   );
 
-  const value = useMemo(
-    () => ({ mode, setMode, cycleMode }),
-    [mode, setMode, cycleMode],
-  );
+  const value = useMemo(() => ({ mode, setMode, cycleMode }), [mode, setMode, cycleMode]);
 
-  return (
-    <ThemeModeContext.Provider value={value}>
-      <Theme theme={logixTheme} mode={mode}>
-        {children}
-      </Theme>
-    </ThemeModeContext.Provider>
-  );
+  return <ThemeModeContext.Provider value={value}>{children}</ThemeModeContext.Provider>;
 }
+
+/**
+ * Forces dark tokens for a subtree regardless of the user's preference --
+ * used by the /wall TV mode, which the design specifies as always dark.
+ */
+export const ForceDark = ({ children }: { children: ReactNode }) => {
+  useEffect(() => {
+    const previous = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "dark");
+    return () => {
+      if (previous) document.documentElement.setAttribute("data-theme", previous);
+      else document.documentElement.removeAttribute("data-theme");
+    };
+  }, []);
+  return <div style={{ background: "var(--lx-bg)", minHeight: "100dvh" }}>{children}</div>;
+};

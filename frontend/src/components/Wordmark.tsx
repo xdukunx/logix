@@ -1,68 +1,47 @@
-// The LOGIX wordmark + brand mark. Weight 800 with wide tracking carries the
-// identity (no display face needed); the mark is a blue rounded square holding
-// the terminal ">_" glyph. Used in the SideNav header and the login card.
-// Matches docs/design/LogiX App Shell & Login.dc.html + Style Tile §Wordmark.
-
-export function LogixMark({ size = 28 }: { size?: number }) {
-  const glyph = Math.round(size * 0.57);
+// The LOGIX lockup: an accent rounded square holding a mono ">_" prompt next
+// to the wordmark in wide tracking. Design: the header of every v3 canvas
+// (LogiX Style Tile v2.dc.html and the Monitoring sidebar).
+export function LogixMark({ size = 24 }: { size?: number }) {
   return (
     <span
+      className="lx-mono"
+      aria-hidden="true"
       style={{
         width: size,
         height: size,
-        borderRadius: Math.round(size * 0.25),
+        borderRadius: Math.round(size * 0.29),
         background: "var(--lx-accent)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        boxShadow: "0 2px 6px rgba(37, 99, 235, 0.35)",
+        fontWeight: 700,
+        color: "var(--lx-on-accent)",
+        fontSize: Math.round(size * 0.46),
         flexShrink: 0,
       }}
     >
-      <svg
-        width={glyph}
-        height={glyph}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="#fff"
-        strokeWidth={2.2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <path d="M7 9l3 3-3 3" />
-        <line x1="12.5" y1="15" x2="16" y2="15" />
-      </svg>
+      &gt;_
     </span>
   );
 }
 
 export function Wordmark({
-  size = 17,
-  tracking = "0.14em",
-  showMark = true,
-  markSize,
+  size = 13,
+  isMarkOnly = false,
+  markSize = 24,
 }: {
   size?: number;
-  tracking?: string;
-  showMark?: boolean;
+  isMarkOnly?: boolean;
   markSize?: number;
 }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-      {showMark && <LogixMark size={markSize ?? Math.round(size * 1.6)} />}
-      <span
-        style={{
-          fontSize: size,
-          fontWeight: 800,
-          letterSpacing: tracking,
-          color: "var(--color-text-primary)",
-          lineHeight: 1,
-        }}
-      >
-        LOGI<span style={{ color: "var(--lx-accent)" }}>X</span>
-      </span>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }} title="Logix">
+      <LogixMark size={markSize} />
+      {!isMarkOnly && (
+        <span style={{ fontSize: size, fontWeight: 700, letterSpacing: "0.16em", lineHeight: 1 }}>
+          LOGIX
+        </span>
+      )}
     </span>
   );
 }

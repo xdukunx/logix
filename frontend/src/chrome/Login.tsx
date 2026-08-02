@@ -1,101 +1,23 @@
 // Login gate shown when there's no session token. Local admin auth: email +
-// password checked against the server's ADMIN_EMAILS allowlist + the
-// LOGIX_ADMIN_PASSWORD it was started with (Google OAuth was removed). Matches
-// docs/design/LogiX App Shell & Login.dc.html: centered mascot + LOGIX
-// wordmark, an ID/EN language toggle, two privacy-forward value props, the
-// sign-in form, and a privacy footer stating what we do (and don't) log.
-import { useState } from "react";
-import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { Center } from "@astryxdesign/core/Center";
-import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { HStack, VStack } from "@astryxdesign/core/Stack";
-import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
-import { ArrowRightEndOnRectangleIcon } from "@heroicons/react/24/outline";
-import { CheckIcon, ShieldCheckIcon } from "@heroicons/react/24/solid";
+// password checked against the server's ADMIN_EMAILS allowlist plus the
+// LOGIX_ADMIN_PASSWORD it was started with. The auth call itself is unchanged;
+// only the surface is restyled to v3 -- one centered card, flat, with the
+// always-visible privacy line the client surfaces also carry.
+import { useState, type FormEvent } from "react";
 
 import { login } from "../api";
-import mascot from "../assets/mascot.png";
 import Wordmark from "../components/Wordmark";
-
-type Lang = "id" | "en";
-
-const COPY: Record<
-  Lang,
-  {
-    subtitle: string;
-    bullets: [string, string];
-    emailLabel: string;
-    emailPlaceholder: string;
-    passwordLabel: string;
-    passwordPlaceholder: string;
-    signIn: string;
-    privacy: string;
-  }
-> = {
-  id: {
-    subtitle: "Lab Access Logbook",
-    bullets: [
-      "Lihat siapa memakai tiap stasiun — fisik, SSH, atau AnyDesk.",
-      "Laporan kehadiran & penggunaan otomatis, adil, transparan.",
-    ],
-    emailLabel: "Email admin",
-    emailPlaceholder: "admin@lab.ac.id",
-    passwordLabel: "Password",
-    passwordPlaceholder: "••••••••",
-    signIn: "Masuk",
-    privacy: "Kami mencatat siapa, cara, dan kapan — bukan keystroke atau isi layar.",
-  },
-  en: {
-    subtitle: "Lab Access Logbook",
-    bullets: [
-      "See who is at each station — physical, SSH, or AnyDesk.",
-      "Automatic attendance & usage reports — fair and transparent.",
-    ],
-    emailLabel: "Admin email",
-    emailPlaceholder: "admin@lab.ac.id",
-    passwordLabel: "Password",
-    passwordPlaceholder: "••••••••",
-    signIn: "Sign in",
-    privacy: "We log who, how, and when — never keystrokes or screen contents.",
-  },
-};
-
-const CheckBullet = ({ children }: { children: React.ReactNode }) => (
-  <HStack gap={2} align="start">
-    <span
-      style={{
-        width: 20,
-        height: 20,
-        borderRadius: 5,
-        background: "var(--lx-status-inuse-bg)",
-        color: "var(--lx-status-inuse)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        marginTop: 1,
-      }}
-    >
-      <CheckIcon style={{ width: 12, height: 12 }} />
-    </span>
-    <Text type="supporting">{children}</Text>
-  </HStack>
-);
+import { Button, TextField } from "../ui/controls";
 
 export default function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [lang, setLang] = useState<Lang>("id");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const t = COPY[lang];
+  const [isBusy, setBusy] = useState(false);
 
-  const canSubmit = email.trim().length > 0 && password.length > 0 && !busy;
-
-  const submit = async () => {
-    if (!canSubmit) return;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password || isBusy) return;
     setBusy(true);
     setError(null);
     try {
@@ -108,68 +30,117 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
   };
 
   return (
-    <Center height="100vh" style={{ background: "var(--color-background-body)" }}>
-      <Card padding={8} width={380}>
-        <VStack gap={5} align="stretch">
-          <VStack gap={2} align="center">
-            <img src={mascot} alt="" style={{ height: 58, width: "auto" }} />
-            <Wordmark size={30} tracking="0.2em" showMark={false} />
-            <Text type="supporting" color="secondary">{t.subtitle}</Text>
-          </VStack>
+    <div
+      style={{
+        minHeight: "100dvh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <form
+        onSubmit={submit}
+        style={{
+          width: 360,
+          maxWidth: "100%",
+          background: "var(--lx-card)",
+          borderRadius: "var(--lx-radius-card)",
+          boxShadow: "var(--lx-shadow-card)",
+          padding: "28px 30px",
+        }}
+      >
+        <div style={{ marginBottom: 20 }}>
+          <Wordmark />
+        </div>
+        <h1 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 4px" }}>Masuk</h1>
+        <p style={{ fontSize: 13.5, color: "var(--lx-muted)", margin: "0 0 22px", lineHeight: 1.55 }}>
+          Dasbor admin Lab Komputasi FTMM.
+        </p>
 
-          <SegmentedControl
-            value={lang}
-            onChange={(v) => setLang(v as Lang)}
-            label="Bahasa"
-            size="sm"
-            layout="fill"
-          >
-            <SegmentedControlItem value="id" label="ID" />
-            <SegmentedControlItem value="en" label="EN" />
-          </SegmentedControl>
-
-          <VStack gap={3} align="stretch">
-            {t.bullets.map((b) => (
-              <CheckBullet key={b}>{b}</CheckBullet>
-            ))}
-          </VStack>
-
-          <VStack gap={3} align="stretch">
-            <TextInput
-              label={t.emailLabel}
-              type="email"
-              value={email}
-              onChange={(v) => { setEmail(v); setError(null); }}
-              placeholder={t.emailPlaceholder}
-              onEnter={submit}
-            />
-            <TextInput
-              label={t.passwordLabel}
+        <div style={{ display: "grid", gap: 14 }}>
+          <TextField
+            label="Email admin"
+            value={email}
+            onChange={setEmail}
+            placeholder="admin@lab.ac.id"
+            autoFocus
+          />
+          <div>
+            <label
+              htmlFor="lx-password"
+              style={{
+                display: "block",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: ".06em",
+                textTransform: "uppercase",
+                color: "var(--lx-muted)",
+                marginBottom: 6,
+              }}
+            >
+              Password
+            </label>
+            <input
+              id="lx-password"
               type="password"
               value={password}
-              onChange={(v) => { setPassword(v); setError(null); }}
-              placeholder={t.passwordPlaceholder}
-              onEnter={submit}
-              status={error ? { type: "error", message: error } : undefined}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={Boolean(error)}
+              style={{
+                font: "inherit",
+                width: "100%",
+                fontSize: 13.5,
+                padding: "9px 14px",
+                borderRadius: "var(--lx-radius-control)",
+                border: `1px solid ${error ? "var(--lx-status-alert)" : "var(--lx-border)"}`,
+                background: "var(--lx-card)",
+                color: "var(--lx-text)",
+              }}
             />
-            <Button
-              label={t.signIn}
-              variant="primary"
-              size="lg"
-              style={{ width: "100%" }}
-              icon={<ArrowRightEndOnRectangleIcon style={{ width: 18, height: 18 }} />}
-              isDisabled={!canSubmit}
-              isLoading={busy}
-              onClick={submit}
-            />
-          </VStack>
+          </div>
+        </div>
 
-          <HStack gap={2} align="center" justify="center">
-            <ShieldCheckIcon style={{ width: 14, height: 14, color: "var(--lx-text-muted)", flexShrink: 0 }} />
-            <Text type="supporting" color="secondary">{t.privacy}</Text>
-          </HStack>
-        </VStack>
-      </Card>
-    </Center>
+        {error && (
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 10 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: "var(--lx-status-alert)",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontSize: 12 }}>{error}</span>
+          </div>
+        )}
+
+        <div style={{ marginTop: 20 }}>
+          <Button
+            label={isBusy ? "Memeriksa..." : "Masuk"}
+            variant="primary"
+            isFullWidth
+            disabled={isBusy || !email.trim() || !password}
+            onClick={() => {}}
+            type="submit"
+          />
+        </div>
+
+        <p
+          style={{
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: "var(--lx-muted)",
+            textAlign: "center",
+            margin: "16px 0 0",
+          }}
+        >
+          Sesi mencatat waktu, durasi &amp; tujuan.
+          <br />
+          Tanpa perekaman layar.
+        </p>
+      </form>
+    </div>
   );
 }

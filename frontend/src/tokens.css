@@ -5,8 +5,13 @@
  * `LogiX Style Tile v2.dc.html`. Every value here is pixel-final; do not
  * approximate. Screens consume these vars — no hardcoded hex in components.
  *
- * Light is the default, dark is first-class: each token is a light-dark() pair
- * driven by documentElement.style.colorScheme (see theme/ThemeMode.tsx).
+ * Light is the default, dark is first-class. The dark ramp is applied by an
+ * attribute/media override rather than light-dark(): a custom property whose
+ * value is light-dark() is resolved on the FIRST style pass and does NOT
+ * re-resolve when `color-scheme` changes at runtime, so toggling the theme
+ * left the canvas on its original ramp while newly-mounted nodes picked up the
+ * other one. Overriding the property itself is plain cascade and always
+ * invalidates correctly.
  *
  * Guard rails encoded here: status color exists ONLY as an 8px dot or a 3px
  * edge/ring — there are deliberately no tinted status backgrounds. Accent
@@ -15,20 +20,22 @@
  */
 
 :root {
+  color-scheme: light;
+
   /* ---- Surfaces ---- */
-  --lx-bg: light-dark(#f4f5f7, #0b0f16);
-  --lx-card: light-dark(#ffffff, #111722);
-  --lx-border: light-dark(#e6e9ef, #1e2836);
+  --lx-bg: #f4f5f7;
+  --lx-card: #ffffff;
+  --lx-border: #e6e9ef;
   /* Dashed border for offline / empty-slot cards. */
-  --lx-border-dashed: light-dark(#d9dde3, #1e2836);
+  --lx-border-dashed: #d9dde3;
   /* Hairline between table rows — lighter than --lx-border by design. */
-  --lx-hairline: light-dark(#f0f2f5, #1e2836);
+  --lx-hairline: #f0f2f5;
   /* Recessed fill: menu item hover, callout backgrounds, selected table row. */
-  --lx-sunken: light-dark(#f4f5f7, #0b0f16);
+  --lx-sunken: #f4f5f7;
 
   /* ---- Text ---- */
-  --lx-text: light-dark(#14181f, #edf1f7);
-  --lx-muted: light-dark(#6a7382, #8a94a6);
+  --lx-text: #14181f;
+  --lx-muted: #6a7382;
 
   /* ---- Accent — links, focus rings, primary buttons. Nothing else. ---- */
   --lx-accent: #2563eb;
@@ -36,16 +43,68 @@
   --lx-on-accent: #ffffff;
 
   /* ---- Nav / toggle active pill: dark in light mode, inverted in dark ---- */
-  --lx-pill-active-bg: light-dark(#14181f, #edf1f7);
-  --lx-pill-active-fg: light-dark(#ffffff, #0b0f16);
+  --lx-pill-active-bg: #14181f;
+  --lx-pill-active-fg: #ffffff;
 
   /* ---- Status — dot 8px or edge/ring 3px only. Never a filled background. ---- */
-  --lx-status-active: light-dark(#16a34a, #22c55e);
-  --lx-status-locked: light-dark(#d97706, #f59e0b);
-  --lx-status-idle: light-dark(#64748b, #94a3b8);
-  --lx-status-offline: light-dark(#9ca3af, #6b7280);
-  --lx-status-alert: light-dark(#dc2626, #ef4444);
+  --lx-status-active: #16a34a;
+  --lx-status-locked: #d97706;
+  --lx-status-idle: #64748b;
+  --lx-status-offline: #9ca3af;
+  --lx-status-alert: #dc2626;
+}
 
+/* The dark ramp. Declared once and applied by both selectors below. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --lx-bg: #0b0f16;
+    --lx-card: #111722;
+    --lx-border: #1e2836;
+    --lx-border-dashed: #1e2836;
+    --lx-hairline: #1e2836;
+    --lx-sunken: #0b0f16;
+
+    --lx-text: #edf1f7;
+    --lx-muted: #8a94a6;
+
+    --lx-pill-active-bg: #edf1f7;
+    --lx-pill-active-fg: #0b0f16;
+
+    --lx-status-active: #22c55e;
+    --lx-status-locked: #f59e0b;
+    --lx-status-idle: #94a3b8;
+    --lx-status-offline: #6b7280;
+    --lx-status-alert: #ef4444;
+  }
+}
+
+/* An explicit choice from the theme toggle wins over the OS preference. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --lx-bg: #0b0f16;
+  --lx-card: #111722;
+  --lx-border: #1e2836;
+  --lx-border-dashed: #1e2836;
+  --lx-hairline: #1e2836;
+  --lx-sunken: #0b0f16;
+
+  --lx-text: #edf1f7;
+  --lx-muted: #8a94a6;
+
+  --lx-pill-active-bg: #edf1f7;
+  --lx-pill-active-fg: #0b0f16;
+
+  --lx-status-active: #22c55e;
+  --lx-status-locked: #f59e0b;
+  --lx-status-idle: #94a3b8;
+  --lx-status-offline: #6b7280;
+  --lx-status-alert: #ef4444;
+}
+
+:root {
   /* ---- Radius ---- */
   --lx-radius-card: 16px;
   --lx-radius-control: 10px;
@@ -90,8 +149,14 @@ body {
   padding: 0;
 }
 
-body {
+/* The canvas lives on the root element so it resolves against the same
+   color-scheme as every other token. */
+html {
   background: var(--lx-bg);
+}
+
+body {
+  background: transparent;
   color: var(--lx-text);
   font-family: var(--lx-font);
   font-size: 14.5px;

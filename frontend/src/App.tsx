@@ -1,142 +1,173 @@
-// Logix Admin Dashboard -- entry shell. Auth bootstrap (OAuth return token /
-// localStorage), hash-based tab routing so sections stay bookmarkable, the
-// sidebar connectivity indicator, and global chrome (alerts bell, report
-// download, logout). Ported from server/static/app.js.
-import { useCallback, useEffect, useState } from "react";
-import { AppShell } from "@astryxdesign/core/AppShell";
-import { Button } from "@astryxdesign/core/Button";
-import { IconButton } from "@astryxdesign/core/IconButton";
-import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
-import { HStack } from "@astryxdesign/core/Stack";
-import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Text } from "@astryxdesign/core/Text";
-import { useToast } from "@astryxdesign/core/Toast";
-import { TopNav, TopNavHeading } from "@astryxdesign/core/TopNav";
-import {
-  ArrowRightStartOnRectangleIcon,
-  ChartBarIcon,
-  Cog6ToothIcon,
-  ComputerDesktopIcon,
-  DocumentArrowDownIcon,
-  MoonIcon,
-  ServerStackIcon,
-  SignalIcon,
-  Squares2X2Icon,
-  SunIcon,
-} from "@heroicons/react/24/outline";
+// Logix Admin Dashboard -- v3 "Clean Calibration" shell.
+// Design: docs/design_handoff_logix_v3/LogiX Monitoring v2.dc.html (sidebar)
+// and LogiX Responsive.dc.html (tablet top bar / phone bottom tab bar).
+//
+// Four destinations, active state = dark pill. The old Analytics and Layar
+// routes are gone; their hashes redirect so existing bookmarks still land
+// somewhere sensible.
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
-import { clearToken, fetchWithAuth, getToken, setOnSessionExpired, setToken } from "./api";
+import { clearToken, fetchWithAuth, getToken, setOnSessionExpired } from "./api";
 import AlertsBell from "./chrome/AlertsBell";
 import Login from "./chrome/Login";
-import ReportDialog from "./chrome/ReportDialog";
 import Wordmark from "./components/Wordmark";
 import { useThemeMode } from "./theme/ThemeMode";
-import { usePolling } from "./util";
-
-// Lab identity shown under the page title. TODO(config): source from
-// branding.subtitle once Settings (C7) exposes it app-wide.
-const LAB_SUBTITLE = "Lab Kimia Komputasi · FTMM";
-
-const THEME_ICON = {
-  light: SunIcon,
-  dark: MoonIcon,
-  system: ComputerDesktopIcon,
-} as const;
-
-const THEME_LABEL = {
-  light: "Tema: Terang",
-  dark: "Tema: Gelap",
-  system: "Tema: Sistem",
-} as const;
-
-// Cycles light -> dark -> system; icon + tooltip reflect the current mode.
-const DarkModeToggle = () => {
-  const { mode, cycleMode } = useThemeMode();
-  const Icon = THEME_ICON[mode];
-  return (
-    <IconButton
-      label={THEME_LABEL[mode]}
-      size="sm"
-      variant="ghost"
-      icon={<Icon style={{ width: 18, height: 18 }} />}
-      onClick={cycleMode}
-    />
-  );
-};
-import Analytics from "./views/Analytics";
+import { useBreakpoint } from "./ui/hooks";
+import { ToastProvider, useToast } from "./ui/overlays";
 import Devices from "./views/Devices";
 import Monitoring from "./views/Monitoring";
-import Screens from "./views/Screens";
+import Riwayat from "./views/Riwayat";
 import Settings from "./views/Settings";
-import TokensDemo from "./views/TokensDemo";
 import WallMode from "./views/WallMode";
 
+const LAB_NAME = "Lab Komputasi FTMM";
+
 const TABS = {
-  monitoring: { title: "Monitoring", icon: SignalIcon, view: Monitoring },
-  screens: { title: "Layar", icon: Squares2X2Icon, view: Screens },
-  devices: { title: "Devices", icon: ServerStackIcon, view: Devices },
-  analytics: { title: "Analytics", icon: ChartBarIcon, view: Analytics },
-  settings: { title: "Settings", icon: Cog6ToothIcon, view: Settings },
+  monitoring: { title: "Monitoring", short: "Monitor", view: Monitoring },
+  riwayat: { title: "Riwayat", short: "Riwayat", view: Riwayat },
+  perangkat: { title: "Perangkat", short: "Perangkat", view: Devices },
+  pengaturan: { title: "Pengaturan", short: "Atur", view: Settings },
 } as const;
 
 type TabKey = keyof typeof TABS;
 
-const normalizeTab = (hash: string): TabKey =>
-  (hash in TABS ? hash : "monitoring") as TabKey;
+// Retired routes. Analytics became Riwayat; the standalone Layar/Screens tab
+// was removed and screenshot is now a per-device action on Monitoring.
+const REDIRECTS: Record<string, TabKey> = {
+  analytics: "riwayat",
+  screens: "monitoring",
+  layar: "monitoring",
+  devices: "perangkat",
+  settings: "pengaturan",
+};
 
-// Sidebar connectivity indicator: browser online/offline events plus a 20s
-// GET /api/health poll -- either failing reads as disconnected.
-const ConnectivityStatus = () => {
-  const [state, setState] = useState<"connected" | "disconnected" | "checking">("checking");
+const normalizeTab = (hash: string): TabKey => {
+  if (hash in TABS) return hash as TabKey;
+  return REDIRECTS[hash] ?? "monitoring";
+};
 
-  const check = useCallback(async () => {
-    if (!navigator.onLine) {
-      setState("disconnected");
-      return;
-    }
-    try {
-      const res = await fetch("/api/health", { cache: "no-store" });
-      setState(res.ok ? "connected" : "disconnected");
-    } catch {
-      setState("disconnected");
-    }
-  }, []);
+const NAV_ICONS: Record<TabKey, ReactNode> = {
+  monitoring: (
+    <>
+      <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5" />
+      <rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5" />
+      <rect x="13" y="13" width="7.5" height="7.5" rx="1.5" />
+    </>
+  ),
+  riwayat: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5 L12 12 L15.5 14" />
+    </>
+  ),
+  perangkat: (
+    <>
+      <rect x="3.5" y="5" width="17" height="12" rx="2" />
+      <path d="M9 20.5 L15 20.5" />
+    </>
+  ),
+  pengaturan: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3.5 L12 6 M12 18 L12 20.5 M3.5 12 L6 12 M18 12 L20.5 12 M6 6 L7.8 7.8 M16.2 16.2 L18 18 M18 6 L16.2 7.8 M7.8 16.2 L6 18" />
+    </>
+  ),
+};
 
-  usePolling(check, 20000);
+const NavIcon = ({ tab, color }: { tab: TabKey; color: string }) => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke={color}
+    strokeWidth="2"
+    strokeLinecap="round"
+    aria-hidden="true"
+  >
+    {NAV_ICONS[tab]}
+  </svg>
+);
 
-  useEffect(() => {
-    const onOffline = () => setState("disconnected");
-    window.addEventListener("online", check);
-    window.addEventListener("offline", onOffline);
-    return () => {
-      window.removeEventListener("online", check);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, [check]);
+const THEME_LABEL = { light: "Tema: terang", dark: "Tema: gelap", system: "Tema: sistem" } as const;
 
-  const labels = {
-    connected: "Server Terhubung",
-    disconnected: "Terputus dari Server",
-    checking: "Memeriksa Koneksi...",
+/** Sidebar footer / top-bar utilities: theme cycle, alerts, sign out. */
+const Utilities = ({ onLogout, isCompact }: { onLogout: () => void; isCompact?: boolean }) => {
+  const { mode, cycleMode } = useThemeMode();
+  const button: React.CSSProperties = {
+    font: "inherit",
+    fontSize: 12,
+    color: "var(--lx-muted)",
+    background: "transparent",
+    border: "none",
+    padding: "4px 0",
+    cursor: "pointer",
+    textAlign: "left",
   };
-  const variants = { connected: "success", disconnected: "error", checking: "warning" } as const;
-
   return (
-    <HStack gap={2} align="center">
-      <StatusDot variant={variants[state]} label={labels[state]} isPulsing={state === "disconnected"} />
-      <Text type="supporting" color="secondary">{labels[state]}</Text>
-    </HStack>
+    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <AlertsBell />
+      <button type="button" style={button} onClick={cycleMode} title={THEME_LABEL[mode]}>
+        {THEME_LABEL[mode]}
+      </button>
+      {!isCompact && (
+        <button type="button" style={button} onClick={onLogout}>
+          Keluar
+        </button>
+      )}
+    </div>
   );
 };
 
+const NavItem = ({
+  tab,
+  isActive,
+  onSelect,
+}: {
+  tab: TabKey;
+  isActive: boolean;
+  onSelect: () => void;
+}) => (
+  <button
+    type="button"
+    aria-current={isActive ? "page" : undefined}
+    onClick={onSelect}
+    style={{
+      font: "inherit",
+      display: "block",
+      width: "100%",
+      textAlign: "left",
+      fontSize: 13.5,
+      fontWeight: isActive ? 600 : 400,
+      padding: "9px 14px",
+      borderRadius: "var(--lx-radius-control)",
+      border: "none",
+      background: isActive ? "var(--lx-pill-active-bg)" : "transparent",
+      color: isActive ? "var(--lx-pill-active-fg)" : "var(--lx-muted)",
+      cursor: "pointer",
+    }}
+  >
+    {TABS[tab].title}
+  </button>
+);
+
 const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
   const [tab, setTab] = useState<TabKey>(normalizeTab(window.location.hash.slice(1)));
-  const [isReportOpen, setIsReportOpen] = useState(false);
+  const breakpoint = useBreakpoint();
 
   useEffect(() => {
     const onHashChange = () => setTab(normalizeTab(window.location.hash.slice(1)));
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Rewrite a retired hash in place so the address bar matches what's shown.
+  useEffect(() => {
+    const current = window.location.hash.slice(1);
+    if (current && !(current in TABS) && current in REDIRECTS) {
+      window.location.replace(`#${REDIRECTS[current]}`);
+    }
   }, []);
 
   const switchTab = (name: TabKey) => {
@@ -145,95 +176,194 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
   };
 
   const ActiveView = TABS[tab].view;
+  const keys = Object.keys(TABS) as TabKey[];
+
+  // Phone: header + bottom tab bar. Tablet: top bar with inline nav pills.
+  // Desktop: the 216px persistent sidebar.
+  if (breakpoint === "phone") {
+    return (
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            background: "var(--lx-card)",
+            borderBottom: "1px solid var(--lx-border)",
+            padding: "14px 18px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            position: "sticky",
+            top: 0,
+            zIndex: 20,
+          }}
+        >
+          <Wordmark isMarkOnly />
+          <span style={{ fontSize: 15, fontWeight: 650 }}>{TABS[tab].title}</span>
+          <span style={{ marginLeft: "auto" }}>
+            <Utilities onLogout={onLogout} isCompact />
+          </span>
+        </header>
+        <main style={{ flex: 1, padding: 12, minWidth: 0 }}>
+          <ActiveView />
+        </main>
+        <nav
+          aria-label="Navigasi utama"
+          style={{
+            position: "sticky",
+            bottom: 0,
+            background: "var(--lx-card)",
+            borderTop: "1px solid var(--lx-border)",
+            padding: "8px 10px",
+            display: "flex",
+            gap: 4,
+            zIndex: 20,
+          }}
+        >
+          {keys.map((key) => {
+            const isActive = key === tab;
+            const color = isActive ? "var(--lx-pill-active-fg)" : "var(--lx-muted)";
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-current={isActive ? "page" : undefined}
+                onClick={() => switchTab(key)}
+                style={{
+                  font: "inherit",
+                  flex: 1,
+                  minHeight: 44,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 3,
+                  padding: "7px 0",
+                  borderRadius: 12,
+                  border: "none",
+                  background: isActive ? "var(--lx-pill-active-bg)" : "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                <NavIcon tab={key} color={color} />
+                <span style={{ fontSize: 9.5, fontWeight: 600, color }}>{TABS[key].short}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    );
+  }
+
+  if (breakpoint === "tablet") {
+    return (
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <header
+          style={{
+            background: "var(--lx-card)",
+            borderBottom: "1px solid var(--lx-border)",
+            padding: "12px 20px",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <Wordmark isMarkOnly />
+          <div style={{ display: "flex", gap: 4 }}>
+            {keys.map((key) => {
+              const isActive = key === tab;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={() => switchTab(key)}
+                  style={{
+                    font: "inherit",
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    padding: "6px 14px",
+                    borderRadius: "var(--lx-radius-pill)",
+                    border: "none",
+                    background: isActive ? "var(--lx-pill-active-bg)" : "transparent",
+                    color: isActive ? "var(--lx-pill-active-fg)" : "var(--lx-muted)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {TABS[key].title}
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ marginLeft: "auto" }}>
+            <Utilities onLogout={onLogout} />
+          </span>
+        </header>
+        <main style={{ flex: 1, padding: 20, minWidth: 0 }}>
+          <ActiveView />
+        </main>
+      </div>
+    );
+  }
 
   return (
-    <AppShell
-      contentPadding={6}
-      style={{ height: "100%", minHeight: 0 }}
-      topNav={
-        <TopNav
-          label="Main navigation"
-          heading={<TopNavHeading heading={TABS[tab].title} subheading={LAB_SUBTITLE} />}
-          endContent={
-            <HStack gap={2} align="center">
-              <Button
-                label="Unduh Laporan"
-                size="sm"
-                variant="primary"
-                icon={<DocumentArrowDownIcon style={{ width: 16, height: 16 }} />}
-                onClick={() => setIsReportOpen(true)}
-              />
-              <AlertsBell />
-              <DarkModeToggle />
-              <Button
-                label="Keluar"
-                size="sm"
-                variant="ghost"
-                icon={<ArrowRightStartOnRectangleIcon style={{ width: 16, height: 16 }} />}
-                onClick={onLogout}
-              />
-            </HStack>
-          }
-        />
-      }
-      sideNav={
-        <SideNav
-          header={
-            <HStack style={{ padding: "6px 6px" }}>
-              <Wordmark />
-            </HStack>
-          }
-          footer={<ConnectivityStatus />}
-        >
-          <SideNavSection title="Lab" isHeaderHidden>
-            {(Object.keys(TABS) as TabKey[]).map((key) => (
-              <SideNavItem
-                key={key}
-                label={TABS[key].title}
-                icon={TABS[key].icon}
-                isSelected={tab === key}
-                onClick={() => switchTab(key)}
-              />
-            ))}
-          </SideNavSection>
-        </SideNav>
-      }
-    >
-      <ActiveView />
-      <ReportDialog isOpen={isReportOpen} onOpenChange={setIsReportOpen} />
-    </AppShell>
+    <div style={{ minHeight: "100dvh", display: "flex" }}>
+      <aside
+        style={{
+          width: 216,
+          flexShrink: 0,
+          background: "var(--lx-card)",
+          borderRight: "1px solid var(--lx-border)",
+          padding: "22px 14px",
+          display: "flex",
+          flexDirection: "column",
+          position: "sticky",
+          top: 0,
+          height: "100dvh",
+        }}
+      >
+        <div style={{ padding: "0 10px", marginBottom: 28 }}>
+          <Wordmark />
+        </div>
+        <nav aria-label="Navigasi utama" style={{ display: "grid", gap: 4 }}>
+          {keys.map((key) => (
+            <NavItem key={key} tab={key} isActive={key === tab} onSelect={() => switchTab(key)} />
+          ))}
+        </nav>
+        <div style={{ marginTop: "auto", padding: "16px 10px 0", fontSize: 12, color: "var(--lx-muted)" }}>
+          {LAB_NAME}
+          <br />
+          <span className="lx-mono" style={{ fontSize: 11 }}>
+            admin
+          </span>
+          <div style={{ marginTop: 10 }}>
+            <Utilities onLogout={onLogout} />
+          </div>
+        </div>
+      </aside>
+      <main style={{ flex: 1, padding: "28px 32px", minWidth: 0 }}>
+        <ActiveView />
+      </main>
+    </div>
   );
 };
 
-export default function App() {
+const AuthedApp = () => {
   const toast = useToast();
-
-  // Dev-only design-token gallery (#tokens), outside auth so it's reachable
-  // for visual verification without a live backend.
   const [hash, setHash] = useState(window.location.hash);
+
   useEffect(() => {
     const onHash = () => setHash(window.location.hash);
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  const [isAuthed, setIsAuthed] = useState<boolean>(() => {
-    // OAuth return: /?token=... takes precedence, then strip it from the URL
-    // (referrer/history leak mitigation).
-    const queryToken = new URLSearchParams(window.location.search).get("token");
-    if (queryToken) {
-      setToken(queryToken);
-      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
-      return true;
-    }
-    return Boolean(getToken());
-  });
+  const [isAuthed, setIsAuthed] = useState<boolean>(() => Boolean(getToken()));
 
   useEffect(() => {
     setOnSessionExpired(() => setIsAuthed(false));
   }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await fetchWithAuth("/api/auth/logout", { method: "POST" });
     } catch {
@@ -241,16 +371,19 @@ export default function App() {
     }
     clearToken();
     setIsAuthed(false);
-    toast({ body: "Berhasil keluar." });
-  };
+    toast("Berhasil keluar.");
+  }, [toast]);
 
-  if (hash === "#tokens") return <TokensDemo />;
-  // Wall/kiosk mode: full-screen, read-only, no app chrome (requires auth).
-  if (hash === "#wall" && isAuthed) return <WallMode />;
+  if (!isAuthed) return <Login onAuthenticated={() => setIsAuthed(true)} />;
+  // Wall/TV mode: dark, read-only, no nav or menus at all.
+  if (hash === "#wall") return <WallMode />;
+  return <Dashboard onLogout={logout} />;
+};
 
-  return isAuthed ? (
-    <Dashboard onLogout={logout} />
-  ) : (
-    <Login onAuthenticated={() => setIsAuthed(true)} />
+export default function App() {
+  return (
+    <ToastProvider>
+      <AuthedApp />
+    </ToastProvider>
   );
 }
