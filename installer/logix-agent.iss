@@ -149,6 +149,24 @@ Filename: "reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\Curre
 var
   ConfigPage: TInputQueryWizardPage;
 
+// Command-line overrides, so a lab can be imaged unattended instead of an
+// operator typing the same server URL into a wizard on every workstation:
+//
+//   LogixAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
+//     /SERVERURL="https://logix.lab.example" /SERVERKEY="..." /DEVICENAME="WS-07 - GPU-A100"
+//
+// A value given on the command line always wins; anything omitted falls back
+// to the wizard page, so the interactive install is unchanged.
+function ParamOr(const Name, Fallback: string): string;
+var
+  v: string;
+begin
+  v := Trim(ExpandConstant('{param:' + Name + '|}'));
+  if v = '' then
+    v := Fallback;
+  Result := v;
+end;
+
 procedure InitializeWizard;
 begin
   // Strings come from [CustomMessages] via {cm:...} so the page follows the
@@ -170,6 +188,11 @@ begin
   Result := True;
   if CurPageID = ConfigPage.ID then
   begin
+    // Nothing to validate when the values came from the command line -- and in
+    // a silent install there is no operator to answer a message box, which
+    // would otherwise abort setup with no page ever shown.
+    if (ParamOr('ServerUrl', '') <> '') and (ParamOr('ServerKey', '') <> '') then
+      Exit;
     if Trim(ConfigPage.Values[0]) = '' then
     begin
       MsgBox(ExpandConstant('{cm:CfgNeedUrl}'), mbError, MB_OK);
@@ -185,17 +208,17 @@ end;
 
 function GetServerUrl(Param: string): string;
 begin
-  Result := Trim(ConfigPage.Values[0]);
+  Result := ParamOr('ServerUrl', Trim(ConfigPage.Values[0]));
 end;
 
 function GetServerKey(Param: string): string;
 begin
-  Result := Trim(ConfigPage.Values[1]);
+  Result := ParamOr('ServerKey', Trim(ConfigPage.Values[1]));
 end;
 
 function GetDeviceName(Param: string): string;
 begin
-  Result := Trim(ConfigPage.Values[2]);
+  Result := ParamOr('DeviceName', Trim(ConfigPage.Values[2]));
 end;
 
 // Warn (don't block) if no Python is on PATH -- the sign-in/timer/lock/remote

@@ -711,13 +711,34 @@ $timer.Add_Tick({
 # The monitor owns the actual idle auto-close (logbook_monitor.ps1); this only
 # owns the 5-minute warning the design promises the user, so the two can never
 # disagree about when a session ends.
+#
+# The idle threshold is CACHED. Get-LogbookIdleTimeoutSeconds reads the policy
+# out of Get-LogbookConfig, which refreshes from the server -- calling it on
+# every one-second tick meant one HTTP round-trip per second per workstation,
+# which on a full lab is a needless constant load (and it buried the agent log
+# in "Fetching config from server" lines). The policy is an admin setting that
+# changes rarely; once a minute is far more than enough.
+$script:idleLimitSec = -1
+$script:idleLimitTick = -999
+
+function Get-LogbookCachedIdleLimit {
+    if ($script:idleLimitSec -lt 0 -or ($script:tick - $script:idleLimitTick) -ge 60) {
+        $script:idleLimitSec = Get-LogbookIdleTimeoutSeconds
+        $script:idleLimitTick = $script:tick
+    }
+    return $script:idleLimitSec
+}
+
 function Test-LogbookIdleWarning {
     try {
         if ($script:overlayWindow) { return }
         if (Test-Path (Join-Path $Global:StateDir 'workstation_locked.flag')) { return }
         $idleSec = Get-LogbookIdleSeconds
         if ($null -eq $idleSec) { return }
-        $limitSec = Get-LogbookIdleTimeoutSeconds
+        # Nothing to warn about until the user has actually been idle a while;
+        # skip the policy lookup entirely in the common case.
+        if ($idleSec -lt 60) { return }
+        $limitSec = Get-LogbookCachedIdleLimit
         if ($limitSec -le 0) { return }
         $remaining = $limitSec - $idleSec
         if ($remaining -le $script:IDLE_WARN_SECONDS -and $remaining -gt 0) {

@@ -24,10 +24,19 @@ const SYNC_STATUS: Record<SyncStatus, StationStatus> = {
   never_seen: "idle",
 };
 
+/**
+ * Enrolment categories. These are the server's CATEGORY_PROFILES keys, which
+ * set the heartbeat cadence and popup frequency -- NOT the lab's GPU/CPU/Umum
+ * hardware taxonomy from Settings (that lives in devices.device_types and is
+ * what the idle policy keys on). The two are easy to confuse; sending a
+ * hardware category here is rejected with "Unknown category".
+ */
 const CATEGORIES = [
-  { value: "gpu", label: "GPU" },
-  { value: "cpu", label: "CPU" },
-  { value: "custom", label: "Umum" },
+  { value: "lab_workstation", label: "Workstation lab" },
+  { value: "office_workstation", label: "Workstation kantor" },
+  { value: "loaned_laptop", label: "Laptop pinjaman" },
+  { value: "server", label: "Server" },
+  { value: "custom", label: "Lainnya" },
 ];
 
 /** Countdown to the invite's expiry, in the mm:ss the design shows. */
@@ -47,7 +56,7 @@ export default function Devices() {
   const [search, setSearch] = useState("");
 
   const [isInviteOpen, setInviteOpen] = useState(false);
-  const [inviteCategory, setInviteCategory] = useState("cpu");
+  const [inviteCategory, setInviteCategory] = useState("lab_workstation");
   const [invite, setInvite] = useState<{ invite_code: string; expires_at: string } | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<Device | null>(null);
 
