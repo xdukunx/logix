@@ -131,6 +131,7 @@ const NavItem = ({
 }) => (
   <button
     type="button"
+    className="lx-tap"
     aria-current={isActive ? "page" : undefined}
     onClick={onSelect}
     style={{
@@ -225,6 +226,7 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
               <button
                 key={key}
                 type="button"
+                className="lx-tap"
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => switchTab(key)}
                 style={{
@@ -275,6 +277,7 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
                 <button
                   key={key}
                   type="button"
+                  className="lx-tap"
                   aria-current={isActive ? "page" : undefined}
                   onClick={() => switchTab(key)}
                   style={{

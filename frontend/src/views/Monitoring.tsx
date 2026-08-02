@@ -171,7 +171,11 @@ export default function Monitoring() {
     const isOffline = s.status === "offline";
     const identity = s.spec ? `${s.id} · ${s.spec}` : s.id;
     return (
-      <Card variant={isOffline ? "dashed" : "solid"} padding={isPhone ? "13px 14px" : "16px 18px"}>
+      <Card
+        variant={isOffline ? "dashed" : "solid"}
+        isInteractive={!isOffline}
+        padding={isPhone ? "13px 14px" : "16px 18px"}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <StatusDot status={s.status} label={s.status} />
           <span

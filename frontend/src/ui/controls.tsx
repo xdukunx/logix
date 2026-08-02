@@ -40,6 +40,7 @@ export const Button = ({
 } & ButtonHTMLAttributes<HTMLButtonElement>) => (
   <button
     type="button"
+    className="lx-tap"
     {...rest}
     style={{
       font: "inherit",
@@ -52,7 +53,8 @@ export const Button = ({
       opacity: rest.disabled ? 0.5 : 1,
       width: isFullWidth ? "100%" : undefined,
       whiteSpace: "nowrap",
-      transition: `background var(--lx-motion) var(--lx-ease)`,
+      // No inline `transition` here: an inline style beats the .lx-tap class,
+      // which would silently kill the press feedback.
       ...VARIANT[variant],
       ...style,
     }}
@@ -105,6 +107,7 @@ export const PillSelect = <T extends string>({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
+        className="lx-tap"
         onClick={() => setOpen((v) => !v)}
         style={{
           font: "inherit",
@@ -130,6 +133,7 @@ export const PillSelect = <T extends string>({
       {isOpen && (
         <div
           role="listbox"
+          className="lx-anim-menu"
           style={{
             position: "absolute",
             top: "calc(100% + 8px)",
@@ -151,6 +155,7 @@ export const PillSelect = <T extends string>({
               <button
                 type="button"
                 role="option"
+                className="lx-tap lx-row-hover"
                 aria-selected={o.value === value}
                 onClick={() => {
                   onChange(o.value);
@@ -219,6 +224,7 @@ export const PillTabs = <T extends string>({
           key={o.value}
           type="button"
           role="tab"
+          className="lx-tap"
           aria-selected={isActive}
           onClick={() => onChange(o.value)}
           style={{

@@ -92,6 +92,7 @@ export const MoreMenu = ({ label, items }: { label: string; items: MenuItem[] })
       {isOpen && !isPhone && (
         <div
           role="menu"
+          className="lx-anim-menu"
           style={{
             position: "absolute",
             top: 26,
@@ -113,6 +114,7 @@ export const MoreMenu = ({ label, items }: { label: string; items: MenuItem[] })
               <button
                 type="button"
                 role="menuitem"
+                className="lx-tap lx-row-hover"
                 disabled={item.isDisabled}
                 onClick={() => run(item)}
                 style={menuItemStyle(item, 0)}
@@ -166,10 +168,12 @@ export const BottomSheet = ({
       aria-label={title}
     >
       <div
+        className="lx-anim-backdrop"
         style={{ position: "absolute", inset: 0, background: "rgba(16,24,40,.32)" }}
         onClick={onClose}
       />
       <div
+        className="lx-anim-sheet"
         style={{
           position: "relative",
           width: "100%",
@@ -234,6 +238,7 @@ export const Modal = ({
 
   return createPortal(
     <div
+      className="lx-anim-backdrop"
       style={{
         position: "fixed",
         inset: 0,
@@ -248,6 +253,7 @@ export const Modal = ({
       <div
         ref={ref}
         role="dialog"
+        className="lx-anim-modal"
         aria-modal="true"
         aria-label={title}
         style={{
@@ -389,6 +395,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
+            className="lx-anim-toast"
             style={{
               background: "var(--lx-card)",
               border: "1px solid var(--lx-border)",

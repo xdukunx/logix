@@ -1658,9 +1658,10 @@ function Build-LogbookCountdownOverlayXaml($cfg) {
 $res
   </Window.Resources>
   <Grid>
-    <Border Name="OverlayCard" Width="360" CornerRadius="22" Padding="26,24"
+    <Border Name="OverlayCard" Width="360" CornerRadius="22" Padding="26,24" RenderTransformOrigin="0.5,0.5"
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border.RenderTransform><ScaleTransform x:Name="OverlayScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
       <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="24" Opacity="0.6" Color="#000000"/></Border.Effect>
       <StackPanel HorizontalAlignment="Center">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
@@ -1809,6 +1810,7 @@ $res
     <Border Name="PillView" Width="150" Height="32" CornerRadius="16"
             Background="#B30B1017" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top">
+      <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
       <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.45" Color="#000000"/></Border.Effect>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
         <Ellipse Name="PillDot" Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -1826,6 +1828,7 @@ $res
     <Border Name="SliverView" Visibility="Collapsed" Height="24" CornerRadius="12"
             Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top" Padding="14,0">
+      <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
       <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.45" Color="#000000"/></Border.Effect>
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <Ellipse Name="SliverDot" Width="6" Height="6" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -1843,6 +1846,7 @@ $res
     <Border Name="CardView" Visibility="Collapsed" Width="240" CornerRadius="22"
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top" Padding="18,16">
+      <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
       <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="18" Opacity="0.5" Color="#000000"/></Border.Effect>
       <StackPanel>
 

@@ -120,9 +120,22 @@
   --lx-font: system-ui, "Segoe UI", sans-serif;
   --lx-font-mono: ui-monospace, "SF Mono", Consolas, monospace;
 
-  /* ---- Motion — single duration; every transition reads this ---- */
+  /*
+   * ---- Motion ----
+   * Three durations, deliberately few. A "quiet instrument" moves to confirm
+   * a state change and never to decorate: opacity and transform only, no
+   * overshoot, nothing longer than a fifth of a second.
+   *   fast   presses and hovers, felt rather than seen
+   *   base   the default for anything that changes state
+   *   enter  surfaces arriving (menu, modal, toast) -- a touch longer so the
+   *          eye can follow where they came from
+   */
+  --lx-motion-fast: 90ms;
   --lx-motion: 140ms;
+  --lx-motion-enter: 180ms;
   --lx-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Slight deceleration for arriving surfaces. */
+  --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /*
@@ -131,7 +144,9 @@
  */
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --lx-motion-fast: 0ms;
     --lx-motion: 0ms;
+    --lx-motion-enter: 0ms;
   }
   *,
   *::before,
@@ -188,4 +203,127 @@ a:hover {
 :focus-visible {
   outline: 2px solid var(--lx-accent);
   outline-offset: 2px;
+}
+
+/*
+ * ---- Micro-interactions -------------------------------------------------
+ *
+ * House rules, so this layer can never drift back into decoration:
+ *   - transform and opacity only (both composite off the main thread; nothing
+ *     here can cause a layout pass mid-interaction)
+ *   - travel is 2-6px, never more; motion should register as a nudge
+ *   - no infinite loops, no motion on anything at rest. Every rule below is
+ *     tied to a user action or a surface arriving.
+ * The reduce-motion block above zeroes all three duration tokens AND forces
+ * every animation/transition to ~0, so this whole section snaps off.
+ */
+
+/* Surfaces arriving. Menus and toasts come from the direction they belong to;
+   modals settle in place rather than sliding, since they own the screen. */
+@keyframes lx-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+@keyframes lx-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+}
+@keyframes lx-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes lx-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes lx-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+.lx-anim-menu {
+  animation: lx-menu-in var(--lx-motion) var(--lx-ease-out);
+  transform-origin: top center;
+}
+.lx-anim-modal {
+  animation: lx-modal-in var(--lx-motion-enter) var(--lx-ease-out);
+}
+.lx-anim-backdrop {
+  animation: lx-backdrop-in var(--lx-motion) var(--lx-ease);
+}
+.lx-anim-toast {
+  animation: lx-toast-in var(--lx-motion-enter) var(--lx-ease-out);
+}
+.lx-anim-sheet {
+  animation: lx-sheet-in var(--lx-motion-enter) var(--lx-ease-out);
+}
+
+/*
+ * Interactive surfaces. `.lx-interactive` is the one hover/press treatment in
+ * the product: a 1px rise on hover, settling back down on press so a click
+ * feels like it lands. Cards opt in; static content never does.
+ */
+.lx-interactive {
+  transition:
+    transform var(--lx-motion) var(--lx-ease),
+    box-shadow var(--lx-motion) var(--lx-ease),
+    background-color var(--lx-motion) var(--lx-ease),
+    border-color var(--lx-motion) var(--lx-ease);
+}
+@media (hover: hover) {
+  .lx-interactive:hover {
+    transform: translateY(-1px);
+  }
+}
+.lx-interactive:active {
+  transform: translateY(0);
+  transition-duration: var(--lx-motion-fast);
+}
+
+/* Buttons, menu items, nav pills, table rows: colour-only feedback, so
+   nothing shifts under the cursor while the user is aiming at it. */
+.lx-tap {
+  transition:
+    background-color var(--lx-motion) var(--lx-ease),
+    color var(--lx-motion) var(--lx-ease),
+    border-color var(--lx-motion) var(--lx-ease),
+    opacity var(--lx-motion) var(--lx-ease);
+}
+.lx-tap:active:not(:disabled) {
+  opacity: 0.75;
+  transition-duration: var(--lx-motion-fast);
+}
+
+/* Row and menu-item hover wash. Uses the recessed fill, never a status tint. */
+.lx-row-hover {
+  transition: background-color var(--lx-motion) var(--lx-ease);
+}
+@media (hover: hover) {
+  .lx-row-hover:hover {
+    background-color: var(--lx-sunken);
+  }
+}
+
+/*
+ * The status dot is the one thing allowed to draw the eye when data changes,
+ * and only on arrival -- a single 1.0 -> 1.0 scale pop, never a loop. The
+ * guard rail forbids a pulsing dot at rest; this fires once when a station
+ * first appears or changes state.
+ */
+@keyframes lx-dot-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+.lx-anim-dot {
+  animation: lx-dot-in var(--lx-motion) var(--lx-ease-out);
 }

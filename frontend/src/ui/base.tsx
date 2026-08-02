@@ -25,6 +25,10 @@ export const StatusDot = ({
   label?: string;
 }) => (
   <span
+    // Keyed on status so React remounts the node on a state change, replaying
+    // the one-shot arrival pop. It never animates at rest.
+    key={status}
+    className="lx-anim-dot"
     role={label ? "img" : undefined}
     aria-label={label}
     aria-hidden={label ? undefined : true}
@@ -77,19 +81,24 @@ export const Callout = ({
 export const Card = ({
   variant = "solid",
   isSelected = false,
+  isInteractive = false,
   padding = "16px 18px",
   style,
+  className,
   children,
   ...rest
 }: {
   variant?: "solid" | "dashed";
   isSelected?: boolean;
+  /** Opts into the hover-lift treatment. Only for cards the user acts on. */
+  isInteractive?: boolean;
   padding?: CSSProperties["padding"];
   style?: CSSProperties;
   children: ReactNode;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, "style" | "children">) => (
   <div
     {...rest}
+    className={[isInteractive ? "lx-interactive" : "", className].filter(Boolean).join(" ") || undefined}
     style={{
       background: variant === "dashed" ? "transparent" : "var(--lx-card)",
       border: variant === "dashed" ? "1px dashed var(--lx-border-dashed)" : undefined,

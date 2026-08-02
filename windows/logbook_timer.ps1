@@ -242,10 +242,40 @@ function Update-LogbookWidgetStatus {
     $stripBar.Background = $brush
 }
 
+# ---- Motion -----------------------------------------------------------------
+# Surfaces arrive from the top edge they belong to: a short slide down plus a
+# fade, nothing else. Opacity and TranslateTransform only -- no size or layout
+# animation, which is what made the previous widget's growth look unsteady.
+#
+# reduce_motion is a hard kill, not a softening: when the OS asks for it every
+# surface is placed at its final position and opacity with no animation at all.
+$script:EASE = New-Object System.Windows.Media.Animation.CubicEase
+$script:EASE.EasingMode = 'EaseOut'
+
+function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160) {
+    if (-not $Element) { return }
+    $shift = $Element.RenderTransform
+    if ($script:reduceMotion) {
+        $Element.Opacity = 1
+        if ($shift -is [System.Windows.Media.TranslateTransform]) { $shift.Y = 0 }
+        return
+    }
+    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds($Ms))
+    $fade.EasingFunction = $script:EASE
+    $Element.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
+    if ($shift -is [System.Windows.Media.TranslateTransform]) {
+        $slide = New-Object System.Windows.Media.Animation.DoubleAnimation($FromY, 0.0, [TimeSpan]::FromMilliseconds($Ms))
+        $slide.EasingFunction = $script:EASE
+        $shift.BeginAnimation([System.Windows.Media.TranslateTransform]::YProperty, $slide)
+    }
+}
+
 # ---- View -------------------------------------------------------------------
 # Single source of truth for which of the three surfaces is showing. The window
 # is Hidden outright when nothing should be visible (strip posture, sliver
 # retracted) so it cannot intercept a click at the top edge.
+$script:lastSurface = 'none'
+
 function Update-LogbookWidgetView {
     $showCard   = $script:cardOpen
     $showPill   = (-not $showCard) -and ($script:posture -eq 'pill')
@@ -259,6 +289,21 @@ function Update-LogbookWidgetView {
         if (-not $window.IsVisible) { $window.Show() }
     } else {
         $window.Hide()
+    }
+
+    # Animate only on an actual transition. This function runs on every tick,
+    # so replaying the entrance each time would leave the widget permanently
+    # twitching.
+    $surface = if ($showCard) { 'card' } elseif ($showPill) { 'pill' } elseif ($showSliver) { 'sliver' } else { 'none' }
+    if ($surface -ne $script:lastSurface) {
+        switch ($surface) {
+            # The card replaces the pill in place, so it barely travels.
+            'card'   { Show-LogbookSurface $cardView   -FromY -4 -Ms 170 }
+            'pill'   { Show-LogbookSurface $pillView   -FromY -6 -Ms 150 }
+            # The sliver is the one that reads as "dropping" from the edge.
+            'sliver' { Show-LogbookSurface $sliverView -FromY -14 -Ms 180 }
+        }
+        $script:lastSurface = $surface
     }
 
     $stripWindow.Visibility = if ($script:posture -eq 'strip') { 'Visible' } else { 'Collapsed' }
@@ -584,6 +629,22 @@ function Show-LogbookOverlay {
 
         $ow.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape' -or $e.SystemKey -eq 'F4') { $e.Handled = $true } })
         [void]$ow.Show()
+
+        # The overlay is the one surface that interrupts the user, so it gets a
+        # slightly stronger arrival: the scrim fades up while the card settles
+        # from 96%. Still no overshoot -- this is a warning, not a flourish.
+        if (-not $script:reduceMotion) {
+            $card = $ow.FindName('OverlayCard')
+            $scrim = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds(180))
+            $scrim.EasingFunction = $script:EASE
+            $ow.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $scrim)
+            if ($card -and $card.RenderTransform -is [System.Windows.Media.ScaleTransform]) {
+                $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.96, 1.0, [TimeSpan]::FromMilliseconds(200))
+                $pop.EasingFunction = $script:EASE
+                $card.RenderTransform.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $pop)
+                $card.RenderTransform.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $pop)
+            }
+        }
         Update-LogbookWidgetView
     } catch {
         Write-LogbookError "Overlay failed: $($_.Exception.Message)"

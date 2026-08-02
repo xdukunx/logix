@@ -63,6 +63,7 @@ export function Table<T>({
         {rows.map((row) => (
           <div
             key={getRowKey(row)}
+            className={onRowClick ? "lx-interactive" : undefined}
             onClick={onRowClick ? () => onRowClick(row) : undefined}
             style={{
               background: "var(--lx-card)",
@@ -138,6 +139,7 @@ export function Table<T>({
           <div
             key={key}
             role="row"
+            className={onRowClick ? "lx-row-hover" : undefined}
             tabIndex={onRowClick ? 0 : undefined}
             onClick={onRowClick ? () => onRowClick(row) : undefined}
             onKeyDown={
