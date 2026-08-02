@@ -60,12 +60,17 @@ public static class LogixWin {
     [DllImport("user32.dll", EntryPoint="SetWindowLongPtr")] static extern IntPtr SetWindowLongPtr64(IntPtr h, int i, IntPtr v);
     [DllImport("user32.dll", EntryPoint="SetWindowLong")] static extern int SetWindowLong32(IntPtr h, int i, int v);
     public static void AddExStyle(IntPtr hwnd, int bits) {
+        // (long)(uint) rather than a bare `cur | bits`: the int operand would
+        // be sign-extended, which Add-Type compiles as CS0675 -- and it treats
+        // that warning as an error, so the whole type fails to build and the
+        // widget never launches. Masking to uint first keeps the high bits clean.
+        long widened = (long)(uint)bits;
         if (IntPtr.Size == 8) {
             long cur = GetWindowLongPtr64(hwnd, GWL_EXSTYLE).ToInt64();
-            SetWindowLongPtr64(hwnd, GWL_EXSTYLE, new IntPtr(cur | bits));
+            SetWindowLongPtr64(hwnd, GWL_EXSTYLE, new IntPtr(cur | widened));
         } else {
             int cur = GetWindowLong32(hwnd, GWL_EXSTYLE);
-            SetWindowLong32(hwnd, GWL_EXSTYLE, cur | bits);
+            SetWindowLong32(hwnd, GWL_EXSTYLE, (int)((uint)cur | (uint)bits));
         }
     }
 }

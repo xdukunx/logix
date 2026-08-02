@@ -110,6 +110,22 @@ Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status d
 $mono = $timerDoc.SelectNodes("//*[local-name()='TextBlock'][@FontFamily='Consolas']")
 Assert ($mono.Count -ge 4) "time / ID values render in Consolas (mono tabular)"
 
+Write-Host "timer controller P/Invoke"
+# The widget's Win32 helper is compiled at runtime by Add-Type, which treats
+# warnings as errors. A sign-extended bitwise-or (CS0675) once made the whole
+# type fail to build, so logbook_timer.ps1 died on launch -- with nothing
+# written to logbook_error.log, because the failure happened before the
+# try/catch. Compile it here so that can never ship again.
+$timerSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_timer.ps1')
+$pinvoke = [regex]::Match($timerSrc, '(?s)Add-Type @"(.*?)"@')
+Assert ($pinvoke.Success) "timer controller still defines its Win32 helper inline"
+if ($pinvoke.Success -and -not ([System.Management.Automation.PSTypeName]'LogixWin').Type) {
+    $compiled = $true
+    try { Add-Type -TypeDefinition $pinvoke.Groups[1].Value -ErrorAction Stop }
+    catch { $compiled = $false; Write-Host "    compiler said: $($_.Exception.Message)" }
+    Assert $compiled "LogixWin compiles cleanly under Add-Type (warnings are errors)"
+}
+
 Write-Host "idle auto-end policy"
 # Safety-critical: Get-LogbookIdleTimeoutSeconds returns 0 for a DISABLED
 # category. A caller that compares "idle >= limit" without guarding limit > 0
