@@ -44,52 +44,78 @@ try {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "session timer -> XAML"
-$session = [pscustomobject]@{ session_type = 'Physical'; nama = 'Nama & "Contoh"'; tujuan = 'Running Data' }
-$timerXaml = Build-LogbookTimerXaml -cfg $cfg -session $session -deviceName 'LAB-PC-01 <Test>'
+Write-Host "v3 client token ResourceDictionary"
+$res = Build-LogbookClientResources $cfg
+# Wrap the fragment so it can be parsed on its own.
+$resDoc = [xml]("<ResourceDictionary xmlns=`"http://schemas.microsoft.com/winfx/2006/xaml/presentation`" xmlns:x=`"http://schemas.microsoft.com/winfx/2006/xaml`">$res</ResourceDictionary>")
+$brushKeys = @($resDoc.SelectNodes("//*[local-name()='SolidColorBrush']") | ForEach-Object { $_.Key })
+foreach ($k in @('LxSurface','LxElevated','LxHairline','LxText','LxMuted','LxAccent','LxActive','LxNotice','LxWarning','LxCritical')) {
+    Assert ($brushKeys -contains $k) "resource dictionary defines $k"
+}
+Assert ($res -notmatch 'GradientBrush') "no gradient brush in the client token set (v3 guard rail)"
+
+Write-Host "session timer -> XAML (v3 Pill & Strip)"
+$session = [pscustomobject]@{ session_type = 'SSH'; nama = 'Nama & "Contoh"'; tujuan = 'Running Data' }
+$timerXaml = Build-LogbookTimerXaml -cfg $cfg -session $session -deviceName 'LAB-PC-01 <Test> - GPU-A100'
 $timerDoc = [xml]$timerXaml
-Assert ($timerDoc.Window.Width -eq '230') "timer window width fixed at 230 (narrow clock width; widget only ever grows downward)"
-$namaValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'NamaValue' }).Text
+
+$tb = { param($n) $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq $n } }
+$bd = { param($n) $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq $n } }
+
+Assert ($timerDoc.Window.SizeToContent -eq 'WidthAndHeight') "widget sizes to content (no chamfered Path geometry to keep in sync any more)"
+Assert ($timerDoc.Window.ShowInTaskbar -eq 'False') "widget stays out of the taskbar (WS_EX_TOOLWINDOW is applied at runtime too)"
+
+$pill = & $bd 'PillView'
+Assert ($pill.Width -eq '150' -and $pill.Height -eq '32') "pill is 150x32 (design D-02 state 01)"
+Assert ($pill.CornerRadius -eq '16') "pill is fully rounded (half its height)"
+$card = & $bd 'CardView'
+Assert ($card.Width -eq '240') "expand card is 240px wide (design D-02 state 02)"
+Assert ($card.CornerRadius -eq '22') "expand card uses radius 22"
+Assert ($card.Visibility -eq 'Collapsed') "card starts collapsed -- the pill is the resting posture"
+$sliver = & $bd 'SliverView'
+Assert ($sliver.Height -eq '24') "sliver is 24px tall (design D-02 state 06)"
+Assert ($sliver.Visibility -eq 'Collapsed') "sliver starts retracted"
+
+# The station ID must survive the split: "LAB-PC-01" contains hyphens itself,
+# so only a SPACED separator divides the ID from the spec.
+$station = (& $tb 'CardStation').Text
+Assert ($station -eq 'LAB-PC-01 <Test>') "station ID keeps its internal hyphens (split only on a spaced separator)"
+$deviceValue = (& $tb 'DeviceValue').Text
+Assert ($deviceValue -like 'GPU-A100*SSH') "Perangkat row shows spec + access type, not the whole display name"
+$namaValue = (& $tb 'NamaValue').Text
 Assert ($namaValue -eq 'Nama & "Contoh"') "nama with ampersand/quote escaped and round-trips"
-$deviceValue = ($timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'DeviceValue' }).Text
-Assert ($deviceValue -eq 'LAB-PC-01 <Test>') "device name with angle bracket escaped and round-trips"
-$clockMain = $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'ClockMain' }
-Assert ($clockMain.Text -eq '00:00') "clock starts at 00:00"
-$pulseEllipse = $timerDoc.SelectNodes("//*[local-name()='Ellipse']") | Where-Object { $_.Name -eq 'Pulse' }
-Assert ($null -ne $pulseEllipse) "pulse is an Ellipse (animated via BeginAnimation, not a text swap)"
-$shapePaths = $timerDoc.SelectNodes("//*[local-name()='Path'][@Name='ShapePath']")
-Assert ($shapePaths.Count -eq 1) "exactly one chamfered-shape Path element (SELESAI's icon glyph is also a Path, so match by name, not by count)"
-$pathData = $shapePaths[0].Data
-Assert ($pathData.StartsWith('M 20,0') -and $pathData.TrimEnd().EndsWith('Z')) "shape path data starts/ends correctly (closed geometry)"
-Assert ($timerDoc.Window.Height -eq '210') "window starts at a fixed 210 height (deterministic, not SizeToContent -- see logbook_timer.ps1's HEIGHT_* constants)"
-$infoSection = $timerDoc.SelectNodes("//*[local-name()='StackPanel']") | Where-Object { $_.Name -eq 'InfoSection' }
-Assert ($infoSection.Visibility -eq 'Visible' -or [string]::IsNullOrEmpty($infoSection.Visibility)) "info section starts visible (first 10s of a session)"
-$messageSection = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MessageSection' }
-Assert ($messageSection.Visibility -eq 'Collapsed') "message section starts collapsed (Auto row -> zero height, no reserved blank space)"
-$messageIconBadge = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MessageIconBadge' }
-Assert ($null -ne $messageIconBadge) "message has a colored icon badge (toast-style, matching the reference)"
-$messageTitle = $timerDoc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'MessageTitle' }
-Assert ($null -ne $messageTitle) "message has a bold title line separate from the body text"
 
-Write-Host "timer shape geometry at various heights"
-$shape90 = Get-LogbookTimerShapeData 50   # below the floor
-Assert ($shape90 -match 'L 320,70 ') "height floor (90) applied when given a too-small content height"
-$shape300 = Get-LogbookTimerShapeData 300
-Assert ($shape300 -match 'L 320,280 ' -and $shape300.TrimEnd().EndsWith('Z')) "shape geometry recomputes correctly for a taller (message-extended) height"
-$shapeHuge = Get-LogbookTimerShapeData 5000
-Assert ($shapeHuge -match 'L 320,480 ') "height ceiling (500) applied -- guards against ever filling the screen again"
+$clock = & $tb 'PillClock'
+Assert ($clock.Text -eq '00:00') "pill clock starts at 00:00"
+Assert ((& $tb 'CardClock').Text -eq '00:00:00') "card clock carries seconds"
 
-Write-Host "timer shape geometry at various widths"
-$shapeDefaultW = Get-LogbookTimerShapeData 190
-Assert ($shapeDefaultW -match 'L 276,0 L 320,44 ') "width defaults to 320 (backward-compatible single-arg call)"
-$shapeNarrow = Get-LogbookTimerShapeData 100 210   # the widget's actual fixed width (230 window - 20 margin)
-Assert ($shapeNarrow -match 'L 166,0 L 210,44 ' -and $shapeNarrow -match 'L 210,80 ') "narrow width recomputes chamfer and right edge"
-$seedInDoc = $shapePaths[0].Data
-Assert ($seedInDoc -match 'L 166,0 L 210,44 ') "timer XAML seeds the shape at the narrow 210 width, matching the window"
-$shapeTiny = Get-LogbookTimerShapeData 100 10
-Assert ($shapeTiny -match 'L 106,0 L 150,44 ') "width floor (150) applied when given a too-small content width"
-$shapeWide = Get-LogbookTimerShapeData 100 5000
-Assert ($shapeWide -match 'L 456,0 L 500,44 ') "width ceiling (500) applied -- guards against filling the screen"
+Assert ((& $bd 'PillBadge').Visibility -eq 'Collapsed') "unread badge hidden until a message arrives"
+$cardMsg = $timerDoc.SelectNodes("//*[local-name()='StackPanel']") | Where-Object { $_.Name -eq 'CardMessage' }
+Assert ($cardMsg.Visibility -eq 'Collapsed') "message block collapsed by default (never auto-expands)"
+Assert ((& $tb 'ArmedCaption').Visibility -eq 'Collapsed') "armed caption hidden until SELESAI is armed"
+
+Write-Host "v3 anti-pattern guard rails (client)"
+Assert ($timerXaml -notmatch 'GradientBrush') "no gradient anywhere in the timer widget"
+Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status dot is static"
+$mono = $timerDoc.SelectNodes("//*[local-name()='TextBlock'][@FontFamily='Consolas']")
+Assert ($mono.Count -ge 4) "time / ID values render in Consolas (mono tabular)"
+
+Write-Host "strip posture -> XAML"
+$stripDoc = [xml](Build-LogbookStripXaml $cfg)
+Assert ($stripDoc.Window.Height -eq '3') "strip is a 3px line (design D-02 state 05)"
+Assert ($null -ne ($stripDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'StripBar' })) "strip exposes StripBar for status recolouring"
+
+Write-Host "shared countdown / broadcast overlay -> XAML"
+$ovDoc = [xml](Build-LogbookCountdownOverlayXaml $cfg)
+$ovCard = $ovDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'OverlayCard' }
+Assert ($ovCard.Width -eq '360') "overlay card is 360px wide (design D-02 state 08)"
+Assert ($ovCard.CornerRadius -eq '22') "overlay card uses radius 22, matching the expand card"
+foreach ($n in @('CountNumber','OverlayTitle','OverlayBody','ExtendBtn','EndNowBtn','AckBtn')) {
+    Assert ($ovDoc.InnerXml -match ('Name="' + $n + '"')) "overlay exposes $n (one component serves idle auto-end AND broadcast)"
+}
+$ovButtons = $ovDoc.SelectNodes("//*[local-name()='Button']")
+Assert ($ovButtons.Count -eq 3) "overlay has exactly the three action buttons"
+Assert ($ovDoc.InnerXml -match 'TextWrapping="NoWrap"' -or $res -match 'TextWrapping="NoWrap"') "overlay action labels never wrap"
 
 if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nAll popup-config checks passed." -ForegroundColor Green

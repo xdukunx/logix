@@ -1166,6 +1166,95 @@ function Get-LogbookTheme($cfg) {
     }
 }
 
+function Build-LogbookClientResources($cfg) {
+    # The v3 "Clean Calibration" client token set, emitted as a WPF
+    # ResourceDictionary fragment. This is the client-side twin of the web
+    # dashboard's tokens.css: one place defines the palette, every window
+    # references it via {StaticResource ...} instead of inlining hex.
+    #
+    # Values come from docs/design_handoff_logix_v3/README.md ("Client widget
+    # (WPF, always dark)") and remain config-overridable through
+    # Get-LogbookTheme, so a faculty rebrand still works.
+    #
+    # Guard rails encoded here: no gradient brushes, and status colour exists
+    # only as a dot fill or a 3px edge -- there is deliberately no tinted
+    # status background brush to reach for. LxNotice is the accent blue,
+    # matching the message states in the Timer prototype (D-02 state 04/07).
+    $t = Get-LogbookTheme $cfg
+    return @"
+    <SolidColorBrush x:Key="LxSurface"  Color="$($t.surfaceWidget)"/>
+    <SolidColorBrush x:Key="LxElevated" Color="$($t.surfaceElevated)"/>
+    <SolidColorBrush x:Key="LxHairline" Color="$($t.border)"/>
+    <SolidColorBrush x:Key="LxText"     Color="$($t.text)"/>
+    <SolidColorBrush x:Key="LxMuted"    Color="$($t.muted)"/>
+    <SolidColorBrush x:Key="LxAccent"   Color="$($t.accent)"/>
+    <SolidColorBrush x:Key="LxActive"   Color="$($t.signalNormal)"/>
+    <SolidColorBrush x:Key="LxNotice"   Color="$($t.accent)"/>
+    <SolidColorBrush x:Key="LxWarning"  Color="$($t.signalWarning)"/>
+    <SolidColorBrush x:Key="LxCritical" Color="$($t.signalCritical)"/>
+
+    <!-- Two type voices only: Segoe UI for words, Consolas for time/ID/duration. -->
+    <Style x:Key="LxLabel" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{StaticResource LxMuted}"/>
+    </Style>
+    <Style x:Key="LxValue" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+    <Style x:Key="LxMono" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Consolas"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+    </Style>
+
+    <!-- Pill button: fully rounded, no gradient, no glow. Outline by default;
+         the caller sets Background/Foreground for the primary + armed forms. -->
+    <Style x:Key="LxPill" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontFamily" Value="Segoe UI Semibold"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="16,9"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <!-- 20, not 999: WPF generates degenerate elliptical arcs from a
+                 corner radius far larger than the box, which renders a
+                 stretched button as a full ellipse rather than a stadium.
+                 20 exceeds half the tallest pill here, so it still clamps to
+                 a true half-height round-end. -->
+            <Border x:Name="PillBg" CornerRadius="20"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+              <TextBlock Text="{TemplateBinding Content}" HorizontalAlignment="Center"
+                         VerticalAlignment="Center" TextWrapping="NoWrap"
+                         Foreground="{TemplateBinding Foreground}"
+                         FontFamily="{TemplateBinding FontFamily}"
+                         FontSize="{TemplateBinding FontSize}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="PillBg" Property="Opacity" Value="0.75"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="PillBg" Property="Opacity" Value="0.5"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+"@
+}
+
 # NIM/NIP/NIK is numbers-only (student/staff ID, national ID) -- reject
 # non-digit keystrokes at the source and strip non-digits from paste, rather
 # than validating after the fact. Shared by the real popup (logbook_popup.ps1)
@@ -1480,43 +1569,52 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
 "@
 }
 
-function Build-LogbookEmergencyOverlayXaml($cfg) {
-    # Emergency countdown (design: LogiX Notifications S3). A shutdown in 30s is
-    # too important for the corner widget, so Variant 3 escapes to a centered,
-    # dimmed-backdrop, always-on-top overlay. Big live Consolas numeral, red,
-    # pulsing ring. The controller drives CountNumber via a DispatcherTimer.
-    $theme  = Get-LogbookTheme $cfg
-    $red    = $theme.signalCritical; $text = $theme.text; $muted = $theme.muted
-    $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
-    $tTitle = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencyTitle' 'Peringatan Sistem')
-    $tBody  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencyBody' 'Perangkat ini akan dimatikan oleh admin. Simpan pekerjaan Anda sekarang.')
-    $tSaved = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencySaved' 'Saya sudah menyimpan')
-    $device = ConvertTo-LogbookXmlText (Get-LogbookDeviceDisplayName)
+function Build-LogbookCountdownOverlayXaml($cfg) {
+    # The shared "escape both postures" overlay (design: D-02 state 08). One
+    # component serves BOTH the idle auto-end warning and an admin Emergency
+    # Broadcast -- the controller shows/hides the countdown numeral and swaps
+    # the action row rather than there being two overlays to keep in step.
+    #
+    # Dimmed backdrop + a single centered 360px card, radius 22. Both action
+    # labels are TextWrapping="NoWrap" so "Perpanjang sesi" / "Selesai
+    # sekarang" can never break across two lines.
+    $res = Build-LogbookClientResources $cfg
+    $tExtend = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'overlayExtend' 'Perpanjang sesi')
+    $tEndNow = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'overlayEndNow' 'Selesai sekarang')
+    $tAck    = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'overlayAck' 'Saya paham')
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="#CC070C15" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True"
+        Background="#B805080D" FontFamily="Segoe UI">
+  <Window.Resources>
+$res
+  </Window.Resources>
   <Grid>
-    <Border Width="440" CornerRadius="16" Background="$elevated" BorderBrush="$red" BorderThickness="1"
-            HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30" >
-      <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="0" Opacity="0.6" Color="#000000" /></Border.Effect>
+    <Border Name="OverlayCard" Width="360" CornerRadius="22" Padding="26,24"
+            Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="24" Opacity="0.6" Color="#000000"/></Border.Effect>
       <StackPanel HorizontalAlignment="Center">
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
-          <Ellipse Width="10" Height="10" Fill="$red" Margin="0,0,9,0" VerticalAlignment="Center"/>
-          <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="16" FontWeight="Bold" Foreground="$red" VerticalAlignment="Center"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
+          <Ellipse Name="OverlayDot" Width="8" Height="8" Fill="{StaticResource LxCritical}" VerticalAlignment="Center" Margin="0,0,7,0"/>
+          <TextBlock Name="OverlayTitle" Text="Sesi berakhir dalam" FontFamily="Segoe UI Semibold" FontSize="13"
+                     Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
         </StackPanel>
-        <TextBlock Text="$device" FontFamily="Consolas" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-        <Grid Width="180" Height="180" HorizontalAlignment="Center">
-          <Ellipse Name="Ring" Width="180" Height="180" Stroke="$red" StrokeThickness="4" Opacity="0.85"/>
-          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-            <TextBlock Name="CountNumber" Text="30" FontFamily="Consolas" FontSize="76" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center"/>
-            <TextBlock Text="detik" FontFamily="Segoe UI" FontSize="13" Foreground="$muted" HorizontalAlignment="Center" Margin="0,-6,0,0"/>
-          </StackPanel>
-        </Grid>
-        <TextBlock Text="$tBody" FontSize="14" Foreground="$text" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" Margin="0,16,0,18"/>
-        <Button Name="SavedBtn" Content="$tSaved" Height="44" MinWidth="200" Cursor="Hand"
-                Background="$red" Foreground="#FFFFFF" BorderThickness="0" FontFamily="Segoe UI Semibold" FontSize="15" FontWeight="Bold"/>
+        <TextBlock Name="CountNumber" Text="05:00" FontFamily="Consolas" FontSize="44" LineHeight="51"
+                   Foreground="{StaticResource LxCritical}" HorizontalAlignment="Center"/>
+        <TextBlock Name="OverlayBody" Text="" FontSize="12" Foreground="{StaticResource LxMuted}"
+                   TextWrapping="Wrap" TextAlignment="Center" MaxWidth="308" Margin="0,6,0,16"/>
+        <StackPanel Name="OverlayActions" Orientation="Horizontal" HorizontalAlignment="Center">
+          <Button Name="ExtendBtn" Content="$tExtend" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"
+                  Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                  Foreground="#FFFFFF" Margin="0,0,8,0"/>
+          <Button Name="EndNowBtn" Content="$tEndNow" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"/>
+          <Button Name="AckBtn" Content="$tAck" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"
+                  Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                  Foreground="#FFFFFF" Visibility="Collapsed"/>
+        </StackPanel>
       </StackPanel>
     </Border>
   </Grid>
@@ -1585,221 +1683,210 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
 "@
 }
 
-# Chamfered-rounded shape path data (three rounded corners, a diagonal
-# chamfer replacing the top-right one), parameterized by content height and
-# width so it can be recomputed at runtime as the timer widget grows/shrinks
-# (collapsed clock-only <-> expanded info <-> message extension). r/c are
-# fixed; height and width vary. See logbook_timer.ps1's
-# Sync-LogbookTimerShape.
-function Get-LogbookTimerShapeData([double]$ContentHeight, [double]$ContentWidth = 320) {
-    $r = 20; $c = 44
-    # Clamped to a sane range -- defense in depth against any future bug
-    # feeding this a wildly wrong size (a prior version of the
-    # message-extend animation had exactly that bug, filling the screen).
-    $h = [Math]::Round([Math]::Min([Math]::Max($ContentHeight, 90), 500))
-    $w = [Math]::Round([Math]::Min([Math]::Max($ContentWidth, 150), 500))
-    return "M $r,0 L $($w-$c),0 L $w,$c L $w,$($h-$r) A $r,$r 0 0 1 $($w-$r),$h L $r,$h A $r,$r 0 0 1 0,$($h-$r) L 0,$r A $r,$r 0 0 1 $r,0 Z"
-}
-
-# Session timer widget (Logix Control dashboard follow-up). Same
-# pure-string-building pattern as Build-LogbookPopupXaml above -- config-
-# driven colors, XML-escaped free-text inputs. The shape is a single Path
-# geometry used both as the border/fill layer and, via Grid.Clip, to clip
-# the content layer so nothing renders past the cut corner.
-# Base fill is a fixed near-black -- "dominated by black" is a deliberate
-# constant, not config-driven; only the primary/accent accents come from
-# branding.colors.
+# Timer widget -- v3 "Pill & Strip" (design: docs/design_handoff_logix_v3/
+# "LogiX Timer Pill & Strip.dc.html", README section 5).
 #
-# Width is FIXED at the narrow clock width -- the widget must only ever
-# grow DOWNWARD (an explicit product decision; a first iteration that also
-# widened on hover was rejected). Height is driven by two independently
-# toggleable sections --
-#   InfoSection    (nama/tujuan/device + accent bar): visible for the
-#                  first 10s of a session or while the user hovers the
-#                  widget, collapsed otherwise so the user can focus on
-#                  the time, not the data.
-#   MessageSection (an incoming admin message): collapsed by default,
-#                  animated open/closed by logbook_timer.ps1, extending
-#                  the shape downward from wherever it currently ends --
-#                  below the timer if InfoSection is collapsed, below the
-#                  full info block if it's expanded.
-# Both sections are Grid rows sized "Auto", so a Collapsed section takes
-# zero space -- no reserved blank area, unlike an earlier "*"-row design.
-# Everything inside must fit the narrow width: values ellipsize, message
-# text wraps.
+# One instrument, two postures, both anchored to the TOP EDGE of the screen:
+#   Pill   150x32 capsule at rest; hover expands it to a 240px card.
+#   Strip  a 3px full-width line (a separate click-through window, see
+#          Build-LogbookStripXaml); dwelling at the top edge drops a 24px
+#          sliver from THIS window.
+# Double-click toggles the posture and the choice is remembered across
+# sessions. All three visuals live in one window and are swapped by
+# Visibility, so there is a single always-on-top surface to manage.
+#
+# Sizing is SizeToContent -- unlike the previous chamfered-Path widget, every
+# surface here is a plain Border with CornerRadius, so there is no Path
+# geometry or Grid.Clip to keep in sync and WPF's own measure pass is
+# trustworthy. RootVisual carries a 16px margin purely as bleed room for the
+# drop shadows.
+#
+# Guard rails: no gradient, no glow, no pulse. The status dot is a static 8px
+# Ellipse. Colours come exclusively from Build-LogbookClientResources.
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
-    $theme        = Get-LogbookTheme $cfg
-    $accent       = $theme.accent
-    $muted        = $theme.muted
-    $text         = $theme.text
-    $primary        = $theme.surfaceElevated
-    $widget         = $theme.surfaceWidget
-    $border         = $theme.border
-    $signalNormal   = $theme.signalNormal
-    $signalWarning  = $theme.signalWarning
-    $signalCritical = $theme.signalCritical
-    $tSelesai       = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
+    $res = Build-LogbookClientResources $cfg
+    $tSelesai = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
 
-    $sessionType = ConvertTo-LogbookXmlText ([string]$session.session_type)
-    $nama        = ConvertTo-LogbookXmlText ([string]$session.nama)
-    $tujuan      = ConvertTo-LogbookXmlText ([string]$session.tujuan)
-    $device      = ConvertTo-LogbookXmlText ([string]$deviceName)
-
-    # Fixed initial height (matches HEIGHT_EXPANDED in logbook_timer.ps1 --
-    # InfoSection defaults to Visible). Deliberately NOT SizeToContent --
-    # two earlier attempts at having WPF auto-size the window (first via
-    # SizeToContent toggling, then via Measure()/DesiredSize) both produced
-    # wrong/huge heights that only surfaced on a live Windows run, not in
-    # XML-structural tests. logbook_timer.ps1 owns height transitions
-    # entirely via a small set of fixed target heights instead. Width 230
-    # (shape 210) is the permanent width -- sized for the clock, verified
-    # headlessly to fit worst-case digits with slack.
-    $seedShapeData = Get-LogbookTimerShapeData 190 210
+    $nama   = ConvertTo-LogbookXmlText ([string]$session.nama)
+    $tujuan = ConvertTo-LogbookXmlText ([string]$session.tujuan)
+    # A display name reads "WS-07 - GPU-A100": the station ID is the card
+    # header's right-hand identity, the spec goes on the Perangkat row next to
+    # the access type. Split only on a SPACED separator (" - " or a spaced middle dot) --
+    # "WS-07" contains a hyphen itself, so an unspaced split leaves just "WS".
+    $parts = [regex]::Split([string]$deviceName, '\s+(?:-|\u00B7)\s+')
+    $station = ConvertTo-LogbookXmlText ($parts[0].Trim())
+    $spec = if ($parts.Count -gt 1) { (($parts[1..($parts.Count - 1)]) -join ' ').Trim() } else { $parts[0].Trim() }
+    $access = ConvertTo-LogbookXmlText ([string]$session.session_type)
+    $perangkat = ConvertTo-LogbookXmlText $spec
+    if ($access) { $perangkat = "$perangkat &#183; $access" }
 
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="230" Height="210" WindowStyle="None" ResizeMode="NoResize"
-        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
-  <Grid Name="RootVisual" RenderTransformOrigin="0.5,0.5">
-    <Grid.RenderTransform>
-      <!-- Scaled/faded on entrance by logbook_timer.ps1 for the center-stage
-           reveal before the widget glides to its top-left dock. Origin 0.5,0.5
-           so it grows from its own center. Default 1,1 keeps the widget fully
-           visible if the entrance animation never runs. -->
-      <ScaleTransform ScaleX="1" ScaleY="1"/>
-    </Grid.RenderTransform>
-    <Path Name="ShapePath" Margin="10" Fill="$widget" Stroke="$border" StrokeThickness="1.3" Data="$seedShapeData">
-      <Path.Effect>
-        <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.55" Color="#070C15" />
-      </Path.Effect>
-    </Path>
+        WindowStyle="None" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
+        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True"
+        Background="Transparent" FontFamily="Segoe UI" Left="0" Top="0">
+  <Window.Resources>
+$res
+  </Window.Resources>
 
-    <Grid Name="ContentGrid" Margin="10" Clip="$seedShapeData">
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-      </Grid.RowDefinitions>
+  <Grid Name="RootVisual" Margin="16">
 
-      <Grid Grid.Row="0" Margin="18,14,18,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <Ellipse Name="Pulse" Width="8" Height="8" Fill="$signalNormal" Margin="0,3,8,0" VerticalAlignment="Center" />
-        <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-      </Grid>
-
-      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,4" VerticalAlignment="Bottom">
-        <TextBlock Name="ClockMain" Text="00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text"/>
-        <TextBlock Name="ClockSeconds" Text="00" FontFamily="Consolas" FontSize="16" FontWeight="Bold" Foreground="$muted" Margin="4,0,0,6" VerticalAlignment="Bottom"/>
-      </StackPanel>
-
-      <StackPanel Grid.Row="2" Name="InfoSection" Visibility="Visible">
-        <Border Height="1" Background="#22FFFFFF" Margin="18,0,18,8"/>
-
-        <Grid Margin="18,0,18,4">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Nama" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-          <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <Grid Margin="18,0,18,4">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Tujuan" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-          <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <Grid Margin="18,0,18,8">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Device" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-          <TextBlock Grid.Column="1" Name="DeviceValue" Text="$device" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <Border Height="4" Margin="18,0,18,12" CornerRadius="2">
-          <Border.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-              <GradientStop Color="$primary" Offset="0"/>
-              <GradientStop Color="$accent" Offset="1"/>
-            </LinearGradientBrush>
-          </Border.Background>
+    <!-- ===== 1. PILL (collapsed, default posture) ===================== -->
+    <Border Name="PillView" Width="150" Height="32" CornerRadius="16"
+            Background="#B30B1017" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Top">
+      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.45" Color="#000000"/></Border.Effect>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Ellipse Name="PillDot" Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <TextBlock Name="PillClock" Text="00:00" FontFamily="Consolas" FontSize="13"
+                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+        <Border Name="PillBadge" Visibility="Collapsed" MinWidth="16" Height="16" CornerRadius="8"
+                Background="{StaticResource LxNotice}" Margin="8,0,0,0" VerticalAlignment="Center">
+          <TextBlock Name="PillBadgeText" Text="1" FontFamily="Consolas" FontSize="10" FontWeight="Bold"
+                     Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
         </Border>
       </StackPanel>
+    </Border>
 
-      <!-- SELESAI lives in its OWN row, a sibling of InfoSection (NOT nested
-           inside it): once revealed, present regardless of whether Nama/
-           Tujuan/Device are shown or collapsed (hover / first-10s only).
-           Two-step to prevent misclicks. Filled soft surface + icon (not a
-           hollow outline pill) so it reads as a real, deliberate control at
-           a glance; stretches to the same 18px inset every other row in
-           this card uses, so it aligns with the layout instead of floating
-           centered. Warms to the brand accent (blue) on hover; the
-           controller (logbook_timer.ps1) arms it red on first press and
-           ends the session on a confirming second press within 3s.
-           Starts Collapsed/Opacity 0: the center-stage + glide-to-dock
-           sequence shows only the clock and session data, deliberately
-           withholding the "end session" action until the widget is fully
-           settled in its resting corner. logbook_timer.ps1's
-           Show-LogbookSelesaiButton reveals it (fade + the window growing
-           to fit) right when the dock animation completes. -->
-      <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,12"
-              Visibility="Collapsed" Opacity="0"
-              Padding="0,10" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
-              FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
-        <Button.Template>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="SelesaiBg" CornerRadius="9" Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Path Data="M18.36 6.64A9 9 0 1 1 5.64 6.64 M12 2 L12 12" Stroke="{TemplateBinding Foreground}"
-                      StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                      Width="13" Height="13" Stretch="Uniform" Margin="0,0,7,0"/>
-                <!-- MaxWidth+TextTrimming: the armed-state label ("Tekan lagi
-                     untuk selesai") is long enough to overflow the button's
-                     ~194px width at this font/weight and get hard-clipped by
-                     the widget's own chamfered-shape Clip, found by live
-                     clicking the real widget rather than just rendering the
-                     short "SELESAI" label. 150 is comfortably under
-                     "SELESAI"'s own natural width, so it has zero effect
-                     on the normal (unarmed) state. -->
-                <TextBlock Text="{TemplateBinding Content}" VerticalAlignment="Center" MaxWidth="150" TextTrimming="CharacterEllipsis"
-                           Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
-              </StackPanel>
-            </Border>
-            <ControlTemplate.Triggers>
-              <!-- Hover uses the brand accent (blue), not amber: "Blue is
-                   the direction, everything else is a theme" (Client
-                   Foundation). Amber/red stay reserved for the two-step
-                   arm/confirm escalation, not mere hover. -->
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="SelesaiBg" Property="Background" Value="#332563EB"/>
-                <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$accent"/>
-                <Setter Property="Foreground" Value="$accent"/>
-              </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="SelesaiBg" Property="Opacity" Value="0.75"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Button.Template>
-      </Button>
+    <!-- ===== 2. SLIVER (strip posture, peeked) ======================== -->
+    <Border Name="SliverView" Visibility="Collapsed" Height="24" CornerRadius="12"
+            Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Top" Padding="14,0">
+      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.45" Color="#000000"/></Border.Effect>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Ellipse Name="SliverDot" Width="6" Height="6" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <Border Name="SliverBadge" Visibility="Collapsed" MinWidth="15" Height="15" CornerRadius="8"
+                Background="{StaticResource LxNotice}" Margin="0,0,8,0" VerticalAlignment="Center">
+          <TextBlock Name="SliverBadgeText" Text="1" FontFamily="Consolas" FontSize="10" FontWeight="Bold"
+                     Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
+        </Border>
+        <TextBlock Name="SliverText" Text="00:00" FontFamily="Consolas" FontSize="12"
+                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+      </StackPanel>
+    </Border>
 
-      <Border Grid.Row="4" Name="MessageSection" Visibility="Collapsed" Margin="14,0,14,14" Padding="10,10" CornerRadius="10"
-              Background="#16FFFFFF" BorderThickness="3,1,1,1" BorderBrush="$accent">
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Border Name="MessageIconBadge" Grid.Column="0" Width="24" Height="24" CornerRadius="12" Background="$accent" VerticalAlignment="Top" Margin="0,1,10,0">
-            <TextBlock Name="MessageIcon" Text="!" FontFamily="Segoe UI Semibold" FontSize="12" Foreground="#0B0F19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
-          <StackPanel Grid.Column="1">
-            <TextBlock Name="MessageTitle" Text="Emergency Alert" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$accent"/>
-            <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="10.5" Foreground="$text" TextWrapping="Wrap" Margin="0,2,0,0"/>
-          </StackPanel>
+    <!-- ===== 3. EXPAND CARD (hover / sliver click) ==================== -->
+    <Border Name="CardView" Visibility="Collapsed" Width="240" CornerRadius="22"
+            Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Top" Padding="18,16">
+      <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="18" Opacity="0.5" Color="#000000"/></Border.Effect>
+      <StackPanel>
+
+        <Grid Margin="0,0,0,12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <Ellipse Name="CardDot" Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <TextBlock Name="CardClock" Grid.Column="1" Text="00:00:00" FontFamily="Consolas" FontSize="18"
+                     Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+          <TextBlock Name="CardStation" Grid.Column="2" Text="$station" FontFamily="Consolas" FontSize="11"
+                     Foreground="{StaticResource LxMuted}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis"/>
         </Grid>
-      </Border>
-    </Grid>
+
+        <!-- Session identity. Hidden while armed or while a message is open. -->
+        <StackPanel Name="CardInfo">
+          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10"/>
+          <Grid Margin="0,0,0,6">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="Nama" Style="{StaticResource LxLabel}"/>
+            <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" Style="{StaticResource LxValue}"/>
+          </Grid>
+          <Grid Margin="0,0,0,6">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="Tujuan" Style="{StaticResource LxLabel}"/>
+            <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" Style="{StaticResource LxValue}"/>
+          </Grid>
+          <Grid Margin="0,0,0,12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <TextBlock Text="Perangkat" Style="{StaticResource LxLabel}"/>
+            <TextBlock Grid.Column="1" Name="DeviceValue" Text="$perangkat" FontFamily="Consolas" FontSize="12"
+                       Foreground="{StaticResource LxText}" TextTrimming="CharacterEllipsis"/>
+          </Grid>
+        </StackPanel>
+
+        <!-- Admin message. Never auto-expands; revealed when the user hovers. -->
+        <StackPanel Name="CardMessage" Visibility="Collapsed">
+          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10"/>
+          <TextBlock Name="MessageMeta" Text="ADMIN" FontFamily="Consolas" FontSize="10.5"
+                     Foreground="{StaticResource LxMuted}" Margin="0,0,0,4"/>
+          <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="12.5" LineHeight="18"
+                     Foreground="{StaticResource LxText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        </StackPanel>
+
+        <!-- Quick replies: two one-tap answers plus a free-text escape. -->
+        <StackPanel Name="CardQuickReply" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,2">
+          <Button Name="QuickOkBtn" Content="OK" Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5" Margin="0,0,6,0"/>
+          <Button Name="QuickWaitBtn" Content="Butuh 10 mnt" Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5" Margin="0,0,6,0"/>
+          <Button Name="QuickFreeBtn" Content="Balas..." Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5"
+                  Foreground="{StaticResource LxMuted}"/>
+        </StackPanel>
+
+        <!-- Free-text reply. Enter sends; the card will not auto-collapse while
+             this field has focus. -->
+        <Grid Name="CardReplyRow" Visibility="Collapsed" Margin="0,0,0,2">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Border CornerRadius="999" BorderBrush="{StaticResource LxAccent}" BorderThickness="1" Padding="13,6" Margin="0,0,6,0">
+            <TextBox Name="ReplyInput" Background="Transparent" BorderThickness="0" FontSize="12"
+                     Foreground="{StaticResource LxText}" CaretBrush="{StaticResource LxAccent}"
+                     MaxLength="140" VerticalContentAlignment="Center"/>
+          </Border>
+          <Button Name="ReplySendBtn" Grid.Column="1" Width="30" Height="30" Cursor="Hand"
+                  Background="{StaticResource LxAccent}" BorderThickness="0">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border CornerRadius="15" Background="{TemplateBinding Background}">
+                  <Path Data="M 5,12 L 19,12 M 13,6 L 19,12 L 13,18" Stroke="#FFFFFF" StrokeThickness="2.2"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="13" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
+        </Grid>
+
+        <!-- Reply confirmation. Dot returns to green, card auto-collapses in 5s. -->
+        <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal">
+          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10" Visibility="Collapsed"/>
+          <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
+                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12"
+                     Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- SELESAI: a real armed -> confirm state machine, not a CSS trick.
+             The controller arms it red on first click and auto-disarms after 3s. -->
+        <Button Name="SelesaiBtn" Content="$tSelesai" Style="{StaticResource LxPill}"
+                Padding="0,9" HorizontalContentAlignment="Center"/>
+        <TextBlock Name="ArmedCaption" Visibility="Collapsed" Text="batal otomatis dalam 3 dtk"
+                   FontSize="11" Foreground="{StaticResource LxMuted}"
+                   HorizontalAlignment="Center" Margin="0,8,0,0"/>
+      </StackPanel>
+    </Border>
   </Grid>
+</Window>
+"@
+}
+
+function Build-LogbookStripXaml($cfg) {
+    # Strip posture: a 3px full-width line pinned to the very top of the
+    # screen, coloured by session status. Its own window because it must span
+    # the whole width while the pill/card window stays narrow and draggable.
+    # The controller makes it click-through (WS_EX_TRANSPARENT) so it never
+    # steals a click from the app underneath -- the top edge stays a usable
+    # target for the application, and the sliver is what the user aims at.
+    $res = Build-LogbookClientResources $cfg
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" Topmost="True" ShowInTaskbar="False"
+        AllowsTransparency="True" Background="Transparent" Height="3" Left="0" Top="0">
+  <Window.Resources>
+$res
+  </Window.Resources>
+  <Border Name="StripBar" Background="{StaticResource LxActive}"/>
 </Window>
 "@
 }

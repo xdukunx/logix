@@ -148,110 +148,153 @@ if ($Surface -in 'welcome', 'all') {
 }
 
 if ($Surface -in 'timer', 'all') {
-    # Same fixed heights the real widget uses (logbook_timer.ps1's
-    # HEIGHT_COLLAPSED/HEIGHT_EXPANDED) -- measured headlessly via
-    # ContentGrid.Measure(), not guessed, so the chamfered shape always
-    # matches the window exactly (no transparent gaps, no clipped content).
-    $script:pvHCollapsed = 152
-    $script:pvHExpanded = 235
-    $script:pvTimerW = 230
+    # The v3 widget sizes itself (SizeToContent), so it gets its own show path
+    # rather than Show-PreviewWindow's fixed-size one. Hover to expand, click
+    # SELESAI twice to confirm, double-click to flip pill <-> strip, and press
+    # M to simulate an incoming admin message.
     $session = @{ session_type = 'SSH'; nama = 'A. Rahmawati'; tujuan = 'Simulasi DFT' }
-    Show-PreviewWindow (Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100') 'Logix - Timer Widget (hover to expand, click SELESAI) (PREVIEW)' $script:pvTimerW $script:pvHCollapsed {
-        param($window)
-        # Live-ticking clock (starts at 02:14:41, counts up every second) so
-        # this reads as a running session, not a frozen screenshot -- and the
-        # real SELESAI two-step (arm on first click, confirm within 3s on the
-        # second), so you can actually click-test it here. Everything an event
-        # handler touches must be $script: scoped (see Enable-PopupInteractive
-        # above) -- a DispatcherTimer's Tick handler fires long after this
-        # block returns, and closures over merely-local variables go stale by
-        # then, corrupting later ShowDialog() calls for OTHER surfaces.
-        $script:pvClockMain = $window.FindName('ClockMain'); $script:pvClockSeconds = $window.FindName('ClockSeconds')
-        $script:pvElapsed = [TimeSpan]::FromHours(2).Add([TimeSpan]::FromMinutes(14)).Add([TimeSpan]::FromSeconds(41))
-        $script:pvClockTimer = New-Object Windows.Threading.DispatcherTimer
-        $script:pvClockTimer.Interval = [TimeSpan]::FromSeconds(1)
-        $script:pvClockTimer.Add_Tick({
-            $script:pvElapsed = $script:pvElapsed.Add([TimeSpan]::FromSeconds(1))
-            $script:pvClockMain.Text = ('{0:00}:{1:00}' -f [math]::Floor($script:pvElapsed.TotalHours), $script:pvElapsed.Minutes)
-            $script:pvClockSeconds.Text = ('{0:00}' -f $script:pvElapsed.Seconds)
-        })
-        $script:pvClockTimer.Start()
+    $window = [Windows.Markup.XamlReader]::Load(
+        (New-Object System.Xml.XmlNodeReader ([xml](Build-LogbookTimerXaml $script:pvCfg $session 'WS-07 - GPU-A100'))))
+    $script:pvWin = $window
+    $window.Topmost = $true
+    $window.WindowStartupLocation = 'Manual'
+    $work = [System.Windows.SystemParameters]::WorkArea
+    $window.Left = $work.Left + (($work.Width - 240) / 2.0)
+    $window.Top = $work.Top + 10 - 16
+    $window.Title = 'Logix - Timer Pill & Strip (PREVIEW)'
 
-        # Info (Nama/Tujuan/Device) only shows on hover -- matches the real
-        # widget's Update-LogbookInfoVisibility. Resync the shape + clip to
-        # the new size every time, exactly like Sync-LogbookTimerShape does,
-        # or the outline drifts out of alignment with the actual content.
-        $script:pvInfoSection = $window.FindName('InfoSection')
-        $script:pvShapePath = $window.FindName('ShapePath')
-        $script:pvContentGrid = $window.FindName('ContentGrid')
-        $script:pvInfoSection.Visibility = 'Collapsed'
-        $script:pvSyncShape = {
-            $geom = [System.Windows.Media.Geometry]::Parse((Get-LogbookTimerShapeData ($script:pvWin.Height - 20) ($script:pvTimerW - 20)))
-            $script:pvShapePath.Data = $geom
-            $script:pvContentGrid.Clip = $geom
+    $script:pvPill = $window.FindName('PillView')
+    $script:pvCard = $window.FindName('CardView')
+    $script:pvSliver = $window.FindName('SliverView')
+    $script:pvCardInfo = $window.FindName('CardInfo')
+    $script:pvCardMsg = $window.FindName('CardMessage')
+    $script:pvQuick = $window.FindName('CardQuickReply')
+    $script:pvSent = $window.FindName('CardSent')
+    $script:pvSelesai = $window.FindName('SelesaiBtn')
+    $script:pvArmedCap = $window.FindName('ArmedCaption')
+    $script:pvPillClock = $window.FindName('PillClock')
+    $script:pvCardClock = $window.FindName('CardClock')
+    $script:pvSliverText = $window.FindName('SliverText')
+    $script:pvTheme = Get-LogbookTheme $script:pvCfg
+    $script:pvBc = New-Object System.Windows.Media.BrushConverter
+    $script:pvPosture = 'pill'
+    $script:pvOpen = $false
+    $script:pvArmed = $false
+    $script:pvHasMsg = $false
+
+    $script:pvSync = {
+        $showCard = $script:pvOpen
+        $script:pvCard.Visibility = $(if ($showCard) { 'Visible' } else { 'Collapsed' })
+        $script:pvPill.Visibility = $(if (-not $showCard -and $script:pvPosture -eq 'pill') { 'Visible' } else { 'Collapsed' })
+        $script:pvSliver.Visibility = $(if (-not $showCard -and $script:pvPosture -eq 'strip') { 'Visible' } else { 'Collapsed' })
+        $script:pvCardInfo.Visibility = $(if ($script:pvArmed -or $script:pvHasMsg) { 'Collapsed' } else { 'Visible' })
+        $script:pvCardMsg.Visibility = $(if ($script:pvHasMsg) { 'Visible' } else { 'Collapsed' })
+        $script:pvQuick.Visibility = $(if ($script:pvHasMsg) { 'Visible' } else { 'Collapsed' })
+        $script:pvSelesai.Visibility = $(if ($script:pvHasMsg) { 'Collapsed' } else { 'Visible' })
+        $script:pvArmedCap.Visibility = $(if ($script:pvArmed) { 'Visible' } else { 'Collapsed' })
+        $script:pvCard.Width = $(if ($script:pvHasMsg) { 260 } else { 240 })
+    }
+
+    $script:pvElapsed = [TimeSpan]::FromHours(2).Add([TimeSpan]::FromMinutes(14)).Add([TimeSpan]::FromSeconds(41))
+    $script:pvClockTimer = New-Object Windows.Threading.DispatcherTimer
+    $script:pvClockTimer.Interval = [TimeSpan]::FromSeconds(1)
+    $script:pvClockTimer.Add_Tick({
+        $script:pvElapsed = $script:pvElapsed.Add([TimeSpan]::FromSeconds(1))
+        $h = [int][Math]::Floor($script:pvElapsed.TotalHours)
+        $script:pvPillClock.Text = ('{0:00}:{1:00}' -f $h, $script:pvElapsed.Minutes)
+        $script:pvCardClock.Text = ('{0:00}:{1:00}:{2:00}' -f $h, $script:pvElapsed.Minutes, $script:pvElapsed.Seconds)
+        $script:pvSliverText.Text = $script:pvPillClock.Text + ' ' + [char]0x00B7 + ' WS-07'
+        if ($script:pvArmed) {
+            $script:pvArmTicks -= 1
+            if ($script:pvArmTicks -le 0) { & $script:pvDisarm }
         }
-        $window.Add_MouseEnter({
-            $script:pvInfoSection.Visibility = 'Visible'
-            $script:pvWin.Height = $script:pvHExpanded
-            & $script:pvSyncShape
-        })
-        $window.Add_MouseLeave({
-            $script:pvInfoSection.Visibility = 'Collapsed'
-            $script:pvWin.Height = $script:pvHCollapsed
-            & $script:pvSyncShape
-        })
-
-        $script:pvSelesaiBtn = $window.FindName('SelesaiBtn')
-        $script:pvTheme = Get-LogbookTheme $script:pvCfg
-        $script:pvBc = New-Object System.Windows.Media.BrushConverter
+    })
+    $script:pvArmTicks = 0
+    $script:pvDisarm = {
         $script:pvArmed = $false
-        $script:pvArmTimer = New-Object Windows.Threading.DispatcherTimer
-        $script:pvArmTimer.Interval = [TimeSpan]::FromSeconds(3)
-        $script:pvArmTimer.Add_Tick({
-            $script:pvArmed = $false; $script:pvArmTimer.Stop()
-            $script:pvSelesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEnd' 'SELESAI')
-            $script:pvSelesaiBtn.Background = $script:pvBc.ConvertFromString('#14FFFFFF')
-            $script:pvSelesaiBtn.BorderBrush = $script:pvBc.ConvertFromString($script:pvTheme.border)
-            $script:pvSelesaiBtn.Foreground = $script:pvBc.ConvertFromString($script:pvTheme.muted)
-        })
-        $script:pvSelesaiBtn.Add_Click({
-            if (-not $script:pvArmed) {
-                $script:pvArmed = $true
-                $script:pvSelesaiBtn.Content = (Get-LogbookText $script:pvCfg 'timerEndArmed' 'Tekan lagi untuk selesai')
-                $red = $script:pvBc.ConvertFromString($script:pvTheme.signalCritical)
-                $script:pvSelesaiBtn.Background = $red; $script:pvSelesaiBtn.BorderBrush = $red
-                $script:pvSelesaiBtn.Foreground = [System.Windows.Media.Brushes]::White
-                $script:pvArmTimer.Stop(); $script:pvArmTimer.Start()
-            } else {
-                [System.Windows.MessageBox]::Show('SELESAI dikonfirmasi (PRATINJAU). Agent asli akan mengunci workstation di titik ini.', 'Logix - Preview') | Out-Null
-                $script:pvWin.Close()
-            }
-        })
-        # Safety net: however this window closes (SELESAI, or the title-bar X),
-        # stop both timers so they can never keep ticking into the next surface.
-        $window.Add_Closed({
-            try { $script:pvClockTimer.Stop() } catch {}
-            try { $script:pvArmTimer.Stop() } catch {}
+        $script:pvSelesai.Content = (Get-LogbookText $script:pvCfg 'timerEnd' 'SELESAI')
+        $script:pvSelesai.Background = $script:pvBc.ConvertFromString('#00FFFFFF')
+        $script:pvSelesai.BorderBrush = $script:pvBc.ConvertFromString($script:pvTheme.border)
+        $script:pvSelesai.Foreground = $script:pvBc.ConvertFromString($script:pvTheme.text)
+        & $script:pvSync
+    }
+    $script:pvSelesai.Add_Click({
+        if (-not $script:pvArmed) {
+            $script:pvArmed = $true
+            $script:pvArmTicks = 3
+            $script:pvSelesai.Content = (Get-LogbookText $script:pvCfg 'timerEndArmed' 'Tekan lagi untuk selesai')
+            $red = $script:pvBc.ConvertFromString($script:pvTheme.signalCritical)
+            $script:pvSelesai.Background = $red; $script:pvSelesai.BorderBrush = $red
+            $script:pvSelesai.Foreground = [System.Windows.Media.Brushes]::White
+            & $script:pvSync
+        } else {
+            [System.Windows.MessageBox]::Show(
+                'SELESAI dikonfirmasi (PRATINJAU). Agent asli memanggil Close-LogbookSessionAndLock di titik ini.',
+                'Logix - Preview') | Out-Null
+            $script:pvWin.Close()
+        }
+    })
+    $window.Add_MouseEnter({ $script:pvOpen = $true; & $script:pvSync })
+    $window.Add_MouseLeave({ $script:pvOpen = $false; if ($script:pvArmed) { & $script:pvDisarm }; & $script:pvSync })
+    $window.Add_MouseLeftButtonDown({
+        param($s, $e)
+        if ($e.ClickCount -eq 2) {
+            $script:pvPosture = $(if ($script:pvPosture -eq 'pill') { 'strip' } else { 'pill' })
+            $script:pvOpen = $false
+            & $script:pvSync
+        }
+    })
+    $window.Add_KeyDown({
+        param($s, $e)
+        if ($e.Key -eq 'M') {
+            $script:pvHasMsg = -not $script:pvHasMsg
+            $script:pvWin.FindName('MessageMeta').Text = 'ADMIN ' + [char]0x00B7 + ' ' + (Get-Date).ToString('HH:mm')
+            $script:pvWin.FindName('MessageText').Text = 'Lab tutup 17:00. Simpan pekerjaan sebelum pulang ya.'
+            $blue = $script:pvBc.ConvertFromString($script:pvTheme.accent)
+            $green = $script:pvBc.ConvertFromString($script:pvTheme.signalNormal)
+            $c = $(if ($script:pvHasMsg) { $blue } else { $green })
+            $script:pvWin.FindName('PillDot').Fill = $c
+            $script:pvWin.FindName('CardDot').Fill = $c
+            & $script:pvSync
+        }
+    })
+    foreach ($q in @('QuickOkBtn','QuickWaitBtn','QuickFreeBtn')) {
+        $window.FindName($q).Add_Click({
+            $script:pvHasMsg = $false
+            $script:pvSent.Visibility = 'Visible'
+            $script:pvWin.FindName('SentText').Text = 'Terkirim ke admin ' + [char]0x00B7 + ' ' + (Get-Date).ToString('HH:mm')
+            & $script:pvSync
+            $script:pvSent.Visibility = 'Visible'
         })
     }
+    $window.Add_Closed({ try { $script:pvClockTimer.Stop() } catch {} })
+
+    & $script:pvSync
+    $script:pvClockTimer.Start()
+    Write-Host 'Opening: Timer Pill & Strip -- hover to expand, double-click to flip posture, M to simulate a message.' -ForegroundColor Cyan
+    [void]$window.ShowDialog()
 }
 
 if ($Surface -in 'notif', 'all') {
-    Show-PreviewWindow (Build-LogbookEmergencyOverlayXaml $script:pvCfg) 'Logix - Emergency Countdown Overlay (PREVIEW)' 700 640 {
+    Show-PreviewWindow (Build-LogbookCountdownOverlayXaml $script:pvCfg) 'Logix - Countdown / Broadcast Overlay (PREVIEW)' 760 560 {
         param($window)
-        $script:pvCount = $window.FindName('CountNumber'); $script:pvSecs = 30; $script:pvCount.Text = '30'
+        $script:pvCount = $window.FindName('CountNumber')
+        $script:pvSecs = 300
+        $window.FindName('OverlayBody').Text = 'Idle 2 jam terdeteksi. Gerakkan mouse atau perpanjang untuk melanjutkan.'
+        $window.FindName('AckBtn').Visibility = 'Collapsed'
         $script:pvTimer = New-Object Windows.Threading.DispatcherTimer
         $script:pvTimer.Interval = [TimeSpan]::FromSeconds(1)
-        $script:pvTimer.Add_Tick({ $script:pvSecs -= 1; if ($script:pvSecs -le 0) { $script:pvCount.Text = '0'; $script:pvTimer.Stop() } else { $script:pvCount.Text = [string]$script:pvSecs } })
-        $window.FindName('SavedBtn').Add_Click({ $script:pvTimer.Stop(); $script:pvWin.Close() })
-        # Safety net: stop the countdown however this window closes, so it
-        # can't keep ticking (and referencing this closed window's controls)
-        # into the next surface if closed via the title-bar X instead of the button.
+        $script:pvTimer.Add_Tick({
+            $script:pvSecs -= 1
+            if ($script:pvSecs -lt 0) { $script:pvSecs = 0; $script:pvTimer.Stop() }
+            $script:pvCount.Text = ('{0:00}:{1:00}' -f [int]($script:pvSecs / 60), ($script:pvSecs % 60))
+        })
+        $window.FindName('ExtendBtn').Add_Click({ $script:pvTimer.Stop(); $script:pvWin.Close() })
+        $window.FindName('EndNowBtn').Add_Click({ $script:pvTimer.Stop(); $script:pvWin.Close() })
         $window.Add_Closed({ try { $script:pvTimer.Stop() } catch {} })
         $script:pvTimer.Start()
     }
 }
-
 if ($Surface -in 'lock', 'all') {
     Show-PreviewWindow (Build-LogbookLockXaml $script:pvCfg 'Dhana Pratama' 'Pemeliharaan singkat GPU driver. Mohon tunggu +-10 menit.') 'Logix - Lock / Paused Overlay (PREVIEW)' 760 720 {
         param($window)

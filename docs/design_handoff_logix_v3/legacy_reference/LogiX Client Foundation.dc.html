@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; background: #ddd6c8; color: #2b2621; -webkit-font-smoothing: antialiased; }
+  .serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, "Cascadia Mono", monospace; }
+  .plate { box-shadow: 0 2px 4px rgba(58,46,30,.08), 0 34px 66px -30px rgba(58,46,30,.55); }
+  /* elevated dark client surface tokens live inline; this is the reference doc */
+</style>
+</helmet>
+
+<div style="max-width: 1180px; margin: 0 auto; background: #f7f4ee; box-shadow: 0 40px 120px -50px rgba(58,46,30,.6); border-left: 1px solid #e7e0d2; border-right: 1px solid #e7e0d2;">
+
+  <!-- MASTHEAD -->
+  <div style="padding: 60px 68px 42px; border-bottom: 2px solid #2b2621;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 44px;">
+      <div style="display: flex; align-items: center; gap: 11px;">
+        <div style="width: 28px; height: 28px; border-radius: 6px; background: #2563eb; display: flex; align-items: center; justify-content: center; font-weight: 800; color: #fff;" class="mono" >&gt;_</div>
+        <span style="font-size: 14px; font-weight: 700; letter-spacing: 0.22em; color: #2b2621;">LOGIX</span>
+      </div>
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #a8a08e;">Client · Design Foundation</div>
+    </div>
+    <div style="display: flex; align-items: flex-end; gap: 40px;">
+      <div style="flex: 1;">
+        <div class="serif" style="font-size: 15px; font-style: italic; color: #b5622f; margin-bottom: 14px;">A precision instrument, not a web page.</div>
+        <h1 class="serif" style="font-size: 60px; font-weight: 600; line-height: 0.98; letter-spacing: -0.02em; margin: 0; color: #23201b;">The client,<br>designed like<br>an instrument.</h1>
+      </div>
+      <p style="width: 300px; flex-shrink: 0; font-size: 14px; line-height: 1.62; color: #6b6456; margin: 0 0 6px;">The fullscreen popup and corner widget a researcher meets at the keyboard. Deep-navy, data-forward, Indonesian-first — every surface built from WPF primitives (<span class="serif" style="font-style: italic; color: #2b2621;">Border, StackPanel, Path, TextBlock</span>). No emoji, no decoration for its own sake. Signal over noise.</p>
+    </div>
+  </div>
+
+  <div style="padding: 0 68px 80px;">
+
+    <!-- ============ 01 BRAND ============ -->
+    <div style="display: grid; grid-template-columns: 60px 1fr; gap: 28px; padding: 54px 0 26px; border-bottom: 1px solid #e7e0d2;">
+      <div class="serif" style="font-size: 40px; font-weight: 500; color: #cbc2af; line-height: 1;">01</div>
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #b5622f; margin-bottom: 10px;">Brand direction</div>
+        <h2 class="serif" style="font-size: 32px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; color: #23201b;">Blue is the direction. Everything else is a theme.</h2>
+        <p style="font-size: 15px; line-height: 1.6; color: #6b6456; margin: 0; max-width: 640px;">The client speaks the dashboard's language — accent <span class="serif" style="font-style:italic;">#2563EB</span> on a deep-navy surface. That is <strong style="color:#2b2621;">Option A, and it is the default</strong>. Because color is config-driven (<span class="serif" style="font-style:italic;">branding.colors.*</span>), a specific lab or faculty can re-theme without a rebuild — that is all Option B is now.</p>
+      </div>
+    </div>
+
+    <!-- A primary, big -->
+    <figure style="margin: 32px 0 0;">
+      <div class="plate" style="background: #0b1017; border-radius: 12px; overflow: hidden; border: 1px solid #0b1017;">
+        <div style="display: grid; grid-template-columns: 1.15fr 1fr;">
+          <!-- live preview -->
+          <div style="padding: 40px; background: radial-gradient(120% 100% at 20% 0%, #10203c 0%, #070c15 70%); display: flex; align-items: center; justify-content: center; border-right: 1px solid #161f2c;">
+            <div style="width: 100%; max-width: 300px; background: #0e1626; border: 1px solid #223451; border-radius: 12px; padding: 26px 24px; text-align: center;">
+              <div class="mono" style="width: 40px; height: 40px; border-radius: 9px; background: #2563eb; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; margin-bottom: 14px;">&gt;_</div>
+              <div style="font-size: 21px; font-weight: 700; letter-spacing: 0.18em; color: #eef3fb;">LOGI<span style="color:#4b8cf5;">X</span></div>
+              <div style="font-size: 12px; color: #7f90a8; margin: 4px 0 20px;">Masuk untuk memulai sesi</div>
+              <div style="background: #2563eb; color: #fff; border-radius: 7px; padding: 10px; font-size: 13px; font-weight: 600;">Mulai Sesi</div>
+            </div>
+          </div>
+          <!-- rationale -->
+          <div style="padding: 34px 34px; display: flex; flex-direction: column; justify-content: center;">
+            <div style="display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+              <span class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: #4b8cf5;">OPTION A</span>
+              <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0b1017; background: #4b8cf5; padding: 3px 8px; border-radius: 4px;">Default</span>
+            </div>
+            <div style="font-size: 19px; font-weight: 700; color: #eef3fb; letter-spacing: -0.01em; line-height: 1.3;">Satu identitas dengan dashboard.</div>
+            <p style="font-size: 13.5px; line-height: 1.6; color: #93a1b8; margin: 12px 0 20px;">Blue is the stronger, more-seen equity — admins live in it daily and it is already the logo mark. The client keeps its own deep-navy surface for the wall/keyboard context, but signals in the same accent. Maroon retires.</p>
+            <div style="display: flex; gap: 8px;">
+              <span style="width: 34px; height: 34px; border-radius: 7px; background: #2563eb;"></span>
+              <span style="width: 34px; height: 34px; border-radius: 7px; background: #0e1626; border: 1px solid #223451;"></span>
+              <span style="width: 34px; height: 34px; border-radius: 7px; background: #0b1017; border: 1px solid #161f2c;"></span>
+              <div class="mono" style="margin-left: auto; align-self: center; font-size: 11px; color: #5b6b82;">#2563EB · #0B1017</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- B as customization strip -->
+    <div style="margin: 26px 0 8px; padding: 22px 24px; background: #efeadf; border: 1px solid #e2dccc; border-radius: 12px;">
+      <div style="display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px;">
+        <span class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: #b5622f;">OPTION B</span>
+        <span style="font-size: 13px; font-weight: 700; color: #23201b;">Kustomisasi branding per-lab</span>
+        <span style="margin-left: auto; font-size: 12px; color: #8b8371;" class="serif"><span style="font-style:italic;">branding.colors.*</span></span>
+      </div>
+      <p style="font-size: 13.5px; line-height: 1.55; color: #6b6456; margin: 0 0 16px; max-width: 720px;">Not an alternative to choose — a capability. A faculty that needs its own identity swaps the accent in config; the layout, type, and structure never change. Same instrument, different livery.</p>
+      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <!-- default -->
+        <div style="width: 132px; background: #0b1017; border: 1px solid #161f2c; border-radius: 9px; padding: 12px; text-align: center;">
+          <div class="mono" style="font-size: 15px; font-weight: 700; letter-spacing: .14em; color: #eef3fb;">LOGI<span style="color:#4b8cf5;">X</span></div>
+          <div style="height: 6px; border-radius: 3px; background: #2563eb; margin: 10px 4px 6px;"></div>
+          <div class="mono" style="font-size: 10px; color: #5b6b82;">Default · biru</div>
+        </div>
+        <!-- maroon faculty -->
+        <div style="width: 132px; background: #120a0f; border: 1px solid #2a1922; border-radius: 9px; padding: 12px; text-align: center;">
+          <div class="mono" style="font-size: 15px; font-weight: 700; letter-spacing: .14em; color: #f6e9ef;">LOGI<span style="color:#c1567f;">X</span></div>
+          <div style="height: 6px; border-radius: 3px; background: #741B47; margin: 10px 4px 6px;"></div>
+          <div class="mono" style="font-size: 10px; color: #7c5c68;">FST · maroon</div>
+        </div>
+        <!-- teal faculty -->
+        <div style="width: 132px; background: #07110f; border: 1px solid #123028; border-radius: 9px; padding: 12px; text-align: center;">
+          <div class="mono" style="font-size: 15px; font-weight: 700; letter-spacing: .14em; color: #e6f5f0;">LOGI<span style="color:#2dd4bf;">X</span></div>
+          <div style="height: 6px; border-radius: 3px; background: #0d9488; margin: 10px 4px 6px;"></div>
+          <div class="mono" style="font-size: 10px; color: #55807a;">FTMM · teal</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 02 PALETTE ============ -->
+    <div style="display: grid; grid-template-columns: 60px 1fr; gap: 28px; padding: 54px 0 26px; border-bottom: 1px solid #e7e0d2; margin-top: 34px;">
+      <div class="serif" style="font-size: 40px; font-weight: 500; color: #cbc2af; line-height: 1;">02</div>
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #b5622f; margin-bottom: 10px;">Surface &amp; signal</div>
+        <h2 class="serif" style="font-size: 32px; font-weight: 600; letter-spacing: -0.01em; margin: 0; color: #23201b;">A quiet surface, so signal reads loud</h2>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding: 32px 0 8px;">
+      <!-- surfaces ramp -->
+      <div>
+        <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #a8a08e; margin-bottom: 16px;">Surface ramp</div>
+        <div class="plate" style="border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+          <div style="background: #070c15; padding: 18px 18px 40px; color: #93a1b8;" class="mono"><span style="font-size: 11px;">#070C15 · popup</span></div>
+          <div style="background: #0b1017; padding: 18px; color: #93a1b8;" class="mono"><span style="font-size: 11px;">#0B1017 · widget</span></div>
+          <div style="background: #0e1626; padding: 18px; color: #93a1b8;" class="mono"><span style="font-size: 11px;">#0E1626 · elevated</span></div>
+          <div style="background: #0b1017; padding: 14px 18px; border-top: 1px solid #223451; color: #5b6b82;" class="mono"><span style="font-size: 11px;">#223451 · hairline border · 1px</span></div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 12px;">
+          <div style="flex:1; display:flex; align-items:center; gap:9px;"><span style="width:26px;height:26px;border-radius:6px;background:#eef3fb;border:1px solid #ddd6c8;"></span><span class="mono" style="font-size:11px;color:#6b6456;">#EEF3FB text</span></div>
+          <div style="flex:1; display:flex; align-items:center; gap:9px;"><span style="width:26px;height:26px;border-radius:6px;background:#93a1b8;"></span><span class="mono" style="font-size:11px;color:#6b6456;">#93A1B8 muted</span></div>
+        </div>
+      </div>
+      <!-- semantics -->
+      <div>
+        <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #a8a08e; margin-bottom: 16px;">Signal colors</div>
+        <div class="plate" style="background: #0b1017; border-radius: 12px; padding: 8px;">
+          <div style="display: flex; align-items: center; gap: 12px; padding: 13px 14px;"><span style="width: 8px; height: 30px; border-radius: 3px; background: #22c55e;"></span><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #eef3fb;">Normal — sesi berjalan</div></div><span class="mono" style="font-size: 11px; color: #5b6b82;">#22C55E</span></div>
+          <div style="height:1px; background:#161f2c;"></div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 13px 14px;"><span style="width: 8px; height: 30px; border-radius: 3px; background: #3b82f6;"></span><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #eef3fb;">Notice — privasi / cuplikan</div></div><span class="mono" style="font-size: 11px; color: #5b6b82;">#3B82F6</span></div>
+          <div style="height:1px; background:#161f2c;"></div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 13px 14px;"><span style="width: 8px; height: 30px; border-radius: 3px; background: #f59e0b;"></span><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #eef3fb;">Warning — perhatian</div></div><span class="mono" style="font-size: 11px; color: #5b6b82;">#F59E0B</span></div>
+          <div style="height:1px; background:#161f2c;"></div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 13px 14px;"><span style="width: 8px; height: 30px; border-radius: 3px; background: #ef4444;"></span><div style="flex:1;"><div style="font-size: 13px; font-weight: 600; color: #eef3fb;">Critical — hitung mundur daya</div></div><span class="mono" style="font-size: 11px; color: #5b6b82;">#EF4444</span></div>
+        </div>
+        <p style="font-size: 13px; color: #6b6456; margin: 14px 0 0; line-height: 1.55;">Status lives in a <span class="serif" style="font-style:italic; color:#2b2621;">solid signal bar</span>, not a tinted card — one colored edge, calm surface behind it. Sharper and quieter than the old pill fills.</p>
+      </div>
+    </div>
+
+    <!-- ============ 03 TYPOGRAPHY / HERO SPECIMEN ============ -->
+    <div style="display: grid; grid-template-columns: 60px 1fr; gap: 28px; padding: 54px 0 26px; border-bottom: 1px solid #e7e0d2; margin-top: 34px;">
+      <div class="serif" style="font-size: 40px; font-weight: 500; color: #cbc2af; line-height: 1;">03</div>
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #b5622f; margin-bottom: 10px;">Type · data as hero</div>
+        <h2 class="serif" style="font-size: 32px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; color: #23201b;">The number is the interface</h2>
+        <p style="font-size: 15px; line-height: 1.6; color: #6b6456; margin: 0; max-width: 640px;">Every client surface has one thing that matters most — elapsed time, a countdown, an invite code. It gets set in oversized tabular Consolas and given room. Everything else is Segoe UI, quiet, in support. This is the anti-slop move: hierarchy by scale, not by adding chrome.</p>
+      </div>
+    </div>
+
+    <!-- hero specimen -->
+    <figure class="plate" style="margin: 32px 0 0; background: #0b1017; border-radius: 14px; padding: 40px 44px; display: flex; align-items: center; gap: 44px;">
+      <div style="flex-shrink: 0;">
+        <div class="mono" style="font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #5b6b82; margin-bottom: 8px;">Waktu sesi</div>
+        <div class="mono" style="font-size: 88px; font-weight: 700; line-height: 0.9; letter-spacing: 0.02em; color: #eef3fb;">02:14<span style="font-size: 34px; color: #5b6b82;">:41</span></div>
+      </div>
+      <div style="width: 1px; align-self: stretch; background: #161f2c;"></div>
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; font-family: 'Segoe UI', Tahoma, sans-serif;">
+        <div><div style="font-size: 26px; font-weight: 700; color: #eef3fb; letter-spacing: -0.01em;">Selamat datang di lab</div><div class="mono" style="font-size: 11px; color: #5b6b82; margin-top: 2px;">Segoe UI Semibold · 26</div></div>
+        <div><div style="font-size: 15px; color: #93a1b8; line-height: 1.5;">Teks isi 15px — pesan &amp; petunjuk singkat, terbaca nyaman hanya dengan Segoe UI.</div><div class="mono" style="font-size: 11px; color: #5b6b82; margin-top: 2px;">Segoe UI · 15 · body</div></div>
+        <div><div class="mono" style="font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #7f90a8;">Terakhir aktif · 2 menit lalu</div><div class="mono" style="font-size: 11px; color: #5b6b82; margin-top: 4px;">Consolas · 11 · label / caption</div></div>
+      </div>
+    </figure>
+    <p style="font-size: 13px; color: #6b6456; margin: 14px 0 0; line-height: 1.55;">Fallback-safe: drawn as if only <span class="serif" style="font-style:italic; color:#2b2621;">Segoe UI &amp; Consolas</span> exist. No web font ever loads on a lab machine — Poppins/Montserrat are treated as absent.</p>
+
+    <!-- ============ 04 COMPONENTS ============ -->
+    <div style="display: grid; grid-template-columns: 60px 1fr; gap: 28px; padding: 54px 0 26px; border-bottom: 1px solid #e7e0d2; margin-top: 34px;">
+      <div class="serif" style="font-size: 40px; font-weight: 500; color: #cbc2af; line-height: 1;">04</div>
+      <div>
+        <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #b5622f; margin-bottom: 10px;">Components · WPF-safe</div>
+        <h2 class="serif" style="font-size: 32px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 10px; color: #23201b;">Built from Border, StackPanel &amp; Path</h2>
+        <p style="font-size: 15px; line-height: 1.6; color: #6b6456; margin: 0; max-width: 640px;">Line icons are vector <span class="serif" style="font-style:italic;">Path</span> geometry — never emoji. Controls sit on hairline borders with a small radius, so the surface reads engineered rather than bubbly.</p>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding: 32px 0 8px;">
+      <!-- form -->
+      <figure class="plate" style="margin: 0; background: #0b1017; border-radius: 12px; padding: 24px;">
+        <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6b82; margin-bottom: 18px;">Form controls</div>
+        <div style="margin-bottom: 14px;"><div style="font-size: 12px; color: #7f90a8; margin-bottom: 6px;">NIM / Username</div><div style="background: #070c15; border: 1px solid #223451; border-radius: 7px; padding: 11px 13px; font-size: 14px; color: #eef3fb;">2211001<span style="color:#4b8cf5;">|</span></div></div>
+        <div style="margin-bottom: 14px;"><div style="font-size: 12px; color: #7f90a8; margin-bottom: 6px;">Tujuan penggunaan</div><div style="background: #070c15; border: 1px solid #223451; border-radius: 7px; padding: 11px 13px; font-size: 14px; color: #eef3fb; display: flex; align-items: center;">Simulasi DFT<svg style="margin-left:auto;" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5b6b82" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></div></div>
+        <div style="background: #2563eb; border-radius: 7px; padding: 12px; text-align: center; font-size: 14px; font-weight: 600; color: #fff; display: flex; align-items: center; justify-content: center; gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"></path></svg>Mulai Sesi</div>
+      </figure>
+
+      <!-- message card -->
+      <figure class="plate" style="margin: 0; background: #0b1017; border-radius: 12px; padding: 24px;">
+        <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6b82; margin-bottom: 18px;">Message card</div>
+        <div style="background: #0e1626; border: 1px solid #223451; border-radius: 10px; padding: 16px;">
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 36px; height: 36px; border-radius: 8px; background: #10233f; border: 1px solid #24406e; color: #4b8cf5; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg></span>
+            <div style="flex: 1;"><div style="font-size: 14px; font-weight: 700; color: #eef3fb;">Pesan dari Admin</div><div style="font-size: 13px; color: #a7b4c9; line-height: 1.5; margin-top: 3px;">Mohon simpan pekerjaan — lab tutup pukul 17.00.</div></div>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 14px;">
+            <div style="background: #2563eb; border-radius: 7px; padding: 9px 0; text-align: center; font-size: 13px; font-weight: 600; color: #fff; width: 50%;">Balas</div>
+            <div style="background: #070c15; border: 1px solid #223451; border-radius: 7px; padding: 9px 0; text-align: center; font-size: 13px; font-weight: 600; color: #a7b4c9; width: 50%;">Tutup</div>
+          </div>
+        </div>
+      </figure>
+
+      <!-- countdown -->
+      <figure class="plate" style="margin: 0; background: #0b1017; border-radius: 12px; padding: 24px;">
+        <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6b82; margin-bottom: 18px;">Countdown / urgency</div>
+        <div style="background: #0b1017; border: 1px solid #3a1414; border-left: 3px solid #ef4444; border-radius: 10px; padding: 20px;">
+          <div style="display: flex; align-items: center; gap: 8px; color: #f87171; font-size: 13px; font-weight: 700; margin-bottom: 10px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>Perangkat akan dimatikan</div>
+          <div class="mono" style="font-size: 52px; font-weight: 700; letter-spacing: 0.03em; color: #fecaca; line-height: 1;">00:29</div>
+          <div style="font-size: 13px; color: #d59a9a; margin-top: 10px;">Simpan pekerjaan Anda sekarang.</div>
+        </div>
+      </figure>
+
+      <!-- privacy -->
+      <figure class="plate" style="margin: 0; background: #0b1017; border-radius: 12px; padding: 24px;">
+        <div class="mono" style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #5b6b82; margin-bottom: 18px;">Privacy notice</div>
+        <div style="background: #0b1017; border: 1px solid #123028; border-left: 3px solid #14b8a6; border-radius: 10px; padding: 16px;">
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 34px; height: 34px; border-radius: 8px; background: #0e2a24; color: #2dd4bf; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg></span>
+            <div><div style="font-size: 14px; font-weight: 700; color: #99f6e4;">Cuplikan layar diambil</div><div style="font-size: 13px; color: #8fb9ad; line-height: 1.55; margin-top: 4px;">Admin mengambil satu cuplikan untuk keperluan lab. Anda selalu diberi tahu — <strong style="color:#c7f5ec;">tidak pernah diam-diam</strong>.</div></div>
+          </div>
+        </div>
+        <p style="font-size: 12px; color: #5b6b82; margin: 12px 0 0; line-height: 1.5;">Privacy uses its own calm teal edge — never the alarm red.</p>
+      </figure>
+    </div>
+
+    <!-- TONE -->
+    <div style="margin-top: 54px; padding: 40px 44px; background: #efeadf; border-radius: 16px; border: 1px solid #e2dccc;">
+      <div class="serif" style="font-size: 15px; font-style: italic; color: #b5622f; margin-bottom: 10px;">Personality</div>
+      <h2 class="serif" style="font-size: 30px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 14px; color: #23201b; max-width: 720px;">The user is a researcher, not a suspect.</h2>
+      <p style="font-size: 15.5px; line-height: 1.7; color: #5c554a; margin: 0; max-width: 780px;">Respectful, calm, Indonesian-first — <span class="serif" style="font-style:italic; color:#2b2621;">"Selamat datang", "Mulai Sesi", "Mohon simpan pekerjaan".</span> No alarms unless something is truly urgent. Privacy is stated plainly and often. The client should feel like a well-made instrument at the door — precise, quiet, trustworthy — not a guard watching over your shoulder.</p>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
