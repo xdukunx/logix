@@ -198,8 +198,13 @@ $stripWindow.Add_Closing({ param($s,$e) if (-not $script:allowClose) { $e.Cancel
 # secondary display instead of re-rendering it.
 function Get-LogbookWorkArea { return [System.Windows.SystemParameters]::WorkArea }
 
-# The visual sits 10px below the screen top; RootVisual carries a 16px margin
-# as shadow bleed room, so the window itself starts 6px above the work area.
+# RootVisual's margin is asymmetric bleed room for the drop shadow, which falls
+# straight down: "20,6,20,36". These must stay in step with that margin -- the
+# window is positioned so the VISUAL (not the window) lands 10px below the top
+# of the work area.
+$script:BLEED_SIDE = 20
+$script:BLEED_TOP  = 6
+
 function Update-LogbookWidgetPosition {
     $work = Get-LogbookWorkArea
     $w = $window.ActualWidth
@@ -207,13 +212,13 @@ function Update-LogbookWidgetPosition {
     if ([double]::IsNaN($w) -or $w -le 0) { return }
     $centerX = $work.Left + ($work.Width * $script:anchor)
     $left = $centerX - ($w / 2.0)
-    # Keep the whole widget on screen.
-    $minL = $work.Left - 16
-    $maxL = $work.Left + $work.Width - $w + 16
+    # Keep the visible surface on screen; the transparent bleed may hang off.
+    $minL = $work.Left - $script:BLEED_SIDE
+    $maxL = $work.Left + $work.Width - $w + $script:BLEED_SIDE
     if ($left -lt $minL) { $left = $minL }
     if ($left -gt $maxL) { $left = $maxL }
     $window.Left = $left
-    $window.Top  = $work.Top + 10 - 16
+    $window.Top  = $work.Top + 10 - $script:BLEED_TOP
 }
 $window.Add_SizeChanged({ Update-LogbookWidgetPosition })
 
@@ -251,6 +256,23 @@ function Update-LogbookWidgetStatus {
 # surface is placed at its final position and opacity with no animation at all.
 $script:EASE = New-Object System.Windows.Media.Animation.CubicEase
 $script:EASE.EasingMode = 'EaseOut'
+
+# Fade a surface out and only then collapse it. Update-LogbookWidgetView has
+# already set it Collapsed by the time this runs, so it is briefly made visible
+# again -- both surfaces share the same top-centre anchor and the window is
+# sizing to the incoming one anyway, so nothing shifts during the overlap.
+function Hide-LogbookSurface($Element, [int]$Ms = 120) {
+    if (-not $Element) { return }
+    if ($script:reduceMotion) { $Element.Visibility = 'Collapsed'; return }
+    $Element.Visibility = 'Visible'
+    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, [TimeSpan]::FromMilliseconds($Ms))
+    $fade.EasingFunction = $script:EASE
+    $fade.Add_Completed({
+        $Element.Visibility = 'Collapsed'
+        $Element.Opacity = 1
+    }.GetNewClosure())
+    $Element.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
+}
 
 function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160) {
     if (-not $Element) { return }
@@ -296,14 +318,23 @@ function Update-LogbookWidgetView {
     # twitching.
     $surface = if ($showCard) { 'card' } elseif ($showPill) { 'pill' } elseif ($showSliver) { 'sliver' } else { 'none' }
     if ($surface -ne $script:lastSurface) {
+        $previous = $script:lastSurface
+        $script:lastSurface = $surface
         switch ($surface) {
-            # The card replaces the pill in place, so it barely travels.
-            'card'   { Show-LogbookSurface $cardView   -FromY -4 -Ms 170 }
-            'pill'   { Show-LogbookSurface $pillView   -FromY -6 -Ms 150 }
+            # pill <-> card is a crossfade, not a cut: both are anchored to the
+            # same top-centre point, so the card reads as the pill unfolding
+            # rather than one element being swapped for another.
+            'card'   {
+                if ($previous -eq 'pill') { Hide-LogbookSurface $pillView 120 }
+                Show-LogbookSurface $cardView -FromY -4 -Ms 170
+            }
+            'pill'   {
+                if ($previous -eq 'card') { Hide-LogbookSurface $cardView 120 }
+                Show-LogbookSurface $pillView -FromY -4 -Ms 150
+            }
             # The sliver is the one that reads as "dropping" from the edge.
             'sliver' { Show-LogbookSurface $sliverView -FromY -14 -Ms 180 }
         }
-        $script:lastSurface = $surface
     }
 
     $stripWindow.Visibility = if ($script:posture -eq 'strip') { 'Visible' } else { 'Collapsed' }
@@ -333,7 +364,7 @@ function Update-LogbookWidgetView {
     }
     # Unread widens the pill to make room for the badge (design state 04).
     $pillView.Width = if ($badgeVisible) { 164 } else { 150 }
-    $pillView.Background = $brushConv.ConvertFromString($(if ($badgeVisible) { '#D90B1017' } else { '#B30B1017' }))
+    $pillView.Background = $brushConv.ConvertFromString($(if ($badgeVisible) { '#F50B1017' } else { '#EB0B1017' }))
 
     Update-LogbookWidgetStatus
     Update-LogbookWidgetPosition

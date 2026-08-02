@@ -1486,7 +1486,7 @@ $res
     <Border Name="MainCard" Width="320" CornerRadius="22" Padding="28,26"
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Center">
-      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="24" Opacity="0.55" Color="#000000"/></Border.Effect>
+      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="20" Direction="270" Opacity="0.55" Color="#000000"/></Border.Effect>
       <StackPanel>
 
         <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
@@ -1662,7 +1662,7 @@ $res
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Center">
       <Border.RenderTransform><ScaleTransform x:Name="OverlayScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
-      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="24" Opacity="0.6" Color="#000000"/></Border.Effect>
+      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="20" Direction="270" Opacity="0.6" Color="#000000"/></Border.Effect>
       <StackPanel HorizontalAlignment="Center">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
           <Ellipse Name="OverlayDot" Width="8" Height="8" Fill="{StaticResource LxCritical}" VerticalAlignment="Center" Margin="0,0,7,0"/>
@@ -1804,14 +1804,14 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
 $res
   </Window.Resources>
 
-  <Grid Name="RootVisual" Margin="16">
+  <Grid Name="RootVisual" Margin="20,6,20,36">
 
     <!-- ===== 1. PILL (collapsed, default posture) ===================== -->
     <Border Name="PillView" Width="150" Height="32" CornerRadius="16"
-            Background="#B30B1017" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            Background="#EB0B1017" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top">
       <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.45" Color="#000000"/></Border.Effect>
+      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.45" Color="#000000"/></Border.Effect>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
         <Ellipse Name="PillDot" Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
         <TextBlock Name="PillClock" Text="00:00" FontFamily="Consolas" FontSize="13"
@@ -1829,7 +1829,7 @@ $res
             Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top" Padding="14,0">
       <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Opacity="0.45" Color="#000000"/></Border.Effect>
+      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.45" Color="#000000"/></Border.Effect>
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
         <Ellipse Name="SliverDot" Width="6" Height="6" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
         <Border Name="SliverBadge" Visibility="Collapsed" MinWidth="15" Height="15" CornerRadius="8"
@@ -1847,7 +1847,7 @@ $res
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top" Padding="18,16">
       <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-      <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="18" Opacity="0.5" Color="#000000"/></Border.Effect>
+      <Border.Effect><DropShadowEffect BlurRadius="36" ShadowDepth="12" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
       <StackPanel>
 
         <Grid Margin="0,0,0,12">
