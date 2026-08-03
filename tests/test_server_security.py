@@ -224,3 +224,37 @@ def test_reports_requires_auth(monkeypatch, tmp_path):
     with TestClient(module.app) as client:
         res = client.get("/api/reports")
     assert res.status_code == 401
+
+
+def test_config_read_requires_a_credential(monkeypatch, tmp_path):
+    """GET /api/config must not be readable anonymously.
+
+    It has two legitimate callers with different credentials -- the dashboard
+    (admin bearer token) and the agent (X-API-Key) -- so it accepts either, but
+    an unauthenticated caller gets 401. This endpoint was wide open; nothing
+    secret is in the config today, but it describes the lab's setup and is
+    exactly the kind of blob that later grows a webhook URL or an SMTP
+    password.
+    """
+    module = _load_main(monkeypatch, tmp_path, dev_mode="1", ingest_key="ingest-secret",
+                        admin_password="pw")
+    # verify_api_key checks the devices table for a per-device key before
+    # falling back to the shared one, so the Control schema has to exist too
+    # (devices lives in init_control_tables, not init_db).
+    module.init_db()
+    module.init_control_tables()
+    client = TestClient(module.app)
+
+    assert client.get("/api/config").status_code == 401
+    assert client.get("/api/config", headers={"X-API-Key": "wrong"}).status_code == 401
+
+    # Agent credential.
+    assert client.get("/api/config", headers={"X-API-Key": "ingest-secret"}).status_code == 200
+
+    # Dashboard credential.
+    token = client.post("/api/auth/dev-login").json()["token"]
+    assert client.get("/api/config", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+
+    # Writing still needs an admin session specifically -- a device key must
+    # never be able to rewrite lab policy.
+    assert client.put("/api/config", json={}, headers={"X-API-Key": "ingest-secret"}).status_code == 401

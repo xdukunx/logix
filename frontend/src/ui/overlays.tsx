@@ -92,13 +92,12 @@ export const MoreMenu = ({ label, items }: { label: string; items: MenuItem[] })
       {isOpen && !isPhone && (
         <div
           role="menu"
-          className="lx-anim-menu"
+          className="lx-anim-menu lx-material"
           style={{
             position: "absolute",
             top: 26,
             right: 0,
             zIndex: 30,
-            background: "var(--lx-card)",
             border: "1px solid var(--lx-border)",
             borderRadius: "var(--lx-radius-menu)",
             width: 168,
@@ -173,11 +172,10 @@ export const BottomSheet = ({
         onClick={onClose}
       />
       <div
-        className="lx-anim-sheet"
+        className="lx-anim-sheet lx-material"
         style={{
           position: "relative",
           width: "100%",
-          background: "var(--lx-card)",
           borderRadius: "20px 20px 0 0",
           padding: "10px 18px 22px",
           boxShadow: "0 -12px 40px rgba(16,24,40,.18)",
@@ -253,11 +251,10 @@ export const Modal = ({
       <div
         ref={ref}
         role="dialog"
-        className="lx-anim-modal"
+        className="lx-anim-modal lx-material"
         aria-modal="true"
         aria-label={title}
         style={{
-          background: "var(--lx-card)",
           borderRadius: "var(--lx-radius-card)",
           padding: 24,
           width,
@@ -395,9 +392,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="lx-anim-toast"
+            className="lx-anim-toast lx-material"
             style={{
-              background: "var(--lx-card)",
               border: "1px solid var(--lx-border)",
               ...statusEdge(t.status),
               borderRadius: "var(--lx-radius-menu)",

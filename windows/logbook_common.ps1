@@ -1845,8 +1845,8 @@ $res
     <!-- ===== 3. EXPAND CARD (hover / sliver click) ==================== -->
     <Border Name="CardView" Visibility="Collapsed" Width="240" CornerRadius="22"
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
-            HorizontalAlignment="Center" VerticalAlignment="Top" Padding="18,16">
-      <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+            HorizontalAlignment="Center" VerticalAlignment="Top" Padding="18,16" RenderTransformOrigin="0.5,0">
+      <Border.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Border.RenderTransform>
       <Border.Effect><DropShadowEffect BlurRadius="36" ShadowDepth="12" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
       <StackPanel>
 

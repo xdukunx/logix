@@ -1168,9 +1168,32 @@ def logout(authorization: Optional[str] = Header(None)):
     return {"status": "success"}
 
 
+# Read access to the config needs SOME credential, but it has two legitimate
+# callers with different ones: the dashboard (admin session bearer token) and
+# the agent (X-API-Key, per-device or the shared ingest key). This accepts
+# either and rejects anonymous callers.
+#
+# It was previously wide open. Nothing secret lives in the config today -- it
+# is branding, purpose lists, privacy copy and the idle policy -- but it does
+# describe the lab's internal setup to anyone who can reach the port, and a
+# config blob is exactly the kind of thing that later grows a webhook URL or
+# an SMTP password. Failing closed now is cheap; retrofitting it after someone
+# puts a secret in there is not.
+def verify_token_or_api_key(
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None),
+):
+    try:
+        _resolve_session(authorization)
+        return
+    except HTTPException:
+        pass
+    verify_api_key(x_api_key)
+
+
 # Config Endpoints
 @app.get("/api/config")
-def get_config():
+def get_config(_: None = Depends(verify_token_or_api_key)):
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:

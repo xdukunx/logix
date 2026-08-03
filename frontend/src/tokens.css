@@ -122,20 +122,27 @@
 
   /*
    * ---- Motion ----
-   * Three durations, deliberately few. A "quiet instrument" moves to confirm
-   * a state change and never to decorate: opacity and transform only, no
-   * overshoot, nothing longer than a fifth of a second.
-   *   fast   presses and hovers, felt rather than seen
-   *   base   the default for anything that changes state
-   *   enter  surfaces arriving (menu, modal, toast) -- a touch longer so the
-   *          eye can follow where they came from
+   * Tuned to feel native on macOS. What actually reads as "Apple" is not
+   * bounce -- system animations there are critically damped, with no visible
+   * overshoot. It is the SHAPE of the curve: a fast departure followed by a
+   * long, gentle settle, held slightly longer than most web easing.
+   *
+   * --lx-ease-out is that curve. It is the standard Apple-style decelerate
+   * used for anything arriving on screen. --lx-ease is a gentler symmetric
+   * curve for things merely changing colour.
+   *
+   * Still opacity/transform only, still no overshoot, still nothing that
+   * animates at rest -- the macOS influence is in the timing, not in adding
+   * decoration.
+   *   fast   presses, felt rather than seen
+   *   base   hovers and state changes
+   *   enter  surfaces arriving (menu, modal, sheet, toast)
    */
-  --lx-motion-fast: 90ms;
-  --lx-motion: 140ms;
-  --lx-motion-enter: 180ms;
-  --lx-ease: cubic-bezier(0.2, 0, 0, 1);
-  /* Slight deceleration for arriving surfaces. */
-  --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --lx-motion-fast: 120ms;
+  --lx-motion: 200ms;
+  --lx-motion-enter: 260ms;
+  --lx-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --lx-ease-out: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /*
@@ -249,9 +256,37 @@ a:hover {
   }
 }
 
+/*
+ * macOS menus unfold FROM the control that opened them, not from their own
+ * centre. Both popovers here hang off the right edge of their trigger, so the
+ * origin is the top-right corner -- that one detail is most of what makes a
+ * popover read as native rather than as a floating box that faded in.
+ */
 .lx-anim-menu {
   animation: lx-menu-in var(--lx-motion) var(--lx-ease-out);
-  transform-origin: top center;
+  transform-origin: top right;
+}
+
+/*
+ * Vibrancy. A translucent, blurred surface over the content behind it is the
+ * single most recognisable macOS material. Only the two surfaces that float
+ * above the page get it -- cards and rows stay flat and opaque, per the guard
+ * rails. `saturate` is what stops the blur looking grey and dead.
+ *
+ * color-mix keeps this on the token: it is the card colour with alpha, so it
+ * still flips correctly between light and dark.
+ */
+/* Opaque fallback first, so a browser without backdrop-filter still gets a
+   solid readable surface rather than a transparent one. */
+.lx-material {
+  background: var(--lx-card);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .lx-material {
+    background: color-mix(in srgb, var(--lx-card) 72%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
 }
 .lx-anim-modal {
   animation: lx-modal-in var(--lx-motion-enter) var(--lx-ease-out);
@@ -267,38 +302,46 @@ a:hover {
 }
 
 /*
- * Interactive surfaces. `.lx-interactive` is the one hover/press treatment in
- * the product: a 1px rise on hover, settling back down on press so a click
- * feels like it lands. Cards opt in; static content never does.
+ * Interactive surfaces. macOS does not lift things on hover -- that is a
+ * Material idiom. What it does is swell them a hair and deepen the shadow
+ * (Finder icons, Music artwork), then press them slightly IN on click. The
+ * scale values are deliberately tiny: 0.8% is felt, not seen, and at that
+ * size text stays crisp through the transition.
  */
 .lx-interactive {
   transition:
-    transform var(--lx-motion) var(--lx-ease),
-    box-shadow var(--lx-motion) var(--lx-ease),
+    transform var(--lx-motion) var(--lx-ease-out),
+    box-shadow var(--lx-motion) var(--lx-ease-out),
     background-color var(--lx-motion) var(--lx-ease),
     border-color var(--lx-motion) var(--lx-ease);
 }
 @media (hover: hover) {
   .lx-interactive:hover {
-    transform: translateY(-1px);
+    transform: scale(1.008);
+    box-shadow: 0 2px 4px rgba(16, 24, 40, 0.05), 0 8px 24px rgba(16, 24, 40, 0.07);
   }
 }
 .lx-interactive:active {
-  transform: translateY(0);
+  transform: scale(0.997);
   transition-duration: var(--lx-motion-fast);
 }
 
-/* Buttons, menu items, nav pills, table rows: colour-only feedback, so
-   nothing shifts under the cursor while the user is aiming at it. */
+/*
+ * Buttons, menu items, nav pills. The press is the macOS one: a quick dim
+ * plus a barely-there squeeze, snapping in and easing back out. No movement
+ * on hover, so nothing shifts under a cursor that is still aiming.
+ */
 .lx-tap {
   transition:
     background-color var(--lx-motion) var(--lx-ease),
     color var(--lx-motion) var(--lx-ease),
     border-color var(--lx-motion) var(--lx-ease),
-    opacity var(--lx-motion) var(--lx-ease);
+    opacity var(--lx-motion) var(--lx-ease),
+    transform var(--lx-motion) var(--lx-ease-out);
 }
 .lx-tap:active:not(:disabled) {
-  opacity: 0.75;
+  opacity: 0.72;
+  transform: scale(0.97);
   transition-duration: var(--lx-motion-fast);
 }
 

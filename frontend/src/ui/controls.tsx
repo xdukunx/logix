@@ -133,13 +133,12 @@ export const PillSelect = <T extends string>({
       {isOpen && (
         <div
           role="listbox"
-          className="lx-anim-menu"
+          className="lx-anim-menu lx-material"
           style={{
             position: "absolute",
             top: "calc(100% + 8px)",
             right: 0,
             zIndex: 30,
-            background: "var(--lx-card)",
             border: "1px solid var(--lx-border)",
             borderRadius: "var(--lx-radius-menu)",
             width: width ?? 204,

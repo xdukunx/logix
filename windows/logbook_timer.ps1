@@ -254,7 +254,12 @@ function Update-LogbookWidgetStatus {
 #
 # reduce_motion is a hard kill, not a softening: when the OS asks for it every
 # surface is placed at its final position and opacity with no animation at all.
-$script:EASE = New-Object System.Windows.Media.Animation.CubicEase
+# Quintic, not cubic: a steeper departure and a much longer settle, which is
+# the curve macOS uses for surfaces arriving. Cubic reads as "web easing" by
+# comparison -- it arrives too evenly. Paired with slightly longer durations
+# below, this is what makes the widget feel like a system component rather
+# than an animated window.
+$script:EASE = New-Object System.Windows.Media.Animation.QuinticEase
 $script:EASE.EasingMode = 'EaseOut'
 
 # Fade a surface out and only then collapse it. Update-LogbookWidgetView has
@@ -274,12 +279,13 @@ function Hide-LogbookSurface($Element, [int]$Ms = 120) {
     $Element.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
 }
 
-function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160) {
+function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160, [double]$FromScale = 0) {
     if (-not $Element) { return }
     $shift = $Element.RenderTransform
     if ($script:reduceMotion) {
         $Element.Opacity = 1
         if ($shift -is [System.Windows.Media.TranslateTransform]) { $shift.Y = 0 }
+        if ($shift -is [System.Windows.Media.ScaleTransform]) { $shift.ScaleX = 1; $shift.ScaleY = 1 }
         return
     }
     $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds($Ms))
@@ -289,6 +295,15 @@ function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160) {
         $slide = New-Object System.Windows.Media.Animation.DoubleAnimation($FromY, 0.0, [TimeSpan]::FromMilliseconds($Ms))
         $slide.EasingFunction = $script:EASE
         $shift.BeginAnimation([System.Windows.Media.TranslateTransform]::YProperty, $slide)
+    }
+    # A macOS popover unfolds from its anchor rather than fading in place. The
+    # card's origin is top-centre (set in XAML), so growing from ~96% reads as
+    # the pill expanding downward into the card.
+    if ($FromScale -gt 0 -and $shift -is [System.Windows.Media.ScaleTransform]) {
+        $grow = New-Object System.Windows.Media.Animation.DoubleAnimation($FromScale, 1.0, [TimeSpan]::FromMilliseconds($Ms))
+        $grow.EasingFunction = $script:EASE
+        $shift.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $grow)
+        $shift.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $grow)
     }
 }
 
@@ -325,15 +340,15 @@ function Update-LogbookWidgetView {
             # same top-centre point, so the card reads as the pill unfolding
             # rather than one element being swapped for another.
             'card'   {
-                if ($previous -eq 'pill') { Hide-LogbookSurface $pillView 120 }
-                Show-LogbookSurface $cardView -FromY -4 -Ms 170
+                if ($previous -eq 'pill') { Hide-LogbookSurface $pillView 130 }
+                Show-LogbookSurface $cardView -FromScale 0.96 -Ms 240
             }
             'pill'   {
-                if ($previous -eq 'card') { Hide-LogbookSurface $cardView 120 }
-                Show-LogbookSurface $pillView -FromY -4 -Ms 150
+                if ($previous -eq 'card') { Hide-LogbookSurface $cardView 130 }
+                Show-LogbookSurface $pillView -FromY -4 -Ms 200
             }
             # The sliver is the one that reads as "dropping" from the edge.
-            'sliver' { Show-LogbookSurface $sliverView -FromY -14 -Ms 180 }
+            'sliver' { Show-LogbookSurface $sliverView -FromY -14 -Ms 220 }
         }
     }
 
