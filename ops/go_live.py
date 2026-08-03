@@ -275,9 +275,12 @@ def cmd_check(ns) -> int:
             conn.close()
 
     print("\n  Transport")
-    warn("the server speaks plain HTTP -- put it behind a TLS reverse proxy "
-         "(see docs/deploy/Caddyfile). Without it, the admin password and every "
-         "device key cross the network in the clear.")
+    warn("the server speaks plain HTTP by design -- it must sit behind a TLS "
+         "reverse proxy. Without one, the admin password and every device key "
+         "cross the network in readable text.")
+    print("       lab, no public domain : caddy run --config docs/deploy/Caddyfile.lab")
+    print("       public domain         : docs/deploy/Caddyfile (free cert, auto-renewed)")
+    print("       this machine only     : docs/deploy/Caddyfile.localhost")
 
     print()
     if problems:
