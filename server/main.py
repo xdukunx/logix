@@ -223,6 +223,8 @@ ENROLLMENT_INVITE_COLUMNS = {
     "expires_at": "TEXT NOT NULL",
     "used_at": "TEXT",
     "used_by_device_id": "TEXT",
+    # Optional pin: when set, only this hostname may redeem the invite.
+    "hostname": "TEXT",
 }
 
 INVITE_TTL_MINUTES = 15
@@ -571,6 +573,10 @@ def init_control_tables():
 
         invite_defs = ",\n        ".join(f"{k} {v}" for k, v in ENROLLMENT_INVITE_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS enrollment_invites (\n        {invite_defs}\n    )")
+        # Additive migration: invites created before hostname pinning shipped.
+        existing_invite_cols = {row["name"] for row in conn.execute("PRAGMA table_info(enrollment_invites)").fetchall()}
+        if "hostname" not in existing_invite_cols:
+            conn.execute("ALTER TABLE enrollment_invites ADD COLUMN hostname TEXT")
 
         policy_defs = ",\n        ".join(f"{k} {v}" for k, v in POLICY_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS device_policies (\n        {policy_defs}\n    )")
@@ -1021,6 +1027,15 @@ def require_permission(action: str):
 # Dependency to verify the shared ingest API key sent by local agents.
 # Unset LOGIX_INGEST_API_KEY only ever happens in dev mode; production
 # deployments must configure it, otherwise ingest is rejected outright.
+# Once every workstation has enrolled and holds its own key, set
+# LOGIX_REQUIRE_DEVICE_KEY=1. The shared bootstrap key then stops being
+# accepted for ingest entirely, so a leaked LOGIX_INGEST_API_KEY no longer lets
+# anything post as a device -- only a real per-device handshake works. This is
+# the posture a settled lab should run in; the shared key exists to get the
+# first devices on board, not to stay valid forever.
+REQUIRE_DEVICE_KEY = os.environ.get("LOGIX_REQUIRE_DEVICE_KEY", "0") == "1"
+
+
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
     # A per-device key issued by /api/enroll takes priority over the shared
     # bootstrap key. Guard empty/missing header BEFORE the DB lookup -- a
@@ -1040,6 +1055,10 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         finally:
             conn.close()
 
+    # Device-key-only posture: the per-device lookup above is the ONLY way in.
+    if REQUIRE_DEVICE_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: a per-device key is required")
+
     expected = os.environ.get("LOGIX_INGEST_API_KEY", "")
     if not expected:
         if LOGIX_DEV_MODE:
@@ -1049,9 +1068,80 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing X-API-Key")
 
 
+class InsecureConfiguration(RuntimeError):
+    """Raised at startup when the server would come up in an unsafe posture."""
+
+
+def assert_safe_posture(*, strict: bool = True) -> List[str]:
+    """Refuse to serve a production deployment that is missing its secrets.
+
+    Every one of these has a silent, dangerous failure mode if it is only a
+    warning: an unset admin password is a login that can never succeed (or, in
+    dev mode, the literal string "admin123"); an unset ingest key means the
+    dev-mode branch of verify_api_key accepts *anything*. Failing to start is
+    loud, happens before a single request is served, and cannot be missed the
+    way a log line can.
+
+    Returns the list of non-fatal warnings. Raises InsecureConfiguration for
+    anything fatal, which aborts uvicorn's startup.
+    """
+    fatal: List[str] = []
+    warnings: List[str] = []
+
+    if LOGIX_DEV_MODE:
+        # Dev mode is a development convenience, not a deployment mode: it
+        # enables the passwordless /api/auth/dev-login shortcut, defaults the
+        # admin password to "admin123", and lets an unset ingest key accept any
+        # device. Never a fatal error (it *is* how you develop), but it must be
+        # impossible to leave on by accident without seeing it.
+        warnings.append(
+            "LOGIX_DEV_MODE=1: passwordless dev-login is enabled and ingest auth "
+            "may be bypassed. Never use this on a shared or lab server."
+        )
+        return warnings
+
+    if not os.environ.get("ADMIN_EMAILS", "").strip():
+        fatal.append("ADMIN_EMAILS is empty -- nobody could sign in.")
+    if not ADMIN_PASSWORD:
+        fatal.append(
+            "LOGIX_ADMIN_PASSWORD is not set -- admin login would be permanently closed."
+        )
+    elif len(ADMIN_PASSWORD) < 12:
+        fatal.append(
+            f"LOGIX_ADMIN_PASSWORD is only {len(ADMIN_PASSWORD)} characters; use at least 12."
+        )
+
+    if not REQUIRE_DEVICE_KEY and not os.environ.get("LOGIX_INGEST_API_KEY", "").strip():
+        fatal.append(
+            "LOGIX_INGEST_API_KEY is not set and LOGIX_REQUIRE_DEVICE_KEY is not 1 -- "
+            "agents would have no way to authenticate."
+        )
+
+    if not os.environ.get("LOGIX_ALLOWED_ORIGINS", "").strip():
+        warnings.append(
+            "LOGIX_ALLOWED_ORIGINS is empty: the dashboard must be served from the "
+            "same origin as the API (no cross-origin browser access)."
+        )
+    if not REQUIRE_DEVICE_KEY:
+        warnings.append(
+            "The shared LOGIX_INGEST_API_KEY is still accepted. Once every device has "
+            "enrolled, set LOGIX_REQUIRE_DEVICE_KEY=1 so only per-device keys work."
+        )
+
+    if fatal:
+        raise InsecureConfiguration(
+            "Refusing to start -- unsafe configuration:\n  - " + "\n  - ".join(fatal)
+            + "\n\nSet these in the server environment, or set LOGIX_DEV_MODE=1 for "
+              "local development only."
+        )
+    return warnings
+
+
 def startup_event():
     # Invoked from the lifespan handler at the top of this module (was
     # @app.on_event("startup"), now deprecated in FastAPI).
+    for warning in assert_safe_posture():
+        logger.warning("SECURITY: %s", warning)
     init_db()
     init_control_tables()
     rehydrate_pending_commands()
@@ -1556,6 +1646,12 @@ class EnrollInviteRequest(BaseModel):
     category: Optional[str] = "custom"
     display_name: Optional[str] = ""
     note: Optional[str] = ""
+    # Pin the invite to one machine. When set, only that hostname can redeem
+    # it -- so a code read off an admin's screen (or out of a chat message)
+    # cannot be used to enrol some other box. This is what turns enrolment
+    # from "whoever types the code first" into a handshake with a device the
+    # admin has already registered by name.
+    hostname: Optional[str] = ""
 
 
 class EnrollRequest(BaseModel):
@@ -1604,16 +1700,21 @@ def create_enroll_invite(payload: EnrollInviteRequest, email: str = Depends(requ
     try:
         conn.execute(
             "INSERT INTO enrollment_invites "
-            "(invite_code, category, display_name, note, created_by, created_at, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(invite_code, category, display_name, note, created_by, created_at, expires_at, hostname) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (invite_code, category, payload.display_name, payload.note, email,
-             now.isoformat(), expires_at.isoformat()),
+             now.isoformat(), expires_at.isoformat(), (payload.hostname or "").strip()),
         )
         conn.commit()
     finally:
         conn.close()
 
-    return {"invite_code": invite_code, "expires_at": expires_at.isoformat(), "category": category}
+    return {
+        "invite_code": invite_code,
+        "expires_at": expires_at.isoformat(),
+        "category": category,
+        "hostname": (payload.hostname or "").strip(),
+    }
 
 
 @app.post("/api/enroll")
@@ -1632,6 +1733,16 @@ def redeem_enroll_invite(payload: EnrollRequest, request: Request):
             raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
         if datetime.now() > datetime.fromisoformat(invite["expires_at"]):
             raise HTTPException(status_code=410, detail="Invite code expired")
+
+        # A hostname-pinned invite only works on the machine it was issued for.
+        # Deliberately the same generic message as an unknown code, so this
+        # cannot be used to probe which hostnames an admin has registered.
+        pinned = (invite["hostname"] or "").strip() if "hostname" in invite.keys() else ""
+        if pinned and pinned.lower() != payload.hostname.strip().lower():
+            logger.warning(
+                "enroll: invite pinned to %s redeemed from %s (rejected)", pinned, payload.hostname
+            )
+            raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
 
         category = invite["category"] or "custom"
         device_id = str(uuid.uuid4())
