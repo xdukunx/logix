@@ -21,7 +21,18 @@ param(
     [switch]$NonInteractive,
     [string]$ServerUrl = "",
     [string]$ServerApiKey = "",
-    [string]$DeviceName = ""
+        [string]$DeviceName = "",
+    # One-time enrollment code from the dashboard (Perangkat > Tambah perangkat,
+    # or ops/go_live.py register). When given, the installer performs the real
+    # device handshake unattended: it redeems the code and stores the per-device
+    # key in device.json. That key is what lets the server run in
+    # LOGIX_REQUIRE_DEVICE_KEY mode, where the shared key no longer works.
+    [string]$InviteCode = "",
+    # Trust the server certificate from this .crt before enrolling. A lab server
+    # issues its own certificate (Caddyfile.lab), so a fresh workstation does not
+    # trust it yet and every HTTPS call would fail. Importing it here is what
+    # makes an unattended install over HTTPS possible at all.
+    [string]$ServerCertPath = ""
 )
 $ErrorActionPreference = 'Stop'
 
@@ -54,9 +65,15 @@ function Set-LogixConfigValue {
     $lines = if (Test-Path $cfgPath) { @(Get-Content $cfgPath) } else { @() }
     $pattern = "^\s*#?\s*(?:export\s+)?$Key\s*="
     $found = $false
-    $out = foreach ($line in $lines) {
+    # @(...) is load-bearing: without it a 0- or 1-line config.env makes $out a
+    # single STRING, and the += below then concatenates text instead of
+    # appending a line -- every key ends up welded onto one line and the agent
+    # can no longer read its own server URL. Only bites on a genuinely fresh
+    # machine, where config.env starts empty, which is exactly the case that
+    # matters.
+    $out = @(foreach ($line in $lines) {
         if ($line -match $pattern) { $found = $true; "$Key=$Value" } else { $line }
-    }
+    })
     if (-not $found) { $out += "$Key=$Value" }
     $out | Set-Content -Path $cfgPath -Encoding UTF8
 }
@@ -77,6 +94,54 @@ Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python' })" 
 if ($ServerUrl)    { Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value $ServerUrl }
 if ($ServerApiKey) { Set-LogixConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value $ServerApiKey }
 if ($DeviceName)   { Set-LogixConfigValue -Key 'LOGIX_DEVICE_NAME'    -Value $DeviceName }
+
+# --- Real device handshake ---------------------------------------------------
+# With an invite code we enroll for real instead of relying on the shared
+# bootstrap key: the server hands back a key belonging to THIS device only,
+# which is what lets it run in LOGIX_REQUIRE_DEVICE_KEY mode where the shared
+# key is refused outright. Codes are single-use, expire in 15 minutes, and can
+# be pinned to one hostname, so a code that leaks is worth nothing elsewhere.
+if ($ServerCertPath -and (Test-Path $ServerCertPath)) {
+    # A lab server issues its own certificate, so a fresh workstation does not
+    # trust it yet and enrollment over HTTPS would fail before it starts.
+    try {
+        Import-Certificate -FilePath $ServerCertPath -CertStoreLocation 'Cert:\LocalMachine\Root' -ErrorAction Stop | Out-Null
+        Write-Host "Trusted server certificate from $ServerCertPath" -ForegroundColor Green
+    } catch {
+        Write-Host "WARNING: could not import $ServerCertPath : $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+if ($InviteCode) {
+    if (-not $ServerUrl) {
+        Write-Host 'WARNING: -InviteCode given without -ServerUrl; skipping enrollment.' -ForegroundColor Yellow
+    } else {
+        $identityDir = 'C:\ProgramData\Logix'
+        $identityPath = Join-Path $identityDir 'device.json'
+        try {
+            New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
+            $body = @{
+                invite_code   = $InviteCode
+                hostname      = $env:COMPUTERNAME
+                os            = 'windows'
+                os_version    = [System.Environment]::OSVersion.VersionString
+                agent_version = 'installer'
+            } | ConvertTo-Json
+            $enrolled = Invoke-RestMethod -Uri ($ServerUrl.TrimEnd('/') + '/api/enroll') -Method Post `
+                -Body $body -ContentType 'application/json' -TimeoutSec 15 -UseBasicParsing
+            @{ device_id = $enrolled.device_id; api_key = $enrolled.api_key; category = $enrolled.category } |
+                ConvertTo-Json | Out-File -FilePath $identityPath -Encoding UTF8 -Force
+            Write-Host "Enrolled with the server (device_id $($enrolled.device_id))." -ForegroundColor Green
+            # The per-device key supersedes the shared one; drop the bootstrap
+            # key so a copy of it is not left sitting on the workstation.
+            Set-LogixConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value ''
+        } catch {
+            Write-Host "ERROR: enrollment failed: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host '  The agent will still install and will fall back to the shared key if one is set.' -ForegroundColor Yellow
+            Write-Host '  Re-run with a fresh code once the server is reachable.' -ForegroundColor Yellow
+        }
+    }
+}
 
 # Copy scripts from installer source folder to the install dir. Includes THIS
 # script: installer/README.md tells operators to re-run

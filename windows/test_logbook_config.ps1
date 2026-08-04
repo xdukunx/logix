@@ -156,5 +156,38 @@ $ovButtons = $ovDoc.SelectNodes("//*[local-name()='Button']")
 Assert ($ovButtons.Count -eq 3) "overlay has exactly the three action buttons"
 Assert ($ovDoc.InnerXml -match 'TextWrapping="NoWrap"' -or $res -match 'TextWrapping="NoWrap"') "overlay action labels never wrap"
 
+
+Write-Host "installer config.env writer"
+# Regression: Set-LogixConfigValue built its output with a bare foreach, which
+# yields a single STRING when the file has 0 or 1 lines. The += that follows
+# then concatenated text instead of appending a line, welding every key onto
+# one line -- and the agent could no longer read its own LOGIX_SERVER_URL. It
+# only bit on a genuinely fresh machine (empty config.env), which is exactly
+# the case that matters, and it produced no error: the install "succeeded" and
+# the device simply never talked to the server.
+$installerSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'install_logbook_tasks.ps1')
+$cfgFn = [regex]::Match($installerSrc, '(?s)function Set-LogixConfigValue \{.*?\n\}').Value
+Assert ($cfgFn -ne '') "installer still defines Set-LogixConfigValue"
+
+$probeDir = Join-Path $env:TEMP ('lxcfgtest_' + [guid]::NewGuid().ToString('N').Substring(0,8))
+$cfgFn = [regex]::Replace($cfgFn, '\$cfgDir = .*', ('$cfgDir = ' + "'$probeDir'"))
+Invoke-Expression $cfgFn
+try {
+    Set-LogixConfigValue -Key 'LOGIX_USE_WSL'        -Value '0'
+    Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value 'https://localhost'
+    Set-LogixConfigValue -Key 'LOGIX_DEVICE_NAME'    -Value 'WS-01'
+    Set-LogixConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value ''
+    Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value 'https://logix.lab'
+
+    $cfgLines = @(Get-Content (Join-Path $probeDir 'config.env'))
+    Assert ($cfgLines.Count -eq 4) "four keys written from an empty config, one line each (got $($cfgLines.Count))"
+    $dupes = @($cfgLines | Group-Object | Where-Object { $_.Count -gt 1 })
+    Assert ($dupes.Count -eq 0) "no duplicated lines"
+    Assert (@($cfgLines | Where-Object { $_ -eq 'LOGIX_SERVER_URL=https://logix.lab' }).Count -eq 1) "rewriting a key replaces it in place"
+    Assert (-not (($cfgLines -join '') -match 'localhostLOGIX')) "keys are never welded onto one line"
+} finally {
+    if (Test-Path $probeDir) { [System.IO.Directory]::Delete($probeDir, $true) }
+}
+
 if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nAll popup-config checks passed." -ForegroundColor Green

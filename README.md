@@ -152,6 +152,67 @@ server. Full walkthrough, flags, and mass-deployment: [docs/GETTING_STARTED.md](
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+### Running a lab: server + workstations
+
+Four commands on the server, then one installer run per workstation. Everything
+below — clean database, generated secrets, HTTPS, and each device's own
+credential — is set up by these steps; there is nothing to configure by hand
+afterwards.
+
+**On the server**
+
+```bash
+# 1. Clean database + generated admin password and ingest key -> server/.env.production
+python ops/go_live.py init --admin-email you@campus.ac.id
+
+# 2. Pre-register the lab. One line per station: hostname[,display name]
+python ops/go_live.py register --devices stations.txt
+
+# 3. HTTPS. Edit docs/deploy/Caddyfile.lab first to set your server's name
+caddy run --config docs/deploy/Caddyfile.lab
+
+# 4. Start Logix itself (loopback only -- Caddy is the way in)
+python ops/serve.py
+```
+
+`init` **refuses to reuse a development database**: a dev DB carries test
+devices, sessions with real names and NIMs, and keys that have been sitting in
+a working tree. `register` prints one invite code per station, each **pinned to
+that hostname** — a code that leaks is worthless anywhere else, so it is safe to
+print the table and carry it round the lab. Codes are single-use and expire in
+15 minutes.
+
+**On each workstation** — one command, fully unattended:
+
+```powershell
+LogixAgentSetup.exe /VERYSILENT `
+  /SERVERURL=https://logix.lab `
+  /INVITECODE=A1B2-C3D4-E5F6-7890 `
+  /SERVERCERT=\\server\share\root.crt `
+  /DEVICENAME="WS-07 - GPU-A100"
+```
+
+That single run does all of it: trusts the server's certificate, performs the
+enrolment **handshake** and stores a key belonging to that machine alone, wipes
+the shared bootstrap key from disk, registers the logon task, and starts the
+agent. Leave the flags off and the wizard asks for the same things instead.
+
+`/SERVERCERT` is only needed for a lab server that issues its own certificate
+(`Caddyfile.lab`). With a public domain and a real certificate, omit it.
+
+**Finally, close the door**
+
+```bash
+python ops/go_live.py lockdown   # only per-device keys work from now on
+python ops/go_live.py check      # fails on anything still unsafe
+```
+
+`lockdown` refuses to run while any registered device has yet to enrol, so it
+cannot cut a straggler off. After it, the shared ingest key is inert: a leaked
+copy no longer lets anything report as a device.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
 ### Install via a package manager
 
 | Platform | Ships | Command |

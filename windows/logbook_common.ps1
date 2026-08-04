@@ -1069,9 +1069,16 @@ function Get-LogbookConfig {
     # Cascading: built-in defaults <- machine config <- per-user config.
     $cfg = Get-LogbookDefaultConfig
     
-    # Try to fetch from central server first
+    # Try to fetch from central server first.
     $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
-    $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
+    # Same credential order as Send-LogbookHeartbeat: this device's own key
+    # first, the shared bootstrap key only as a fallback. Reading just the
+    # shared key was wrong in two ways -- an enrolled device deliberately has
+    # it cleared (so config fetches 401'd and silently fell back to a stale
+    # cache), and a server running with LOGIX_REQUIRE_DEVICE_KEY=1 refuses the
+    # shared key outright.
+    $serverKey = Get-LogbookDeviceApiKey
+    if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
     $serverCfg = $null
     
     $cachePath = Join-Path $Global:StateDir 'server_config_cache.json'

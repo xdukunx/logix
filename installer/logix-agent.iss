@@ -102,6 +102,8 @@ en.CfgKey=Server API key (the ingest key from your server):
 id.CfgKey=Kunci API server (ingest key dari server kamu):
 en.CfgDevice=Device name (leave blank to use this PC's name):
 id.CfgDevice=Nama perangkat (kosongkan untuk memakai nama PC ini):
+en.CfgInvite=Enrollment code (from the dashboard; recommended):
+id.CfgInvite=Kode pendaftaran (dari dashboard; disarankan):
 en.CfgNeedUrl=Please enter the Logix server URL (e.g. https://logix.example.org).
 id.CfgNeedUrl=Masukkan URL server Logix (mis. https://logix.example.org).
 en.CfgNeedKey=Please enter the server API key (the ingest key from your Logix server).
@@ -132,7 +134,7 @@ Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ig
 ; launch; the headless wrapper never creates a window (see
 ; Start-HiddenPowerShell in logbook_common.ps1).
 Filename: "{sys}\conhost.exe"; \
-  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
+  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -InviteCode ""{code:GetInviteCode}"" -ServerCertPath ""{code:GetServerCert}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
   StatusMsg: "Registering Logix agent, installing AnyDesk, starting monitor..."; \
   Flags: runhidden waituntilterminated
 
@@ -178,6 +180,7 @@ begin
   ConfigPage.Add(ExpandConstant('{cm:CfgUrl}'), False);
   ConfigPage.Add(ExpandConstant('{cm:CfgKey}'), False);
   ConfigPage.Add(ExpandConstant('{cm:CfgDevice}'), False);
+  ConfigPage.Add(ExpandConstant('{cm:CfgInvite}'), False);
   ConfigPage.Values[0] := 'http://localhost:8000';
 end;
 
@@ -191,15 +194,18 @@ begin
     // Nothing to validate when the values came from the command line -- and in
     // a silent install there is no operator to answer a message box, which
     // would otherwise abort setup with no page ever shown.
-    if (ParamOr('ServerUrl', '') <> '') and (ParamOr('ServerKey', '') <> '') then
+    if (ParamOr('ServerUrl', '') <> '') and
+       ((ParamOr('ServerKey', '') <> '') or (ParamOr('InviteCode', '') <> '')) then
       Exit;
     if Trim(ConfigPage.Values[0]) = '' then
     begin
       MsgBox(ExpandConstant('{cm:CfgNeedUrl}'), mbError, MB_OK);
       Result := False;
     end
-    else if Trim(ConfigPage.Values[1]) = '' then
+    else if (Trim(ConfigPage.Values[1]) = '') and (Trim(ConfigPage.Values[3]) = '') then
     begin
+      // Either credential is enough: an enrollment code (preferred -- the
+      // device ends up with a key of its own) or the shared ingest key.
       MsgBox(ExpandConstant('{cm:CfgNeedKey}'), mbError, MB_OK);
       Result := False;
     end;
@@ -219,6 +225,20 @@ end;
 function GetDeviceName(Param: string): string;
 begin
   Result := ParamOr('DeviceName', Trim(ConfigPage.Values[2]));
+end;
+
+// One-time enrollment code. With it the device performs a real handshake and
+// receives its own key; without it, it falls back to the shared bootstrap key.
+function GetInviteCode(Param: string): string;
+begin
+  Result := ParamOr('InviteCode', Trim(ConfigPage.Values[3]));
+end;
+
+// Path to the server's certificate, for a lab server that issues its own.
+// Nothing to import when the server has a public certificate.
+function GetServerCert(Param: string): string;
+begin
+  Result := ParamOr('ServerCert', '');
 end;
 
 // Warn (don't block) if no Python is on PATH -- the sign-in/timer/lock/remote
