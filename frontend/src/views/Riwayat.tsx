@@ -276,8 +276,7 @@ export default function Riwayat() {
               }}
             />
             <PillSelect
-              value={undefined}
-              label={undefined}
+              triggerLabel="Unduh"
               options={EXPORTS}
               onChange={download}
               isAccent

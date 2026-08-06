@@ -439,7 +439,19 @@ function Close-LogbookCard {
 function Start-LogbookCollapseCountdown {
     # The card must not vanish mid-sentence while the user is typing a reply.
     if ($script:msgState -eq 'replying' -and $replyInput.IsKeyboardFocusWithin) { return }
-    $script:collapseAtTick = $script:tick + $script:COLLAPSE_SECONDS
+
+    # Anything the user still needs to READ gets the full linger: an admin
+    # message they have just opened, and the "Terkirim ke admin" confirmation.
+    # Everything else collapses the instant the cursor leaves -- the widget is
+    # ambient, and a card that hangs around for seconds over whatever they went
+    # back to doing reads as being in the way. (The design's flat 5s linger was
+    # written for the message case and felt far too slow applied to the plain
+    # session card.)
+    if ($script:msgState -in @('reading', 'sent')) {
+        $script:collapseAtTick = $script:tick + $script:COLLAPSE_SECONDS
+        return
+    }
+    Close-LogbookCard
 }
 
 $window.Add_MouseEnter({

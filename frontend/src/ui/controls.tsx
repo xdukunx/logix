@@ -86,6 +86,7 @@ export const PillSelect = <T extends string>({
   onChange,
   isAccent = false,
   width,
+  triggerLabel,
 }: {
   label?: string;
   value?: T;
@@ -93,13 +94,20 @@ export const PillSelect = <T extends string>({
   onChange: (value: T) => void;
   isAccent?: boolean;
   width?: number;
+  /**
+   * Fixed text for the trigger, for the ACTION-menu case (Unduh) where the
+   * options are things to do rather than a value to hold. Without it such a
+   * menu has no selected option to name itself after and renders as a bare
+   * chevron with no label at all.
+   */
+  triggerLabel?: string;
 }) => {
   const [isOpen, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, isOpen, () => setOpen(false));
 
   const current = options.find((o) => o.value === value);
-  const text = label ? `${label}: ${current?.label ?? ""}` : (current?.label ?? label ?? "");
+  const text = triggerLabel ?? (label ? `${label}: ${current?.label ?? ""}` : (current?.label ?? label ?? ""));
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
