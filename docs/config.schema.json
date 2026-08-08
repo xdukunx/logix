@@ -13,22 +13,64 @@
       "type": "object",
       "description": "Visual identity shared across popup, dashboard, and reports.",
       "properties": {
-        "logoText": { "type": "string", "description": "Short text logo shown when no image is set." },
-        "logoPath": { "type": "string", "description": "Absolute path to a logo image (optional)." },
-        "title": { "type": "string" },
-        "subtitle": { "type": "string" },
+        "logoText": {
+          "type": "string",
+          "description": "Short text logo shown when no image is set."
+        },
+        "logoPath": {
+          "type": "string",
+          "description": "Absolute path to a logo image (optional)."
+        },
+        "title": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
         "colors": {
           "type": "object",
           "description": "Client & dashboard palette. The client (Windows popup/timer) resolves these via Get-LogbookTheme with the deep-navy Client Foundation defaults; a lab re-themes by overriding any key.",
           "properties": {
-            "primary":         { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Elevated surface (cards / inputs)." },
-            "accent":          { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Brand blue (#2563EB by default)." },
-            "muted":           { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Muted text." },
-            "text":            { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Primary text." },
-            "surface":         { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Deepest surface (fullscreen popup)." },
-            "surfaceWidget":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Corner timer widget surface." },
-            "surfaceElevated": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Raised panels / inputs." },
-            "border":          { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "1px hairline border." }
+            "primary": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Elevated surface (cards / inputs)."
+            },
+            "accent": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Brand blue (#2563EB by default)."
+            },
+            "muted": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Muted text."
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Primary text."
+            },
+            "surface": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Deepest surface (fullscreen popup)."
+            },
+            "surfaceWidget": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Corner timer widget surface."
+            },
+            "surfaceElevated": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Raised panels / inputs."
+            },
+            "border": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "1px hairline border."
+            }
           },
           "additionalProperties": false
         },
@@ -36,10 +78,26 @@
           "type": "object",
           "description": "Solid status-bar signal colours -- status is a colored edge on a calm surface, never a tinted card.",
           "properties": {
-            "normal":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Session running (green)." },
-            "notice":   { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Privacy / screenshot (calm blue, never red)." },
-            "warning":  { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Attention (amber)." },
-            "critical": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$", "description": "Power countdown / urgent (red)." }
+            "normal": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Session running (green)."
+            },
+            "notice": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Privacy / screenshot (calm blue, never red)."
+            },
+            "warning": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Attention (amber)."
+            },
+            "critical": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Power countdown / urgent (red)."
+            }
           },
           "additionalProperties": false
         }
@@ -50,36 +108,68 @@
       "type": "object",
       "description": "All user-facing labels and hint strings. Localize here without touching code.",
       "properties": {
-        "intro": { "type": "string" },
-        "startHint": { "type": "string" },
-        "namaLabel": { "type": "string" },
-        "nimLabel": { "type": "string" },
-        "accessLabel": { "type": "string" },
-        "purposeLabel": { "type": "string" },
-        "ketLabel": { "type": "string" },
-        "submit": { "type": "string" },
-        "hint": { "type": "string" },
-        "hintIncomplete": { "type": "string" },
-        "hintReady": { "type": "string" }
+        "intro": {
+          "type": "string"
+        },
+        "startHint": {
+          "type": "string"
+        },
+        "namaLabel": {
+          "type": "string"
+        },
+        "nimLabel": {
+          "type": "string"
+        },
+        "accessLabel": {
+          "type": "string"
+        },
+        "purposeLabel": {
+          "type": "string"
+        },
+        "ketLabel": {
+          "type": "string"
+        },
+        "submit": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "hintIncomplete": {
+          "type": "string"
+        },
+        "hintReady": {
+          "type": "string"
+        }
       },
       "additionalProperties": true
     },
     "accessTypes": {
       "type": "array",
       "description": "Options for the access-type dropdown.",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "purposes": {
       "type": "array",
       "description": "Options for the session-purpose dropdown.",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "requiredFields": {
       "type": "array",
       "description": "Which form fields must be filled before a session can start.",
       "items": {
         "type": "string",
-        "enum": ["nama", "nim", "access", "purpose", "keterangan"]
+        "enum": [
+          "nama",
+          "nim",
+          "access",
+          "purpose",
+          "keterangan"
+        ]
       }
     },
     "devices": {
@@ -89,7 +179,9 @@
         "device_types": {
           "type": "array",
           "description": "Category options offered when naming/labeling a device.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "naming_pattern": {
           "type": "string",
@@ -115,7 +207,9 @@
                 "description": "Idle hours before the session is closed automatically."
               }
             },
-            "required": ["enabled"],
+            "required": [
+              "enabled"
+            ],
             "additionalProperties": false
           }
         }
@@ -129,11 +223,21 @@
         "default_scope": {
           "type": "string",
           "description": "Which range the report modal pre-selects.",
-          "enum": ["today", "all", "range"]
+          "enum": [
+            "today",
+            "all",
+            "range"
+          ]
         },
-        "include_branding": { "type": "boolean" },
-        "include_purpose_summary": { "type": "boolean" },
-        "include_device_summary": { "type": "boolean" }
+        "include_branding": {
+          "type": "boolean"
+        },
+        "include_purpose_summary": {
+          "type": "boolean"
+        },
+        "include_device_summary": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
@@ -141,9 +245,26 @@
       "type": "object",
       "description": "Descriptive text shown to users about what's collected -- NOT the same as LOGIX_PRIVACY_MODE (an agent-local env var controlling whether logix/log_physical.py syncs to the central server at all; see docs/PRIVACY.md). This object never gates behavior, only what's displayed.",
       "properties": {
-        "notice": { "type": "string" },
-        "collected": { "type": "array", "items": { "type": "string" } },
-        "not_collected": { "type": "array", "items": { "type": "string" } }
+        "notice": {
+          "type": "string"
+        },
+        "collected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "not_collected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retention_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Days to keep the personal fields (nama, NIM, Windows username, keterangan) on a session row. After this the row is redacted in place, never deleted -- utilisation history survives, the personal data does not. 0 disables purging."
+        }
       },
       "additionalProperties": false
     }

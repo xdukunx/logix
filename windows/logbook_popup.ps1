@@ -673,6 +673,26 @@ try {
     if (-not $TestMode) { Enable-LogbookKeyboardLockdown }
     $nama.Focus() | Out-Null
     [void]$window.ShowDialog()
+} catch {
+    # FAIL OPEN, ON THE RECORD.
+    #
+    # This is the gate to a lab workstation. If it throws, the two bad outcomes
+    # are (a) a student stuck at a machine they cannot use, staring at a
+    # PowerShell stack trace, and (b) the machine's usage vanishing from the
+    # logbook because nothing recorded it. The second is what used to happen
+    # silently. Neither is acceptable, so: let them work, register the session
+    # as identity_source='unverified' so the hours are still counted and
+    # visibly attributed to nobody, and say so in words a student can act on.
+    #
+    # The finally below still runs, so Task Manager and the keyboard are
+    # released no matter which way this goes -- a crashed popup must never
+    # leave a workstation locked down.
+    $reason = $_.Exception.Message
+    Write-LogbookError "Sign-in popup failed: $reason"
+    if (-not $TestMode) {
+        Register-LogbookUnverifiedSession -Reason $reason | Out-Null
+        Show-LogbookSignInFailureNotice -Reason $reason
+    }
 } finally {
     Disable-LogbookKeyboardLockdown
     Set-TaskManagerDisabled -Disabled $false

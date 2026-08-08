@@ -47,6 +47,17 @@ BASE_COLUMNS = {
     # duplicate row.
     "event_uid": "TEXT",
     "synced": "INTEGER DEFAULT 0",
+    # Mirrors server/main.py's BASE_COLUMNS. How the person's identity was
+    # established, not merely what they typed:
+    #   self_declared -- typed their own nama + NIM at the sign-in popup
+    #   unverified    -- the popup could not run and the machine was let
+    #                    through anyway (the deliberate fail-open policy); the
+    #                    session is real, the person behind it is not known
+    #   directory     -- resolved against the campus directory (reserved)
+    # Carried here so a fail-open session survives an offline spell in the
+    # agent's own queue and still reaches the server labelled honestly.
+    "identity_source": "TEXT",
+    "person_role": "TEXT",
 }
 
 WORKSTATION_TYPES = {"PHYSICAL", "ANYDESK"}
@@ -202,6 +213,11 @@ def payload_from_args(ns: argparse.Namespace) -> dict[str, Any]:
         "hostname": norm(data.get("hostname"), norm(ns.hostname, socket.gethostname())),
         "client_ip": norm(data.get("client_ip"), norm(ns.client_ip)),
         "anydesk_detected": truthy(data.get("anydesk_detected", ns.anydesk_detected)),
+        # Defaults to self_declared because that is what an ordinary START is:
+        # relaying what the person typed at the sign-in popup. Only the
+        # fail-open path passes anything else.
+        "identity_source": norm(data.get("identity_source"), "self_declared"),
+        "person_role": norm(data.get("person_role"), ""),
         "raw_json": ns.raw_json or json.dumps(data if data else {
             "argv_source": "log_physical.py",
             "env_user": os.environ.get("USER"),

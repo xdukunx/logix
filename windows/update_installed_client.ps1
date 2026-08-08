@@ -99,6 +99,17 @@ if ($missing) { Say "  not in repo, left alone: $($missing -join ', ')" 'DarkGra
 $logo = Join-Path $repo 'logo.png'
 if (Test-Path $logo) { Copy-Item $logo (Join-Path $InstallDir 'logo.png') -Force }
 
+# VERSION rides along with the scripts on purpose: it is what the agent reports
+# in every heartbeat, so it has to describe the code that was just copied. Ship
+# them together or the dashboard confidently reports the wrong build.
+$version = Join-Path (Split-Path $repo -Parent) 'VERSION'
+if (Test-Path $version) {
+    Copy-Item $version (Join-Path $InstallDir 'VERSION') -Force
+    Say ("stamped VERSION {0}" -f (Get-Content $version -Raw).Trim()) 'Green'
+} else {
+    Say "no VERSION file in the repo -- agent will report no version" 'Yellow'
+}
+
 # ---- re-seed the cached palette ----------------------------------------------
 # branding.colors normally arrives from the server via /api/config; the local
 # file is a cache so the client still renders when the server is unreachable.

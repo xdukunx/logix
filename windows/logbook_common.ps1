@@ -567,7 +567,12 @@ function Invoke-WSLLogbook {
         [string]$Nama = '',
         [string]$Nim = '',
         [string]$Tujuan = '',
-        [string]$Keterangan = ''
+        [string]$Keterangan = '',
+        # See BASE_COLUMNS in log_physical.py. Only the fail-open path passes
+        # anything other than the default.
+        [ValidateSet('self_declared', 'unverified', 'directory')]
+        [string]$IdentitySource = 'self_declared',
+        [string]$PersonRole = ''
     )
     Ensure-LogbookDirs
     $winUser = "$env:USERDOMAIN\$env:USERNAME"
@@ -586,6 +591,8 @@ function Invoke-WSLLogbook {
         tujuan = $Tujuan
         keterangan = $Keterangan
         anydesk_detected = $AnyDeskDetected
+        identity_source = $IdentitySource
+        person_role = $PersonRole
     }
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
@@ -826,6 +833,80 @@ function Get-AnyDeskId {
     return ''
 }
 
+# What build this agent is. Read from the VERSION file the installer drops
+# beside these scripts, so it describes the code actually on disk rather than
+# something baked in at build time that a hand-copied file would not update.
+# Cached: this is read on every heartbeat.
+$script:LogbookAgentVersion = $null
+function Get-LogbookAgentVersion {
+    if ($null -ne $script:LogbookAgentVersion) { return $script:LogbookAgentVersion }
+    $script:LogbookAgentVersion = ''
+    foreach ($dir in @($PSScriptRoot, (Split-Path $PSScriptRoot -Parent))) {
+        if (-not $dir) { continue }
+        $candidate = Join-Path $dir 'VERSION'
+        if (Test-Path $candidate) {
+            try {
+                $v = (Get-Content $candidate -Raw -ErrorAction Stop).Trim()
+                if ($v) { $script:LogbookAgentVersion = $v; break }
+            } catch { }
+        }
+    }
+    return $script:LogbookAgentVersion
+}
+
+# ---- Sign-in failure policy --------------------------------------------------
+#
+# The sign-in popup gates access to a lab workstation. When it cannot run, the
+# machine must FAIL OPEN: a student in front of a PC they cannot use, with a
+# raw PowerShell exception on screen, is a worse outcome than a session whose
+# operator is unknown. That was already the de facto behaviour, but silently --
+# the popup crashed, nothing recorded it, and the machine's usage simply went
+# missing from the logbook.
+#
+# So: fail open, but ON THE RECORD. Register a session marked
+# identity_source='unverified' so the usage is still counted and visibly
+# attributed to nobody, log the cause, and tell the user in plain language
+# instead of showing them a stack trace.
+function Register-LogbookUnverifiedSession {
+    param(
+        [Parameter(Mandatory)] [string] $Reason
+    )
+    try {
+        $sessionId = [guid]::NewGuid().ToString('N')
+        Write-LogbookError "SIGN-IN FAILED OPEN: $Reason (session $sessionId recorded as unverified)"
+        # Same bridge an ordinary START uses, so the event queues offline and
+        # retries exactly like any other -- a fail-open session must not also
+        # be a lost session.
+        Invoke-WSLLogbook -Event 'START' -SessionType 'Physical' -SessionId $sessionId `
+            -Keterangan "Sesi tanpa verifikasi identitas: $Reason" `
+            -IdentitySource 'unverified' | Out-Null
+        return $sessionId
+    } catch {
+        # Even the fallback failing must not block the desktop.
+        Write-LogbookError "Failed to register unverified session: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+# Plain-language notice, auto-dismissing, never modal to the desktop. The user
+# cannot act on a .NET exception; they can act on "tell the admin".
+function Show-LogbookSignInFailureNotice {
+    param([string]$Reason = '')
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        $tip = New-Object System.Windows.Forms.NotifyIcon
+        $tip.Icon = [System.Drawing.SystemIcons]::Warning
+        $tip.Visible = $true
+        $tip.BalloonTipTitle = 'Logix: pencatatan sesi bermasalah'
+        $tip.BalloonTipText = 'Komputer tetap bisa dipakai. Sesi ini tercatat tanpa identitas -- mohon lapor ke admin lab.'
+        $tip.ShowBalloonTip(15000)
+        Start-Sleep -Seconds 2
+        $tip.Dispose()
+    } catch {
+        Write-LogbookError "Could not show sign-in failure notice: $($_.Exception.Message)"
+    }
+}
+
 function Get-LogbookDeviceApiKey {
     # Per-device key from device.json (written by logbook_setup.ps1 on a
     # successful /api/enroll). Mirrors the server's own verify_api_key
@@ -960,6 +1041,20 @@ function Send-LogbookHeartbeat {
         if ($accessType)   { $payload['access_type'] = $accessType }
         if ($purpose)      { $payload['purpose'] = $purpose }
         if ($pendingAcks.Count -gt 0) { $payload['acks'] = $pendingAcks }
+
+        # Which build this workstation is on. Without it the dashboard cannot
+        # tell a fleet running the current agent from one that quietly drifted
+        # -- which is exactly how an install ended up with a sign-in popup
+        # three weeks older than the logbook_common.ps1 beside it, found only
+        # when it crashed.
+        $agentVersion = Get-LogbookAgentVersion
+        if ($agentVersion) { $payload['agent_version'] = $agentVersion }
+        $payload['agent_os'] = 'windows'
+        # This machine's clock, so the server can measure skew. The agent
+        # timestamps its own session events, so a wrong clock here files real
+        # sessions under the wrong hour -- and across midnight, the wrong day.
+        # Nothing downstream can detect that from the data alone.
+        $payload['client_time'] = (Get-Date).ToString('o')
 
         $headers = @{
             'Content-Type' = 'application/json'
