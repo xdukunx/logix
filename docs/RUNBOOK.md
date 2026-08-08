@@ -53,13 +53,74 @@ Test: `python3 ops/watchdog.py --dry-run`.
 - **Off-host copy (do this):** backups on the same disk don't survive a disk
   loss. Add a nightly push, e.g. a cron/timer running
   `rclone copy server/backups remote:logix-backups` or `rsync` to another host.
-- **Restore drill** (practice it before you need it):
+- **Restore** — use `ops/restore_db.py`, not a bare `cp`. It refuses to write
+  over a database the server still has open, keeps the current one aside as
+  `central_logix.pre-restore-<stamp>.db`, integrity-checks the *restored* file
+  (not just the source), and migrates an older snapshot up to the current
+  schema — a backup taken before a column was added restores fine with `cp` and
+  then breaks the app at runtime.
   ```bash
-  sudo systemctl stop logix-server
-  cp server/backups/central_logix-YYYYMMDD-HHMMSS.db server/central_logix.db
-  sqlite3 server/central_logix.db "PRAGMA integrity_check;"   # expect: ok
+  sudo systemctl stop logix-server        # Windows: Stop-ScheduledTask -TaskName "LogixServer"
+  python3 ops/restore_db.py --list        # what is available
+  python3 ops/restore_db.py --latest      # or --from <path>
   sudo systemctl start logix-server
   ```
+  `--dry-run` verifies a snapshot is readable and passes integrity_check
+  without touching anything. Practise it before you need it; the round trip is
+  covered by `tests/test_ops_backup_restore.py`, but a drill on the real host
+  is what proves your backups are where you think they are.
+
+## Personal-data retention
+
+`privacy.retention_days` in `server_config.json` (default 365) bounds how long
+a student's nama, NIM, Windows username and free-text keterangan stay attached
+to a session. Past the window `ops/retention.py` **redacts those fields in
+place** — it does not delete the row, because the session shape (when, which
+workstation, which purpose, how long) is what utilisation reporting needs and
+none of it identifies anybody.
+
+```bash
+python3 ops/retention.py --dry-run     # count what would be redacted
+python3 ops/retention.py               # enforce the configured window
+```
+
+Set `retention_days` to `0` to disable purging. That is a deliberate choice to
+make, not a default to drift into — a university keeping student names forever
+because nobody set a number is the situation this exists to prevent.
+
+## Windows hosts
+
+The scheduled jobs above are systemd timers on Linux. On Windows,
+`install/setup_server.py --service` registers the same four as Task Scheduler
+entries alongside the server task:
+
+| Task | When | What |
+| --- | --- | --- |
+| `LogixServer` | at startup | the server itself |
+| `LogixServer-Backup` | daily 02:30 | database backup, integrity-checked |
+| `LogixServer-CleanupReports` | daily 03:00 | prune generated `.xlsx` (PII) |
+| `LogixServer-Retention` | daily 03:15 | enforce the retention window |
+| `LogixServer-Watchdog` | every 10 min | health / errors / backup freshness |
+
+They use `-StartWhenAvailable`, the equivalent of systemd's `Persistent=true`,
+so a host that was switched off overnight catches up instead of silently
+skipping a backup. Inspect with
+`Get-ScheduledTask -TaskName "LogixServer-*" | Get-ScheduledTaskInfo`.
+
+## Agent versions
+
+Every heartbeat now carries the agent's build, read from the `VERSION` file
+shipped beside its scripts, and the Devices tab shows it per workstation. Check
+for drift before it becomes a support call:
+
+```bash
+sqlite3 server/central_logix.db "SELECT hostname, agent_version, last_seen FROM devices ORDER BY agent_version;"
+```
+
+A workstation reporting `NULL` is running a build from before version
+reporting, or was updated by hand-copying files without the `VERSION` stamp.
+`windows/update_installed_client.ps1` copies the whole set together for exactly
+that reason.
 
 ## Report cleanup
 
