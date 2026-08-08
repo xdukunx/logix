@@ -108,3 +108,77 @@ def test_env_autoload_in_server_main(tmp_path, monkeypatch):
     assert os.environ["FOO_FROM_DOTENV"] == "hello"
     assert os.environ["PRESET_KEY"] == "real-env-wins"
     monkeypatch.delenv("FOO_FROM_DOTENV", raising=False)
+
+
+# --- Windows housekeeping parity ---------------------------------------------
+# backup / cleanup / retention / watchdog existed only as systemd units, so a
+# Windows-hosted server -- the likely case for a lab full of Windows
+# workstations -- ran with no backups, no retention enforcement and no
+# watchdog, and nothing said so.
+
+def test_windows_jobs_cover_every_systemd_timer():
+    """If a timer is added to ops/systemd/ without a Windows counterpart, the
+    two platforms silently diverge. Compare the sets rather than trusting that
+    whoever added one remembered the other."""
+    from pathlib import Path
+
+    timers = {p.stem.replace("logix-", "")
+              for p in (sv.REPO / "ops" / "systemd").glob("*.timer")}
+    windows = {suffix.lower() for _, suffix, _, _ in sv.WINDOWS_JOBS}
+    # systemd names them backup/cleanup/watchdog; Windows uses CleanupReports.
+    windows = {"cleanup" if w == "cleanupreports" else w for w in windows}
+    missing = timers - windows
+    assert not missing, f"systemd timers with no Windows equivalent: {sorted(missing)}"
+
+
+def test_windows_jobs_script_is_valid_powershell():
+    """Generated PowerShell that does not parse fails at install time, on
+    somebody else's machine, with the console already closed."""
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    powershell = shutil.which("powershell") or shutil.which("pwsh")
+    if not powershell:
+        import pytest
+        pytest.skip("no PowerShell on this host")
+
+    script = sv.build_windows_jobs_ps1(r"C:\Python\python.exe")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "jobs.ps1"
+        path.write_text(script, encoding="ascii")
+        # Parse only -- registering four SYSTEM tasks is not a test's business.
+        check = (
+            "$e=$null; "
+            f"[void][System.Management.Automation.Language.Parser]::ParseFile('{path}',"
+            "[ref]$null,[ref]$e); "
+            "if ($e.Count) { $e | ForEach-Object { $_.Message }; exit 1 } else { 'ok' }"
+        )
+        res = subprocess.run([powershell, "-NoProfile", "-Command", check],
+                             capture_output=True, text=True)
+    assert res.returncode == 0, f"generated script does not parse:\n{res.stdout}{res.stderr}"
+
+
+def test_windows_jobs_quote_paths_that_contain_spaces():
+    r"""Start-Process/schtasks arguments split on spaces unless quoted, and this
+    repo has already been bitten by exactly that (C:\Program Files -> C:\Program)."""
+    script = sv.build_windows_jobs_ps1(r"C:\Program Files\Python\python.exe")
+    assert r'-Execute "C:\Program Files\Python\python.exe"' in script
+    # The script path is quoted INSIDE -Argument, which is itself a quoted string.
+    assert '-Argument "\\"' in script
+
+
+def test_watchdog_repeats_rather_than_running_once_a_day():
+    entry = next(j for j in sv.WINDOWS_JOBS if "watchdog" in j[0])
+    assert entry[2] is None, "the watchdog is a polling job, not a daily one"
+    script = sv.build_windows_jobs_ps1("python")
+    assert f"-RepetitionInterval (New-TimeSpan -Minutes {sv.WATCHDOG_INTERVAL_MINUTES})" in script
+
+
+def test_jobs_catch_up_after_the_host_was_off():
+    """Persistent=true in the systemd timers; StartWhenAvailable is its
+    Task Scheduler equivalent. Without it a machine switched off overnight
+    silently skips that night's backup."""
+    script = sv.build_windows_jobs_ps1("python")
+    assert script.count("-StartWhenAvailable") == len(sv.WINDOWS_JOBS)

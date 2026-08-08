@@ -108,6 +108,71 @@ def build_windows_ps1(python: str, host: str, port: int) -> str:
     )
 
 
+# The scheduled housekeeping. On Linux these are systemd timers in ops/systemd/;
+# Windows had no equivalent, so a Windows-hosted server -- which is what a lab
+# running Windows workstations most likely has -- was silently running with no
+# backups, no report cleanup, no retention enforcement and no watchdog. Same
+# jobs, same times, expressed as Task Scheduler entries.
+#
+# (script, task name suffix, daily time HH:mm, description)
+WINDOWS_JOBS = [
+    ("ops/backup_db.py", "Backup", "02:30", "Daily database backup, integrity-checked"),
+    ("ops/cleanup_reports.py", "CleanupReports", "03:00", "Prune generated .xlsx reports (PII)"),
+    ("ops/retention.py", "Retention", "03:15", "Enforce the personal-data retention window"),
+    ("ops/watchdog.py", "Watchdog", None, "Health/error/backup checks -> Telegram"),
+]
+WATCHDOG_INTERVAL_MINUTES = 10
+
+
+def build_windows_jobs_ps1(python: str) -> str:
+    lines = ["$ErrorActionPreference='Stop'"]
+    for script, suffix, at, description in WINDOWS_JOBS:
+        task = f"{WINDOWS_TASK}-{suffix}"
+        target = (REPO / script).as_posix().replace("/", "\\")
+        lines.append(
+            f'$action = New-ScheduledTaskAction -Execute "{python}" '
+            f'-Argument "\\"{target}\\"" -WorkingDirectory "{REPO}"'
+        )
+        if at:
+            lines.append(f'$trigger = New-ScheduledTaskTrigger -Daily -At "{at}"')
+        else:
+            # No -Daily equivalent for "every N minutes forever": a daily
+            # trigger with a repetition is the Task Scheduler idiom.
+            lines.append(
+                '$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date '
+                f'-RepetitionInterval (New-TimeSpan -Minutes {WATCHDOG_INTERVAL_MINUTES})'
+            )
+        lines.append(
+            '$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" '
+            "-LogonType ServiceAccount -RunLevel Highest"
+        )
+        # StartWhenAvailable is the Persistent=true of systemd timers: it
+        # catches up a run the host was switched off for, instead of silently
+        # skipping a night of backups.
+        lines.append(
+            "$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable "
+            "-ExecutionTimeLimit (New-TimeSpan -Hours 1)"
+        )
+        lines.append(
+            f'Register-ScheduledTask -TaskName "{task}" -Action $action -Trigger $trigger '
+            f'-Principal $principal -Settings $settings -Description "{description}" -Force'
+        )
+        lines.append(f'Write-Host "registered {task}"')
+    return "\n".join(lines) + "\n"
+
+
+def register_windows_jobs(python: str) -> None:
+    ps1 = SERVER_DIR / "install_server_jobs.ps1"
+    ps1.write_text(build_windows_jobs_ps1(python), encoding="utf-8")
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(ps1)], check=True)
+    print(f"Registered {len(WINDOWS_JOBS)} housekeeping task(s):")
+    for _, suffix, at, description in WINDOWS_JOBS:
+        when = f"daily {at}" if at else f"every {WATCHDOG_INTERVAL_MINUTES} min"
+        print(f"  {WINDOWS_TASK}-{suffix:<15} {when:<18} {description}")
+    print(f'  remove:  Get-ScheduledTask -TaskName "{WINDOWS_TASK}-*" | Unregister-ScheduledTask -Confirm:$false')
+
+
 def register_service(python: str, host: str, port: int, user: str) -> None:
     if sys.platform.startswith("win"):
         ps1 = SERVER_DIR / "install_server_task.ps1"
@@ -116,6 +181,7 @@ def register_service(python: str, host: str, port: int, user: str) -> None:
                         "-File", str(ps1)], check=True)
         print(f"Registered and started scheduled task '{WINDOWS_TASK}' (runs at startup).")
         print(f'  remove:  Unregister-ScheduledTask -TaskName "{WINDOWS_TASK}" -Confirm:$false')
+        register_windows_jobs(python)
     elif sys.platform == "darwin":
         target = Path("/Library/LaunchDaemons") / f"{MACOS_LABEL}.plist"
         target.write_text(build_macos_plist(python, host, port), encoding="utf-8")

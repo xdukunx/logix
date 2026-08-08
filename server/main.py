@@ -1367,6 +1367,46 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing X-API-Key")
 
 
+def device_hostname_for_key(x_api_key: Optional[str]) -> Optional[str]:
+    """The hostname a per-device key belongs to, or None for the shared key."""
+    if not x_api_key:
+        return None
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT hostname FROM devices WHERE api_key = ?", (x_api_key,)
+        ).fetchone()
+        return row["hostname"] if row else None
+    finally:
+        conn.close()
+
+
+def assert_device_scope(x_api_key: Optional[str], hostname: Optional[str]) -> None:
+    """A per-device key may only speak for its own device.
+
+    verify_api_key established that SOMEBODY enrolled holds this key -- that is
+    authentication. It never checked that the key belongs to the hostname in
+    the payload, which is authorization, and without it any enrolled
+    workstation could file heartbeats and session records as any other. In a
+    student lab, where config.env sits on a machine people use all day, that
+    turns one compromised box into forged data for the whole room.
+
+    The shared bootstrap key legitimately speaks for many devices, so this only
+    binds when a per-device key was actually presented -- which is also why
+    LOGIX_REQUIRE_DEVICE_KEY exists.
+    """
+    owner = device_hostname_for_key(x_api_key)
+    if not owner:
+        return
+    claimed = (hostname or "").strip()
+    if claimed and owner.strip().lower() != claimed.lower():
+        logger.warning("device scope: key for %s used to speak for %s (rejected)", owner, claimed)
+        raise HTTPException(
+            status_code=403,
+            detail="This device key does not belong to that hostname",
+        )
+
+
 class InsecureConfiguration(RuntimeError):
     """Raised at startup when the server would come up in an unsafe posture."""
 
@@ -1604,7 +1644,11 @@ def update_config(config: Dict[str, Any], email: str = Depends(require_permissio
 
 # Heartbeat Endpoint (Workstations post here periodically)
 @app.post("/api/heartbeat")
-def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key)):
+def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
+                   x_api_key: Optional[str] = Header(None)):
+    # Authenticated above; authorized here. A per-device key may only report
+    # for its own machine.
+    assert_device_scope(x_api_key, payload.hostname)
     ad_id = payload.anydesk_id or ""
     device_name = payload.device_name or payload.hostname
 
@@ -1978,13 +2022,30 @@ ENROLL_RATE_LIMIT_WINDOW_MINUTES = 5
 
 
 def _check_enroll_rate_limit(client_ip: str):
-    now = datetime.now()
-    window_start = now - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
+    """Throttle FAILED enrolment attempts only.
+
+    The limit exists to stop someone brute-forcing invite codes against an
+    endpoint that necessarily has no auth. Counting successes as well made
+    commissioning a real lab impossible: 24 workstations enrolled from one
+    provisioning host, or from behind one NAT address, hit the ceiling on the
+    eleventh machine and the rest failed with 429 -- a deployment blocker that
+    only appears at a scale nobody had tested.
+
+    Only failures are recorded (see _record_enroll_failure), which costs no
+    security: a success consumes a single-use, hostname-pinned invite, so an
+    attacker cannot produce a run of them without already holding valid codes.
+    """
+    window_start = datetime.now() - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
     attempts = [t for t in _ENROLL_ATTEMPTS.get(client_ip, []) if t > window_start]
+    _ENROLL_ATTEMPTS[client_ip] = attempts
     if len(attempts) >= ENROLL_RATE_LIMIT_MAX_ATTEMPTS:
-        _ENROLL_ATTEMPTS[client_ip] = attempts
         raise HTTPException(status_code=429, detail="Too many enrollment attempts, try again later")
-    attempts.append(now)
+
+
+def _record_enroll_failure(client_ip: str):
+    window_start = datetime.now() - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
+    attempts = [t for t in _ENROLL_ATTEMPTS.get(client_ip, []) if t > window_start]
+    attempts.append(datetime.now())
     _ENROLL_ATTEMPTS[client_ip] = attempts
 
 
@@ -2026,6 +2087,16 @@ def redeem_enroll_invite(payload: EnrollRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown"
     _check_enroll_rate_limit(client_ip)
 
+    try:
+        return _redeem_enroll_invite(payload, client_ip)
+    except HTTPException as exc:
+        # 429 is the limiter itself; counting it would extend its own window.
+        if exc.status_code != 429:
+            _record_enroll_failure(client_ip)
+        raise
+
+
+def _redeem_enroll_invite(payload: EnrollRequest, client_ip: str):
     conn = get_db()
     try:
         invite = conn.execute(
@@ -2467,7 +2538,12 @@ def mark_reply_read(reply_id: int, email: str = Depends(require_permission("repl
 
 # Logging Endpoints
 @app.post("/api/log")
-def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
+def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key),
+              x_api_key: Optional[str] = Header(None)):
+    # Session records are the data this whole system exists to be trusted
+    # about; a device key must not be able to write them for another machine.
+    for entry in logs:
+        assert_device_scope(x_api_key, entry.hostname)
     conn = get_db()
     inserted = 0
     try:
