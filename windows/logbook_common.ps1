@@ -1784,6 +1784,132 @@ $res
 #
 # Guard rails: no gradient, no glow, no pulse. The status dot is a static 8px
 # Ellipse. Colours come exclusively from Build-LogbookClientResources.
+# ---- Click-through -----------------------------------------------------------
+#
+# A WPF window with AllowsTransparency + Background="Transparent" still HIT-TESTS
+# across its entire rectangle. For the timer widget that rectangle is the pill
+# PLUS the invisible margin its drop shadow needs, parked on the top edge of the
+# screen -- exactly where browser tab strips and title-bar buttons live. The
+# reported symptom was browser tabs that simply would not click.
+#
+# The fix is WS_EX_TRANSPARENT, toggled from a cursor poll: on while the pointer
+# is anywhere else (every click falls straight through to the app underneath),
+# off the moment the pointer reaches the widget's visible surface.
+#
+# Why not answer WM_NCHITTEST with HTTRANSPARENT, which is the textbook answer?
+# Because that requires writing to the hook's `ref bool handled` parameter, and
+# a PowerShell scriptblock converted to a delegate cannot write to a ref
+# parameter -- the assignment is silently dropped, WPF never sees handled=true,
+# and the return value is ignored. It looks correct and does nothing;
+# test_logbook_clickthrough.ps1 is what caught it.
+if (-not ([System.Management.Automation.PSTypeName]'LogixClickThrough').Type) {
+    # Deliberately its own type rather than the timer's LogixWin: this file is
+    # dot-sourced by scripts that never create a widget, and keeping the helper
+    # self-contained is what lets the click-through be tested on its own.
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class LogixClickThrough {
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X; public int Y; }
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongPtr")] static extern IntPtr GetLongPtr64(IntPtr h, int i);
+    [DllImport("user32.dll", EntryPoint="GetWindowLong")] static extern int GetLong32(IntPtr h, int i);
+    [DllImport("user32.dll", EntryPoint="SetWindowLongPtr")] static extern IntPtr SetLongPtr64(IntPtr h, int i, IntPtr v);
+    [DllImport("user32.dll", EntryPoint="SetWindowLong")] static extern int SetLong32(IntPtr h, int i, int v);
+
+    static long Ex(IntPtr h) {
+        return IntPtr.Size == 8 ? GetLongPtr64(h, GWL_EXSTYLE).ToInt64() : (long)(uint)GetLong32(h, GWL_EXSTYLE);
+    }
+    public static POINT Cursor() { POINT p; GetCursorPos(out p); return p; }
+    public static bool IsOn(IntPtr h) { return (Ex(h) & WS_EX_TRANSPARENT) != 0; }
+
+    // Read-modify-write so the caller's WS_EX_TOOLWINDOW / WS_EX_NOACTIVATE
+    // survive. Widening through uint first, never a bare int|long: that is the
+    // CS0675 sign-extension warning, and Add-Type treats warnings as errors.
+    public static void Set(IntPtr h, bool on) {
+        long cur = Ex(h);
+        long bit = (long)(uint)WS_EX_TRANSPARENT;
+        long next = on ? (cur | bit) : (cur & ~bit);
+        if (next == cur) return;
+        if (IntPtr.Size == 8) { SetLongPtr64(h, GWL_EXSTYLE, new IntPtr(next)); }
+        else { SetLong32(h, GWL_EXSTYLE, (int)(uint)next); }
+    }
+}
+"@
+}
+
+# Screen rectangle of a laid-out element, in physical pixels. Two PointToScreen
+# calls rather than ActualWidth arithmetic, so it is correct at any DPI and
+# follows the pill as it auto-sizes -- no rectangle here can drift out of step
+# with the XAML.
+function Get-LogbookSurfaceRect($Element) {
+    if (-not $Element -or -not $Element.IsVisible -or $Element.ActualWidth -le 0) { return $null }
+    $tl = $Element.PointToScreen((New-Object System.Windows.Point 0, 0))
+    $br = $Element.PointToScreen(
+        (New-Object System.Windows.Point $Element.ActualWidth, $Element.ActualHeight))
+    return @{ L = $tl.X; T = $tl.Y; R = $br.X; B = $br.Y }
+}
+
+# Should the window pass clicks through, given where the pointer is? Pure, so
+# the test can drive it with synthetic points instead of moving the real mouse.
+# $Grace widens the target slightly: the pill is small on purpose now, and a
+# hover target you have to hit exactly is a worse problem than the one we fixed.
+function Test-LogbookClickThrough {
+    param($Rect, [double]$X, [double]$Y, [double]$Grace = 3)
+    if (-not $Rect) { return $true }
+    return ($X -lt ($Rect.L - $Grace) -or $X -gt ($Rect.R + $Grace) -or
+            $Y -lt ($Rect.T - $Grace) -or $Y -gt ($Rect.B + $Grace))
+}
+
+# -GetSurface returns the FrameworkElement the user can currently see (the pill,
+# the expanded card, the sliver), or $null when nothing is visible.
+# -OnPointerEnter / -OnPointerLeave let the caller drive expand/collapse from
+# this poll. That matters: while the window is click-through it receives no
+# mouse messages at all, so WPF's own MouseEnter cannot be the only trigger.
+function Register-LogbookClickThrough {
+    param(
+        [Parameter(Mandatory)] $Window,
+        [Parameter(Mandatory)] [scriptblock] $GetSurface,
+        [scriptblock] $OnPointerEnter,
+        [scriptblock] $OnPointerLeave,
+        [int] $PollMs = 40,
+        [double] $Grace = 3
+    )
+    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $Window).Handle
+    if ($hwnd -eq [IntPtr]::Zero) {
+        throw "Register-LogbookClickThrough needs a realised window (call it from SourceInitialized or later)."
+    }
+    # Start click-through: the pointer is not on the widget the instant it appears.
+    [LogixClickThrough]::Set($hwnd, $true)
+
+    $st = [pscustomobject]@{ Hwnd = $hwnd; Get = $GetSurface; Grace = $Grace
+                             Enter = $OnPointerEnter; Leave = $OnPointerLeave; Over = $false }
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds($PollMs)
+    $timer.Add_Tick({
+        try {
+            $p = [LogixClickThrough]::Cursor()
+            $rect = Get-LogbookSurfaceRect (& $st.Get)
+            $through = Test-LogbookClickThrough -Rect $rect -X $p.X -Y $p.Y -Grace $st.Grace
+            [LogixClickThrough]::Set($st.Hwnd, $through)
+
+            $over = -not $through
+            if ($over -ne $st.Over) {
+                $st.Over = $over
+                if ($over) { if ($st.Enter) { & $st.Enter } }
+                else       { if ($st.Leave) { & $st.Leave } }
+            }
+        } catch { }
+    }.GetNewClosure())
+    $timer.Start()
+    # Handed back so the caller can stop it on shutdown, and so a test can tick
+    # it by hand.
+    return $timer
+}
+
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $res = Build-LogbookClientResources $cfg
     $tSelesai = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
@@ -1814,14 +1940,16 @@ $res
   <Grid Name="RootVisual" Margin="20,6,20,36">
 
     <!-- ===== 1. PILL (collapsed, default posture) ===================== -->
-    <Border Name="PillView" Width="150" Height="32" CornerRadius="16"
+    <Border Name="PillView" Height="26" CornerRadius="13" Padding="11,0" Opacity="0.72"
             Background="#EB0B1017" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
             HorizontalAlignment="Center" VerticalAlignment="Top">
       <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.45" Color="#000000"/></Border.Effect>
+      <!-- Lighter than the card's: a 26px pill under a 24/8 shadow looks like it
+           is hovering an inch off the glass. -->
+      <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="5" Direction="270" Opacity="0.35" Color="#000000"/></Border.Effect>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <Ellipse Name="PillDot" Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-        <TextBlock Name="PillClock" Text="00:00" FontFamily="Consolas" FontSize="13"
+        <Ellipse Name="PillDot" Width="7" Height="7" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <TextBlock Name="PillClock" Text="00:00" FontFamily="Consolas" FontSize="12"
                    Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
         <Border Name="PillBadge" Visibility="Collapsed" MinWidth="16" Height="16" CornerRadius="8"
                 Background="{StaticResource LxNotice}" Margin="8,0,0,0" VerticalAlignment="Center">

@@ -76,8 +76,16 @@ Assert ($timerDoc.Window.SizeToContent -eq 'WidthAndHeight') "widget sizes to co
 Assert ($timerDoc.Window.ShowInTaskbar -eq 'False') "widget stays out of the taskbar (WS_EX_TOOLWINDOW is applied at runtime too)"
 
 $pill = & $bd 'PillView'
-Assert ($pill.Width -eq '150' -and $pill.Height -eq '32') "pill is 150x32 (design D-02 state 01)"
-Assert ($pill.CornerRadius -eq '16') "pill is fully rounded (half its height)"
+# The design's fixed 150x32 was walked back: the pill lives on top of whatever
+# window owns the top edge (a browser tab strip, in the report that prompted
+# this), so it hugs its content instead of reserving a box of mostly padding.
+Assert ($null -eq $pill.Width) "pill is auto-width -- it never reserves more of the title bar than it needs"
+Assert ($pill.Height -eq '26') "pill is 26px tall (trimmed from the design's 32)"
+Assert ($pill.Padding -eq '11,0') "pill breathes via padding, which is what lets it auto-size"
+Assert ($pill.CornerRadius -eq '13') "pill is fully rounded (half its height)"
+# At rest it must be see-through: the user has to be able to read the tab
+# underneath it. Anything at/above 0.9 is the bug this guards against.
+Assert ([double]$pill.Opacity -ge 0.5 -and [double]$pill.Opacity -le 0.8) "pill rests semi-transparent so the window beneath stays readable"
 $card = & $bd 'CardView'
 Assert ($card.Width -eq '240') "expand card is 240px wide (design D-02 state 02)"
 Assert ($card.CornerRadius -eq '22') "expand card uses radius 22"
@@ -125,6 +133,23 @@ if ($pinvoke.Success -and -not ([System.Management.Automation.PSTypeName]'LogixW
     catch { $compiled = $false; Write-Host "    compiler said: $($_.Exception.Message)" }
     Assert $compiled "LogixWin compiles cleanly under Add-Type (warnings are errors)"
 }
+
+Write-Host "click-through (widget must not eat clicks meant for the app below)"
+# Behaviour is covered live in test_logbook_clickthrough.ps1, which shows the
+# real window and reads back its real WS_EX_TRANSPARENT bit. These are only the
+# wiring checks that file cannot make: that the controller opts in at all, and
+# that it routes expand/collapse through the poll. The poll has to drive those
+# because a click-through window receives no mouse messages, so WPF's own
+# MouseEnter never fires while the pointer is approaching.
+Assert ($timerSrc -match 'Register-LogbookClickThrough') "controller makes itself click-through"
+Assert ($timerSrc -match '-OnPointerEnter') "expand is driven by the cursor poll, not only by WPF MouseEnter"
+Assert ($timerSrc -match '-OnPointerLeave') "collapse is driven by the cursor poll too"
+$commonSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_common.ps1')
+Assert ($commonSrc -match 'PointToScreen') "the hit rectangle is measured off the live surface, not hard-coded"
+# The mechanism must stay style-based. An HwndSourceHook answering WM_NCHITTEST
+# reads correctly and does nothing: a PowerShell scriptblock cannot write to a
+# delegate's `ref bool handled`, so WPF discards the result. Do not go back.
+Assert ($commonSrc -notmatch 'HwndSourceHook') "click-through does not rely on a ref-parameter hook PowerShell cannot write to"
 
 Write-Host "idle auto-end policy"
 # Safety-critical: Get-LogbookIdleTimeoutSeconds returns 0 for a DISABLED

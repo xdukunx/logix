@@ -77,3 +77,47 @@ def test_schema_no_longer_lists_speculative_unimplemented_fields():
             f"{stale_key!r} was removed as speculative/unimplemented -- "
             "if it's back, confirm it's actually built before re-adding it."
         )
+
+
+# --- v3 palette guard ---------------------------------------------------------
+# server_config.json is what the Windows agent actually paints itself with: the
+# client fetches /api/config and Get-LogbookTheme reads branding.colors straight
+# out of it. The v3 pass restyled every surface but left this file shipping the
+# pre-v3 MindLab palette, so a freshly installed workstation rendered a maroon
+# sign-in card that no design document called for. Tokens are only the source of
+# truth if the thing that serves them agrees.
+
+SERVER_CONFIG_PATH = Path(__file__).resolve().parent.parent / "server" / "server_config.json"
+
+# docs/design/LogiX_BUILD_BRIEF.md: "#741B47 maroon is retired as the accent,
+# kept only as legacy comparison."
+RETIRED_MAROON = "#741B47"
+
+V3_CLIENT_COLORS = {
+    "accent": "#2563EB",
+    "text": "#EEF3FB",
+    "muted": "#93A1B8",
+    "surface": "#070C15",
+    "surfaceWidget": "#0B1017",
+    "surfaceElevated": "#0E1626",
+}
+
+
+def _served_colors() -> dict:
+    return json.loads(SERVER_CONFIG_PATH.read_text(encoding="utf-8"))["branding"]["colors"]
+
+
+def test_served_branding_matches_the_v3_client_palette():
+    colors = _served_colors()
+    for key, expected in V3_CLIENT_COLORS.items():
+        assert colors.get(key) == expected, (
+            f"branding.colors.{key} is {colors.get(key)!r}, expected {expected!r}. "
+            "This file paints the WPF client; it has to track src/tokens.css."
+        )
+
+
+def test_retired_maroon_accent_is_not_served_to_clients():
+    assert RETIRED_MAROON.lower() not in json.dumps(_served_colors()).lower(), (
+        f"{RETIRED_MAROON} was retired as the accent in v3. If a lab genuinely "
+        "wants it back, that is a per-deployment override, not the shipped default."
+    )

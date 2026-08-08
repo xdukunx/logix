@@ -104,20 +104,25 @@ function Get-LogbookWidgetPrefs {
     # Posture and horizontal anchor persist across sessions (README section 5:
     # "remembered per session"). Anchor is a 0..1 fraction of the work area so
     # it survives a resolution change.
-    $defaults = @{ posture = 'pill'; anchor = 0.5 }
+    $defaults = @{ posture = 'pill'; anchor = 0.5; pillOpacity = 0.72 }
     try {
         if (Test-Path $prefsPath) {
             $p = Get-Content $prefsPath -Raw | ConvertFrom-Json
             if ($p.posture -in @('pill','strip')) { $defaults.posture = [string]$p.posture }
             $a = [double]$p.anchor
             if ($a -ge 0.0 -and $a -le 1.0) { $defaults.anchor = $a }
+            if ($null -ne $p.pillOpacity) {
+                $o = [double]$p.pillOpacity
+                if ($o -ge 0.25 -and $o -le 1.0) { $defaults.pillOpacity = $o }
+            }
         }
     } catch { }
     return $defaults
 }
 function Save-LogbookWidgetPrefs {
     try {
-        @{ posture = $script:posture; anchor = $script:anchor } |
+        @{ posture = $script:posture; anchor = $script:anchor
+           pillOpacity = $script:PILL_REST_OPACITY } |
             ConvertTo-Json | Out-File -FilePath $prefsPath -Encoding UTF8 -Force
     } catch { }
 }
@@ -204,6 +209,13 @@ function Get-LogbookWorkArea { return [System.Windows.SystemParameters]::WorkAre
 # of the work area.
 $script:BLEED_SIDE = 20
 $script:BLEED_TOP  = 6
+
+# How solid the pill looks when nothing needs the user. It has to sit on top of
+# somebody's title bar all day, so at rest it fades back and lets the window
+# underneath show through; hover, unread and the open card all go fully opaque.
+# Clamped because a widget the user cannot see is a widget they cannot dismiss.
+$script:PILL_REST_OPACITY = [Math]::Max(0.25, [Math]::Min(1.0, [double]$prefs.pillOpacity))
+if ([double]::IsNaN($script:PILL_REST_OPACITY)) { $script:PILL_REST_OPACITY = 0.72 }
 
 function Update-LogbookWidgetPosition {
     $work = Get-LogbookWorkArea
@@ -377,8 +389,14 @@ function Update-LogbookWidgetView {
         $pillBadgeTx.Text = [string]$script:msgUnread
         $sliverBadgeTx.Text = [string]$script:msgUnread
     }
-    # Unread widens the pill to make room for the badge (design state 04).
-    $pillView.Width = if ($badgeVisible) { 164 } else { 150 }
+    # The pill is auto-width: it hugs the clock, and the badge widens it by
+    # exactly as much as the badge needs. A fixed 150px box was mostly padding,
+    # and every one of those pixels sits on top of the user's title bar.
+    $pillView.Width = [double]::NaN
+    # At rest the pill is deliberately faded so it reads as ambient rather than
+    # as a window. Unread is the one thing worth interrupting for, so that state
+    # goes fully opaque and solid.
+    $pillView.Opacity = if ($badgeVisible) { 1.0 } else { $script:PILL_REST_OPACITY }
     $pillView.Background = $brushConv.ConvertFromString($(if ($badgeVisible) { '#F50B1017' } else { '#EB0B1017' }))
 
     Update-LogbookWidgetStatus
@@ -815,6 +833,24 @@ $window.Add_SourceInitialized({
     # Out of Alt-Tab, and never steals focus from the app the user is in.
     $h = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
     [LogixWin]::AddExStyle($h, [LogixWin]::WS_EX_TOOLWINDOW -bor [LogixWin]::WS_EX_NOACTIVATE)
+
+    # Clicks land on the app underneath unless the user is actually pointing at
+    # the widget. See Register-LogbookClickThrough for why this is necessary.
+    #
+    # The enter/leave callbacks are not redundant with $window.Add_MouseEnter:
+    # while the window is click-through WPF receives no mouse messages at all,
+    # so this poll -- not WPF -- is what notices the pointer arriving.
+    $script:clickThroughTimer = Register-LogbookClickThrough -Window $window -GetSurface {
+        if ($script:cardOpen)               { $cardView }
+        elseif ($script:posture -eq 'pill') { $pillView }
+        elseif ($script:sliverOpen)         { $sliverView }
+        else                                { $null }
+    } -OnPointerEnter {
+        $script:collapseAtTick = -1
+        if (-not $script:cardOpen -and $script:posture -eq 'pill') { Open-LogbookCard }
+    } -OnPointerLeave {
+        if ($script:cardOpen) { Start-LogbookCollapseCountdown }
+    }
 })
 $stripWindow.Add_SourceInitialized({
     $h = (New-Object System.Windows.Interop.WindowInteropHelper $stripWindow).Handle

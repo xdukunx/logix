@@ -20,10 +20,6 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
 
 Ensure-LogbookDirs
 $cfg = Get-LogbookConfig
-# Combo dropdowns render as a light control (white surface, dark text) for
-# readability over the dark popup; the text uses the brand accent so it stays
-# on-theme when a lab re-brands. See Set-ReadableComboBox.
-$script:comboFg = (Get-LogbookTheme $cfg).accent
 Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
 
 try {
@@ -561,71 +557,13 @@ $btn = $window.FindName('SubmitBtn')
 
 $hint = $window.FindName('HintText')
 
-# Force ComboBox readability. Some WPF themes ignore XAML setters for the
-# non-editable selection box and render white text on a white drop-down.
-function Set-ComboVisualTreeReadable($root, $fg, $bg) {
-    try {
-        if ($root -is [System.Windows.Controls.TextBox]) {
-            $root.Foreground = $fg
-            $root.Background = $bg
-            $root.CaretBrush = $fg
-        } elseif ($root -is [System.Windows.Controls.TextBlock]) {
-            $root.Foreground = $fg
-        }
-        $count = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($root)
-        for ($i = 0; $i -lt $count; $i++) {
-            Set-ComboVisualTreeReadable ([System.Windows.Media.VisualTreeHelper]::GetChild($root, $i)) $fg $bg
-        }
-    } catch {}
-}
-
-function Set-ReadableComboBox($combo) {
-    try {
-        $brushConverter = New-Object System.Windows.Media.BrushConverter
-        $fg = $brushConverter.ConvertFromString($script:comboFg)
-        $bg = $brushConverter.ConvertFromString('#FFFFFF')
-        $border = $brushConverter.ConvertFromString('#C0C0C0')
-        $combo.IsEnabled = $true
-        $combo.Background = $bg
-        $combo.Foreground = $fg
-        $combo.BorderBrush = $border
-        [System.Windows.Documents.TextElement]::SetForeground($combo, $fg)
-        foreach ($item in $combo.Items) {
-            try {
-                $item.Background = $bg
-                $item.Foreground = $fg
-                [System.Windows.Documents.TextElement]::SetForeground($item, $fg)
-            } catch {}
-        }
-        $combo.ApplyTemplate() | Out-Null
-        Set-ComboVisualTreeReadable $combo $fg $bg
-        $combo.Add_Loaded({
-            param($sender, $eventArgs)
-            try {
-                $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
-            } catch {}
-        })
-        $combo.Add_DropDownOpened({
-            param($sender, $eventArgs)
-            try {
-                $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
-            } catch {}
-        })
-        $combo.Add_DropDownClosed({
-            param($sender, $eventArgs)
-            try {
-                $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
-            } catch {}
-        })
-    } catch {
-        Write-LogbookError "Combo readable patch failed: $($_.Exception.Message)"
-    }
-}
-Set-ReadableComboBox $access
-Set-ReadableComboBox $tujuan
+# NOTE: a legacy Set-ReadableComboBox lived here. It forced both dropdowns to
+# a white background with brand-accent text and walked the visual tree to make
+# it stick -- a workaround from before the client had its own dark ComboBox
+# ControlTemplate. Once LxCombo landed (logbook_common.ps1) the workaround was
+# no longer merely redundant, it WAS the bug: a white box with red text sitting
+# in the middle of a dark sign-in card. Style the dropdown in LxCombo, never
+# imperatively here.
 $script:submitted = $false
 
 if ($detectedSessionType -eq 'AnyDesk') { $access.SelectedIndex = 1 } else { $access.SelectedIndex = 0 }
