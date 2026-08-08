@@ -216,3 +216,37 @@ try {
 
 if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host "`nAll popup-config checks passed." -ForegroundColor Green
+
+Write-Host "startup cost (this is the login path -- a person is waiting)"
+# Add-Type shells out to csc.exe: ~370ms for the first type in a process, ~250ms
+# each after. A helper compiled at FILE scope in logbook_common.ps1 charges that
+# to every script that dot-sources it, including the sign-in popup, which uses
+# neither of the P/Invoke helpers this file defines. That regression shipped
+# once already and cost ~570ms per login. Compile on first use instead.
+Assert ($commonSrc -notmatch '(?m)^\s*Add-Type\s+@"') `
+    "logbook_common.ps1 compiles no C# at file scope (use Use-LogbookNativeType)"
+Assert ($commonSrc -match 'function Use-LogbookNativeType') "the lazy-compile helper exists"
+foreach ($t in @('LogixClickThrough', 'LogixIdle')) {
+    Assert ($commonSrc -match "Use-LogbookNativeType -Name '$t'") "$t is compiled on first use"
+}
+
+# Measure it rather than trust the grep: a fresh process, dot-source only.
+$sw = [Diagnostics.Stopwatch]::StartNew()
+& powershell -NoProfile -ExecutionPolicy Bypass -Command `
+    ". '$(Join-Path $PSScriptRoot 'logbook_common.ps1')'" | Out-Null
+$dotSourceMs = [int]$sw.ElapsedMilliseconds
+Write-Host "  cold process + dot-source: ${dotSourceMs}ms"
+# Generous: ~250ms of that is powershell.exe itself. One stray Add-Type puts it
+# over 700ms, which is what this is here to catch.
+Assert ($dotSourceMs -lt 900) "dot-sourcing logbook_common.ps1 stays cheap (${dotSourceMs}ms, budget 900ms)"
+
+# The popup must not block on the network at login when a usable cache exists.
+$popupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_popup.ps1')
+Assert ($popupSrc -match 'Get-LogbookConfig -MaxCacheAgeSeconds') `
+    "the sign-in popup reads config cache-first"
+Assert ($commonSrc -match '\[int\]\$MaxCacheAgeSeconds = 0') `
+    "Get-LogbookConfig still defaults to always-fetch for callers that need current data"
+# With no cache to fall back on the fetch is the only source of labels, so it
+# keeps the longer timeout; with a cache it must not.
+Assert ($commonSrc -match 'if \(\$null -ne \$cacheAge\) \{ 1 \} else \{ 2 \}') `
+    "fetch timeout is shorter when a cache exists to fall back on"

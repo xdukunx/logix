@@ -19,7 +19,11 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
 }
 
 Ensure-LogbookDirs
-$cfg = Get-LogbookConfig
+# Cache-first: this is the login path, and a person is watching a blank screen
+# until it renders. The timer refreshes this cache once a minute for the whole
+# life of a session (see Get-LogbookCachedIdleLimit), so in practice it is
+# seconds old. Only a genuinely cold box pays for the round-trip.
+$cfg = Get-LogbookConfig -MaxCacheAgeSeconds 300
 Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
 
 try {

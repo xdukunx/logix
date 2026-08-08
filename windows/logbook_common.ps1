@@ -1066,9 +1066,21 @@ function Send-LogbookHeartbeat {
 }
 
 function Get-LogbookConfig {
+    # -MaxCacheAgeSeconds: reuse the cached server config outright when it is
+    # younger than this, skipping the network entirely. 0 (the default) keeps
+    # the original always-fetch behaviour for callers that must be current.
+    #
+    # This exists because the sign-in popup blocked on /api/config at every
+    # login. With the server reachable that is ~190ms; with it unreachable --
+    # a restart, a flaky lab switch, a workstation booting before the server --
+    # it is the full timeout, every single time, while a person stares at
+    # nothing. The config drives labels and branding, so a slightly stale copy
+    # is fine; a slow login is not.
+    param([int]$MaxCacheAgeSeconds = 0)
+
     # Cascading: built-in defaults <- machine config <- per-user config.
     $cfg = Get-LogbookDefaultConfig
-    
+
     # Try to fetch from central server first.
     $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
     # Same credential order as Send-LogbookHeartbeat: this device's own key
@@ -1083,14 +1095,29 @@ function Get-LogbookConfig {
     
     $cachePath = Join-Path $Global:StateDir 'server_config_cache.json'
     
-    if ($serverUrl) {
+    # A cache young enough for this caller means we never touch the network.
+    $cacheAge = $null
+    if (Test-Path $cachePath) {
+        $cacheAge = ((Get-Date) - (Get-Item $cachePath).LastWriteTime).TotalSeconds
+    }
+    $useCacheOnly = ($MaxCacheAgeSeconds -gt 0 -and $null -ne $cacheAge -and
+                     $cacheAge -ge 0 -and $cacheAge -lt $MaxCacheAgeSeconds)
+    if ($useCacheOnly) {
+        Write-LogbookInfo ("Config cache is {0:N0}s old (< {1}s) -- skipping the server fetch." -f $cacheAge, $MaxCacheAgeSeconds)
+    }
+
+    if ($serverUrl -and -not $useCacheOnly) {
         try {
             $headers = @{}
             if ($serverKey) { $headers['X-API-Key'] = $serverKey }
             $apiUrl = $serverUrl.TrimEnd('/') + '/api/config'
             Write-LogbookInfo "Fetching config from server: $apiUrl"
-            # 2 second timeout to not block UI startup if server is offline
-            $res = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 2 -UseBasicParsing
+            # Having a cache to fall back on buys a much shorter wait: 1s is
+            # generous for a lab LAN, and losing the race only costs freshness.
+            # With no cache at all this is the only source of labels and
+            # branding, so give it the full 2s before giving up.
+            $timeoutSec = if ($null -ne $cacheAge) { 1 } else { 2 }
+            $res = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec $timeoutSec -UseBasicParsing
             if ($res) {
                 $serverCfg = ConvertTo-LogbookHashtable $res
                 # Save to cache
@@ -1802,11 +1829,11 @@ $res
 # parameter -- the assignment is silently dropped, WPF never sees handled=true,
 # and the return value is ignored. It looks correct and does nothing;
 # test_logbook_clickthrough.ps1 is what caught it.
-if (-not ([System.Management.Automation.PSTypeName]'LogixClickThrough').Type) {
-    # Deliberately its own type rather than the timer's LogixWin: this file is
-    # dot-sourced by scripts that never create a widget, and keeping the helper
-    # self-contained is what lets the click-through be tested on its own.
-    Add-Type @"
+# Deliberately its own type rather than the timer's LogixWin: this file is
+# dot-sourced by scripts that never create a widget, and keeping the helper
+# self-contained is what lets the click-through be tested on its own.
+# Compiled on first use -- see Use-LogbookNativeType for why that matters.
+$script:LogixClickThroughSrc = @"
 using System;
 using System.Runtime.InteropServices;
 public static class LogixClickThrough {
@@ -1839,6 +1866,22 @@ public static class LogixClickThrough {
     }
 }
 "@
+
+# Compile a P/Invoke helper the first time something actually calls it.
+#
+# Add-Type shells out to csc.exe: roughly 370ms for the first type in a process
+# and 250ms for every one after. Compiling at file scope charged that to EVERY
+# script that dot-sources this file, whether or not it uses the type -- and the
+# sign-in popup, the one surface a person stands there waiting for at login, was
+# paying ~570ms for a click-through helper and an idle-input helper it never
+# touches. Parsing this whole file, by comparison, costs 18ms.
+function Use-LogbookNativeType {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Source
+    )
+    if (([System.Management.Automation.PSTypeName]$Name).Type) { return }
+    Add-Type -TypeDefinition $Source
 }
 
 # Screen rectangle of a laid-out element, in physical pixels. Two PointToScreen
@@ -1878,6 +1921,7 @@ function Register-LogbookClickThrough {
         [int] $PollMs = 40,
         [double] $Grace = 3
     )
+    Use-LogbookNativeType -Name 'LogixClickThrough' -Source $script:LogixClickThroughSrc
     $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $Window).Handle
     if ($hwnd -eq [IntPtr]::Zero) {
         throw "Register-LogbookClickThrough needs a realised window (call it from SourceInitialized or later)."
@@ -2304,8 +2348,7 @@ function Get-LogbookIdleTimeoutSeconds {
     return 4 * 3600
 }
 
-if (-not ([System.Management.Automation.PSTypeName]'LogixIdle').Type) {
-    Add-Type @"
+$script:LogixIdleSrc = @"
 using System;
 using System.Runtime.InteropServices;
 public static class LogixIdle {
@@ -2315,7 +2358,6 @@ public static class LogixIdle {
     public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 }
 "@
-}
 
 # Seconds since the last keyboard/mouse input anywhere on the machine (not
 # per-window) -- used only to catch "left unlocked and walked away"; a
@@ -2324,6 +2366,7 @@ public static class LogixIdle {
 # any duration" per the product decision above.
 function Get-LogbookIdleSeconds {
     try {
+        Use-LogbookNativeType -Name 'LogixIdle' -Source $script:LogixIdleSrc
         $lii = New-Object LogixIdle+LASTINPUTINFO
         $lii.cbSize = [uint32][System.Runtime.InteropServices.Marshal]::SizeOf($lii)
         if (-not [LogixIdle]::GetLastInputInfo([ref]$lii)) { return $null }
