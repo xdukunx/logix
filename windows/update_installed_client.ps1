@@ -23,18 +23,42 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# The elevated pass runs in its own console that closes the instant it exits, so
+# a failure there is invisible to whoever launched it. Everything goes to a log
+# the unelevated caller can read back.
+$LogPath = Join-Path $env:TEMP 'logix_update_client.log'
+function Say($msg, $color = 'Gray') {
+    Write-Host $msg -ForegroundColor $color
+    try { Add-Content -LiteralPath $LogPath -Value ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $msg) } catch { }
+}
+
 $principal = New-Object Security.Principal.WindowsPrincipal ([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
     if ($Elevated) { throw "re-launch did not gain administrator rights" }
     Write-Host "Needs administrator to write to $InstallDir -- prompting..." -ForegroundColor Yellow
-    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
-           '-InstallDir', $InstallDir, '-Elevated')
+    # Start-Process does NOT quote arguments that contain spaces -- not even in
+    # the array form. Passing 'C:\Program Files\Logix' unquoted arrives as
+    # '-InstallDir C:\Program' plus a stray 'Files\Logix', and the child dies
+    # claiming C:\Program does not exist. Quote every path element by hand.
+    $q = { param($s) '"{0}"' -f $s }
+    $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (& $q $PSCommandPath),
+           '-InstallDir', (& $q $InstallDir), '-Elevated')
     if ($NoRestart) { $a += '-NoRestart' }
-    # Start-Process does not quote arguments containing spaces, so pass the
-    # array form and let it quote each element.
-    $p = Start-Process powershell.exe -ArgumentList $a -Verb RunAs -Wait -PassThru
+    try {
+        $p = Start-Process powershell.exe -ArgumentList $a -Verb RunAs -Wait -PassThru
+    } catch {
+        Write-Host "elevation refused or failed: $($_.Exception.Message)" -ForegroundColor Red
+        exit 2
+    }
+    if ($p.ExitCode -ne 0 -and (Test-Path $LogPath)) {
+        Write-Host "--- elevated pass log ---" -ForegroundColor Yellow
+        Get-Content -LiteralPath $LogPath -Tail 40 | ForEach-Object { Write-Host "  $_" }
+    }
     exit $p.ExitCode
 }
+
+Set-Content -LiteralPath $LogPath -Value "=== elevated pass $(Get-Date -Format s) ===" -Encoding UTF8
+try {
 
 if (-not (Test-Path $InstallDir)) {
     throw "$InstallDir does not exist -- this updates an EXISTING install. Run install_logbook_tasks.ps1 first."
@@ -51,13 +75,13 @@ $scripts = @(
 $taskName = 'MindLab Report Logbook Monitor'
 $task = Get-ScheduledTask | Where-Object { $_.TaskName -eq $taskName }
 if ($task -and -not $NoRestart) {
-    Write-Host "stopping '$taskName'"
+    Say "stopping '$taskName'"
     try { Stop-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath } catch { }
 }
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $_.CommandLine -and $_.CommandLine -match 'logbook_(monitor|timer)\.ps1' } |
     ForEach-Object {
-        Write-Host "  stopping agent pid $($_.ProcessId)"
+        Say "  stopping agent pid $($_.ProcessId)"
         try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { }
     }
 
@@ -69,8 +93,8 @@ foreach ($s in $scripts) {
     Copy-Item $src (Join-Path $InstallDir $s) -Force
     $copied++
 }
-Write-Host "copied $copied script(s) to $InstallDir" -ForegroundColor Green
-if ($missing) { Write-Host "  not in repo, left alone: $($missing -join ', ')" -ForegroundColor DarkGray }
+Say "copied $copied script(s) to $InstallDir" 'Green'
+if ($missing) { Say "  not in repo, left alone: $($missing -join ', ')" 'DarkGray' }
 
 $logo = Join-Path $repo 'logo.png'
 if (Test-Path $logo) { Copy-Item $logo (Join-Path $InstallDir 'logo.png') -Force }
@@ -81,7 +105,9 @@ if (Test-Path $logo) { Copy-Item $logo (Join-Path $InstallDir 'logo.png') -Force
 # A box installed before the v3 palette landed keeps serving itself the retired
 # maroon until its first successful fetch, so refresh the cache directly.
 $serverCfg = Join-Path (Split-Path $repo -Parent) 'server\server_config.json'
-$localCfg = 'C:\ProgramData\MindLabLogbook\config.json'
+# Get-LogbookConfig caches the server's reply here (logbook_common.ps1) -- the
+# name is server_config_cache.json, not config.json.
+$localCfg = 'C:\ProgramData\MindLabLogbook\server_config_cache.json'
 if ((Test-Path $serverCfg) -and (Test-Path $localCfg)) {
     try {
         $want = (Get-Content -Raw $serverCfg | ConvertFrom-Json).branding.colors
@@ -92,22 +118,28 @@ if ((Test-Path $serverCfg) -and (Test-Path $localCfg)) {
         # UTF8 without BOM: a BOM here has broken JSON readers in this project before.
         [System.IO.File]::WriteAllText($localCfg,
             ($have | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding $false))
-        Write-Host "refreshed cached branding.colors (accent $($want.accent))" -ForegroundColor Green
+        Say "refreshed cached branding.colors (accent $($want.accent))" 'Green'
     } catch {
-        Write-Host "could not refresh cached palette: $($_.Exception.Message)" -ForegroundColor Yellow
+        Say "could not refresh cached palette: $($_.Exception.Message)" 'Yellow'
     }
 }
 
 # ---- restart -------------------------------------------------------------------
 if ($task -and -not $NoRestart) {
-    Write-Host "starting '$taskName'"
+    Say "starting '$taskName'"
     Start-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath
     Start-Sleep -Seconds 2
     $state = (Get-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath).State
-    Write-Host "task state: $state" -ForegroundColor Green
+    Say "task state: $state" 'Green'
 } elseif (-not $task) {
-    Write-Host "scheduled task '$taskName' not found -- files updated, nothing restarted." -ForegroundColor Yellow
+    Say "scheduled task '$taskName' not found -- files updated, nothing restarted." 'Yellow'
 }
 
-Write-Host ""
-Write-Host "Done. The widget reappears on the next monitor cycle." -ForegroundColor Cyan
+Say ""
+Say "Done. The widget reappears on the next monitor cycle." 'Cyan'
+
+} catch {
+    Say "FAILED: $($_.Exception.Message)" 'Red'
+    Say "  at $($_.InvocationInfo.ScriptLineNumber): $($_.InvocationInfo.Line.Trim())" 'Red'
+    exit 1
+}
