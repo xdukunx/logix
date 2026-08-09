@@ -472,11 +472,18 @@ function Start-LogbookCollapseCountdown {
     Close-LogbookCard
 }
 
+# WPF's own enter/leave, kept as a second path to the same dwell -- the cursor
+# poll in Register-LogbookClickThrough is the primary one, because a
+# click-through window receives no mouse messages at all. Both must go through
+# the dwell or the slower one would still expand on contact.
 $window.Add_MouseEnter({
     $script:collapseAtTick = -1
-    if (-not $script:cardOpen -and $script:posture -eq 'pill') { Open-LogbookCard }
+    if (-not $script:cardOpen -and $script:posture -eq 'pill') { $script:hoverDwell.Start() }
 })
-$window.Add_MouseLeave({ if ($script:cardOpen) { Start-LogbookCollapseCountdown } })
+$window.Add_MouseLeave({
+    $script:hoverDwell.Stop()
+    if ($script:cardOpen) { Start-LogbookCollapseCountdown }
+})
 
 # ---- Posture toggle + top-edge drag ----------------------------------------
 function Set-LogbookPosture([string]$Next) {
@@ -829,6 +836,19 @@ function Test-LogbookIdleWarning {
 $script:stationLabel = ([regex]::Split([string]$deviceName, '\s+(?:-|\u00B7)\s+'))[0].Trim()
 if (-not $script:stationLabel) { $script:stationLabel = $env:COMPUTERNAME }
 
+# How long the pointer must REST on the pill before it expands. Long enough
+# that crossing the top edge on the way to a browser tab does not summon a
+# 240px card over the thing you were reaching for; short enough that deliberate
+# hover still feels immediate. Collapse stays instant -- the asymmetry is the
+# point: opening should require intent, closing should not.
+$script:HOVER_DWELL_MS = 350
+$script:hoverDwell = New-Object System.Windows.Threading.DispatcherTimer
+$script:hoverDwell.Interval = [TimeSpan]::FromMilliseconds($script:HOVER_DWELL_MS)
+$script:hoverDwell.Add_Tick({
+    $script:hoverDwell.Stop()
+    if (-not $script:cardOpen -and $script:posture -eq 'pill') { Open-LogbookCard }
+})
+
 $window.Add_SourceInitialized({
     # Out of Alt-Tab, and never steals focus from the app the user is in.
     $h = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
@@ -846,9 +866,15 @@ $window.Add_SourceInitialized({
         elseif ($script:sliverOpen)         { $sliverView }
         else                                { $null }
     } -OnPointerEnter {
+        # Arrival is not intent. The pill sits on the top edge of the screen,
+        # which is also where browser tabs and title bars live, so the cursor
+        # crosses it constantly on the way to something else -- and expanding
+        # on contact turned a 72px pill into a 240px card exactly when the user
+        # was reaching for the window underneath. Wait for them to stay.
         $script:collapseAtTick = -1
-        if (-not $script:cardOpen -and $script:posture -eq 'pill') { Open-LogbookCard }
+        $script:hoverDwell.Start()
     } -OnPointerLeave {
+        $script:hoverDwell.Stop()
         if ($script:cardOpen) { Start-LogbookCollapseCountdown }
     }
 })

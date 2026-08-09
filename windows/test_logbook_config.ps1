@@ -250,3 +250,19 @@ Assert ($commonSrc -match '\[int\]\$MaxCacheAgeSeconds = 0') `
 # keeps the longer timeout; with a cache it must not.
 Assert ($commonSrc -match 'if \(\$null -ne \$cacheAge\) \{ 1 \} else \{ 2 \}') `
     "fetch timeout is shorter when a cache exists to fall back on"
+
+Write-Host "hover intent (the pill lives where browser tabs live)"
+# The pill is docked to the top edge, which is also the tab strip and the title
+# bar -- the cursor crosses it on the way to something else constantly. Opening
+# the card on contact turned a 72px obstacle into a 240px one at exactly the
+# wrong moment. Expanding must require the pointer to REST; collapsing must not.
+Assert ($timerSrc -match '\$script:HOVER_DWELL_MS\s*=\s*(\d+)') "expand is gated behind a dwell"
+$dwellMs = [int]$Matches[1]
+Write-Host "  dwell: ${dwellMs}ms"
+Assert ($dwellMs -ge 200 -and $dwellMs -le 600) "the dwell is long enough to ignore a passing cursor, short enough to feel instant (${dwellMs}ms)"
+Assert ($timerSrc -notmatch '-OnPointerEnter \{[^}]*Open-LogbookCard') `
+    "the cursor poll starts the dwell rather than opening the card outright"
+Assert (([regex]::Matches($timerSrc, '\$script:hoverDwell\.Stop\(\)')).Count -ge 2) `
+    "every leave path cancels the dwell, so a crossed pointer never opens the card late"
+# The asymmetry is deliberate and worth pinning: slow to open, instant to close.
+Assert ($timerSrc -match 'Close-LogbookCard\s*\}') "collapse stays immediate"
