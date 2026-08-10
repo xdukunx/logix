@@ -948,7 +948,17 @@ function Write-LogbookBarStatus {
             updated = (Get-Date).ToString('o')
         }
         $tmp = "$path.tmp"
-        $payload | ConvertTo-Json -Compress | Out-File -FilePath $tmp -Encoding UTF8 -Force
+        # NOT Out-File -Encoding UTF8: in Windows PowerShell 5.1 that always
+        # writes a UTF-8 BOM, and YASB's CustomWidget reads this file's output
+        # as a decoded string, then calls json.loads() on it. json.loads on a
+        # STRING (unlike on raw bytes) throws on a leading BOM -- and does so
+        # silently as far as the user can tell: YASB's own error handling
+        # catches JSONDecodeError and swaps in None, so the bar just renders
+        # the raw "{data[text]}" template forever with no error anywhere.
+        # WriteAllText with an explicit no-BOM UTF8Encoding is the same fix
+        # this project already uses for its other JSON writes.
+        [System.IO.File]::WriteAllText(
+            $tmp, ($payload | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding $false))
         Move-Item -LiteralPath $tmp -Destination $path -Force
     } catch { }
 }

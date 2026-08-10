@@ -286,9 +286,74 @@ Assert ($timerSrc -match "stripWindow\.Visibility = if \(\`$script:posture -eq '
     "the strip line only draws in strip posture"
 
 $yasbSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logix_yasb.ps1')
-# In a DOUBLE-quoted YAML scalar a backslash is an escape, so a Windows path
-# is a parse error on \M. This bit me writing it; do not let it back.
-Assert ($yasbSrc -match "run_cmd: 'cmd /c type") "the generated YAML single-quotes the command (Windows paths contain backslashes)"
 Assert ($yasbSrc -notmatch 'run_cmd: "') "no double-quoted YAML scalar carries a path"
 Assert ($yasbSrc -match "type: 'yasb\.custom\.CustomWidget'") "targets the widget class YASB actually ships"
-Assert ($yasbSrc -match '\[char\]0xF017') "the Nerd Font glyph is built, not typed (windows/*.ps1 stays ASCII)"
+
+# run_cmd itself has NO quotes and NO "cmd /c" prefix. This is not a style
+# choice -- it is load-bearing. YASB's CustomWorker builds its subprocess
+# argv via run_cmd.split(" "), a plain space split with zero awareness of
+# quoting, then runs it with shell=True (which already wraps everything in
+# its own cmd.exe layer). "cmd /c type \"path\"" split that way, re-quoted by
+# Python's list2cmdline, and re-parsed by a SECOND, nested cmd.exe never
+# survives intact -- the widget silently rendered the raw "{data[text]}"
+# template forever, with no error anywhere. This was live and reproduced on
+# this machine, not a guess from reading the source.
+Assert ($yasbSrc -notmatch "run_cmd: 'cmd /c") "run_cmd does not add a second, redundant shell layer"
+Assert ($yasbSrc -match "run_cmd: 'type \`$statusFile'") "run_cmd is the bare 'type <path>', unquoted"
+
+# Live reproduction of YASB's own exec path -- split(" "), Popen(list,
+# shell=True, encoding=None), json.loads(output) -- using the actual
+# CustomWorker.run() logic. Confirms the fix works rather than trusting that
+# it merely LOOKS unquoted. Skips gracefully if this box has no python.
+$python = Get-Command python -ErrorAction SilentlyContinue
+if ($python) {
+    Ensure-LogbookDirs
+    Write-LogbookBarStatus -Text '00:00' -Alt 'probe' -Tooltip 'probe' -State 'active'
+    $probePath = Get-LogbookStatusFile
+    $probe = @"
+import subprocess, json, sys
+cmd = r'type $probePath'.split(' ')
+proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                         creationflags=subprocess.CREATE_NO_WINDOW, shell=True, encoding=None)
+data = json.loads(proc.stdout.read())
+assert isinstance(data, dict) and 'text' in data, data
+print('OK')
+"@
+    # Avoid 2>&1 here: $ErrorActionPreference = 'Stop' (top of this file) turns
+    # ANY merged stderr line from a native command into a terminating
+    # exception in PS 5.1, even from a process that exits 0 -- this is not
+    # hypothetical, it took the whole test script down while writing this one.
+    $result = ($probe | & $python.Source - 2>$null)
+    Assert ($LASTEXITCODE -eq 0 -and "$result" -match 'OK') `
+        "run_cmd survives YASB's actual split(shell=True) exec path (got: $result)"
+} else {
+    Write-Host "  (skipped: no python on PATH to reproduce YASB's exec path)"
+}
+# The icon is the literal backslash-u-f-0-1-7 escape TEXT, inside a
+# DOUBLE-quoted YAML scalar -- matching how config.yaml's own wifi_icons
+# already encode their glyphs -- so PowerShell (no \u string escape of its
+# own) passes it through unchanged and the source file stays ASCII. A raw
+# [char]0xF017 embedded directly would also be valid YAML, but it is a UTF-8
+# byte sequence, which is exactly the non-ASCII windows/*.ps1 must never carry.
+Assert ($yasbSrc -match '"<span>\\uf017</span>') "the icon is a YAML unicode escape in a double-quoted scalar, not a raw byte"
+Assert ($yasbSrc -notmatch '\[char\]0xF017') "no raw Unicode char object -- the ASCII-safe escape text is emitted directly"
+
+Write-Host "status bar output has no BOM (YASB's json.loads chokes on one)"
+# Out-File -Encoding UTF8 in Windows PowerShell 5.1 always writes a BOM.
+# YASB reads this file's output as a decoded STRING and calls json.loads()
+# on it; json.loads on a str (unlike on raw bytes) throws on a leading BOM,
+# and YASB's own except-JSONDecodeError silently swallows it -- the bar just
+# shows the raw unformatted template forever with no error anywhere. This
+# bit real output on this machine; reproduce it live, not just by grepping
+# source for Out-File.
+Ensure-LogbookDirs
+Write-LogbookBarStatus -Text '01:23' -Alt 'WS-01 - 01:23:45' -Tooltip 'WS-01' -State 'active'
+$barBytes = [System.IO.File]::ReadAllBytes((Get-LogbookStatusFile))
+Assert (-not ($barBytes.Length -ge 3 -and $barBytes[0] -eq 0xEF -and $barBytes[1] -eq 0xBB -and $barBytes[2] -eq 0xBF)) `
+    "the written status file carries no UTF-8 BOM"
+try {
+    [void]([System.Text.Encoding]::UTF8.GetString($barBytes) | ConvertFrom-Json)
+    Assert $true "the file round-trips through the exact decode+parse path YASB uses"
+} catch {
+    Assert $false "the file round-trips through the exact decode+parse path YASB uses: $($_.Exception.Message)"
+}

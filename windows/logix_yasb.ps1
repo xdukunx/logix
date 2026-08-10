@@ -79,15 +79,17 @@ $selfPath = $PSCommandPath
 $yasbConfig = Join-Path $env:USERPROFILE '.config\yasb\config.yaml'
 $yasbStyles = Join-Path $env:USERPROFILE '.config\yasb\styles.css'
 
-# The clock glyph is built rather than typed: every windows/*.ps1 in this repo
-# is ASCII-only (an installer once mangled a literal to "?"), and a Nerd Font
-# icon is three UTF-8 bytes.
-$icon = [char]0xF017
-
-# SINGLE-quoted YAML scalars, deliberately. In a double-quoted YAML string a
-# backslash is an escape character, so "C:\ProgramData\MindLab..." is not a
-# path, it is a parse error on an unknown escape \M. Single quotes in YAML are
-# literal; the only escape is '' for a quote.
+# Two quoting styles in one YAML block, matching how config.yaml already
+# quotes its OWN icon widgets (see wifi_icons above it: "\udb82\udd2e" etc.) --
+# not a style choice, a YAML requirement:
+#   - label/label_alt are DOUBLE-quoted with a \uXXXX escape, because a
+#     single-quoted YAML scalar has no escapes at all, so typing the literal
+#     text \uf017 there would render as that literal text, not the glyph.
+#   - run_cmd/on_right are SINGLE-quoted, because inside a double-quoted YAML
+#     scalar a backslash IS an escape character, so "C:\ProgramData\..." is
+#     not a path there, it's a parse error on an unknown escape \M.
+# This is the exact mistake made hand-editing config.yaml the first time --
+# get either one backwards and it is a parse error, not a wrong icon.
 $widgetYaml = @"
   # --- Logix session timer ---------------------------------------------------
   # Reads a file the Logix agent already writes once a second; nothing heavy
@@ -95,11 +97,21 @@ $widgetYaml = @"
   logix:
     type: 'yasb.custom.CustomWidget'
     options:
-      label: '<span>$icon</span> {data[text]}'
-      label_alt: '{data[alt]}'
+      label: "<span>\uf017</span> {data[text]}"
+      label_alt: "{data[alt]}"
       class_name: 'logix-widget'
       exec_options:
-        run_cmd: 'cmd /c type "$statusFile"'
+        # YASB splits run_cmd on plain spaces (str.split(" "), not shlex) --
+        # it does not understand quoting at all. "cmd /c type \"path\"" broke
+        # because that split, re-quoted through Python's list2cmdline, then
+        # re-parsed by a NESTED cmd.exe (shell=True already wraps everything
+        # in one cmd.exe /c layer, and this added a second), never survives
+        # intact -- it renders as raw "{data[text]}" with no error anywhere.
+        # The fix is not smarter quoting; it is not needing any. `type` is a
+        # cmd.exe builtin, which shell=True (the default) already runs under,
+        # so the extra `cmd /c` was redundant -- and C:\ProgramData never
+        # contains a space, so the bare path never needs quoting to begin with.
+        run_cmd: 'type $statusFile'
         run_interval: 1000
         return_format: 'json'
       callbacks:
@@ -159,3 +171,4 @@ $out = Join-Path $env:TEMP 'logix-yasb-snippet.txt'
   "# 3. append to $yasbStyles", $cssSnippet) -join "`r`n" |
     Out-File -FilePath $out -Encoding UTF8 -Force
 Write-Host "Also written to: $out" -ForegroundColor DarkGray
+exit 0

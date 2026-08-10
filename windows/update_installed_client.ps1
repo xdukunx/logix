@@ -68,7 +68,8 @@ $repo = $PSScriptRoot
 $scripts = @(
     'logbook_common.ps1', 'logbook_popup.ps1', 'logbook_timer.ps1', 'logbook_monitor.ps1',
     'logbook_end.ps1', 'logbook_screenshot.ps1', 'logbook_setup.ps1', 'install_logbook_tasks.ps1',
-    'uninstall_logbook.ps1', 'cleanup_logbook_state.ps1', 'repair_logbook_permissions.ps1'
+    'uninstall_logbook.ps1', 'cleanup_logbook_state.ps1', 'repair_logbook_permissions.ps1',
+    'logix_yasb.ps1'
 )
 
 # ---- stop the agent so nothing is mid-read while files change ---------------
