@@ -357,3 +357,23 @@ try {
 } catch {
     Assert $false "the file round-trips through the exact decode+parse path YASB uses: $($_.Exception.Message)"
 }
+
+Write-Host "SELESAI confirm window (reported as 'cannot be stopped')"
+# Two-step by design: press once to arm, again to confirm. The window was 3
+# seconds, which is not enough time to read a button you have never seen,
+# understand it and press again -- it silently re-disarmed and the honest
+# reading was that the session could not be ended at all.
+Assert ($timerSrc -match '\$script:DISARM_SECONDS\s*=\s*(\d+)') "the confirm window is a named constant"
+$disarm = [int]$Matches[1]
+Write-Host "  confirm window: ${disarm}s"
+Assert ($disarm -ge 5 -and $disarm -le 15) "long enough to read and act on, short enough not to arm by accident (${disarm}s)"
+# The caption used to hardcode '3 dtk' in the XAML, so changing the constant
+# would have made the countdown lie.
+Assert ($timerSrc -match 'ARMED_CAPTION_FMT') "the caption text is derived from the constant, not written twice"
+Assert ($commonSrc -notmatch 'batal otomatis dalam 3 dtk') "no hardcoded countdown number left in the XAML"
+
+Write-Host "a card opened from the status bar must close itself"
+# Collapse is normally driven by the pointer LEAVING. A card opened from the
+# bar may never have had the pointer over it, so there was no enter, no
+# leave, and it stayed on screen indefinitely.
+Assert ($timerSrc -match 'BAR_OPEN_LINGER_SECONDS') "the bar-opened card arms its own collapse countdown"

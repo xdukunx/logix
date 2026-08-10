@@ -88,7 +88,23 @@ $brushConv = New-Object System.Windows.Media.BrushConverter
 
 # ---- Design timings ---------------------------------------------------------
 $script:COLLAPSE_SECONDS   = 5     # card auto-collapses 5s after the cursor leaves
-$script:DISARM_SECONDS     = 3     # SELESAI auto-disarms if not confirmed
+# A card opened from the status bar was ASKED for, so it gets longer than the
+# pointer-leave linger -- long enough to read the session and reach SELESAI,
+# short enough that forgetting about it does not leave a panel on screen for
+# the rest of the day.
+$script:BAR_OPEN_LINGER_SECONDS = 20
+# SELESAI auto-disarms if not confirmed. Three seconds was too short to be
+# usable: the first press turns the button red and relabels it "Tekan lagi
+# untuk selesai", and someone meeting that for the first time has to read it,
+# understand it, and press again -- inside three seconds, or it silently resets
+# and they are back where they started. Repeat that twice and the honest
+# conclusion is "this thing cannot be stopped", which is exactly what was
+# reported. Long enough to read and act, still far too short to arm by accident
+# and confirm by accident.
+$script:DISARM_SECONDS     = 8
+# The caption counts this down, so it is derived rather than written twice --
+# the XAML used to hardcode "3 dtk" and would have lied the moment this changed.
+$script:ARMED_CAPTION_FMT  = 'batal otomatis dalam {0} dtk'
 $script:DWELL_MS           = 300   # top-edge dwell before the sliver drops
 $script:AUTOPEEK_SECONDS   = 4     # sliver auto-peek on an incoming message
 $script:IDLE_WARN_SECONDS  = 300   # countdown overlay opens 5 min before auto-end
@@ -431,6 +447,10 @@ $selesaiBtn.Add_Click({
         $script:selesaiArmed = $true
         $script:selesaiArmTick = $script:tick
         $selesaiBtn.Content = (Get-LogbookText $cfg 'timerEndArmed' 'Tekan lagi untuk selesai')
+        # Set here as well as on the tick: the tick is a second away, and a
+        # stale number flashing for that second is exactly the kind of small
+        # lie that makes a countdown untrustworthy.
+        $armedCap.Text = ($script:ARMED_CAPTION_FMT -f $script:DISARM_SECONDS)
         $red = $brushConv.ConvertFromString($theme.signalCritical)
         $selesaiBtn.Background = $red
         $selesaiBtn.BorderBrush = $red
@@ -784,6 +804,12 @@ $timer.Add_Tick({
         # cardOpen alone), so it can appear over a bar-mode setup and vanish
         # again on collapse WITHOUT dragging the user back into pill posture.
         Open-LogbookCard
+        # ...but it has to be TOLD to vanish. Collapse is normally driven by the
+        # pointer leaving, and a card opened from the status bar may never have
+        # had the pointer over it at all -- no enter, so no leave, so it sat
+        # there permanently. Arm the countdown up front; moving onto the card
+        # cancels it the same way it always did.
+        $script:collapseAtTick = $script:tick + $script:BAR_OPEN_LINGER_SECONDS
     } elseif ($requested -eq 'posture') {
         Set-LogbookPosture $(if ($script:posture -eq 'bar') { 'pill' } else { 'bar' })
     }
@@ -804,8 +830,15 @@ $timer.Add_Tick({
         -Tooltip ("{0} {1} {2}" -f $script:stationLabel, [char]0x00B7, $cardClock.Text) `
         -State (Get-LogbookBarState)
 
-    if ($script:selesaiArmed -and ($script:tick - $script:selesaiArmTick) -ge $script:DISARM_SECONDS) {
-        Reset-LogbookSelesai
+    if ($script:selesaiArmed) {
+        $left = $script:DISARM_SECONDS - ($script:tick - $script:selesaiArmTick)
+        if ($left -le 0) {
+            Reset-LogbookSelesai
+        } else {
+            # A live countdown, so the window you have is visible rather than
+            # something you discover by missing it.
+            $armedCap.Text = ($script:ARMED_CAPTION_FMT -f $left)
+        }
     }
     if ($script:collapseAtTick -ge 0 -and $script:tick -ge $script:collapseAtTick) {
         if ($script:msgState -eq 'replying' -and $replyInput.IsKeyboardFocusWithin) {

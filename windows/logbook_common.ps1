@@ -2299,7 +2299,10 @@ $res
              The controller arms it red on first click and auto-disarms after 3s. -->
         <Button Name="SelesaiBtn" Content="$tSelesai" Style="{StaticResource LxPill}"
                 Padding="0,9" HorizontalContentAlignment="Center"/>
-        <TextBlock Name="ArmedCaption" Visibility="Collapsed" Text="batal otomatis dalam 3 dtk"
+        <!-- Text is filled at runtime from $script:ARMED_CAPTION_FMT and counts
+             down; hardcoding a number here made the caption lie the moment
+             DISARM_SECONDS changed. -->
+        <TextBlock Name="ArmedCaption" Visibility="Collapsed" Text=""
                    FontSize="11" Foreground="{StaticResource LxMuted}"
                    HorizontalAlignment="Center" Margin="0,8,0,0"/>
       </StackPanel>

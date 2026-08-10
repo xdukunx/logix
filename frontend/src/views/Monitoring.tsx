@@ -10,7 +10,7 @@
 // registry (so "6 dari 12" has a real denominator and idle/offline stations
 // appear at all), /api/active carries the live session on the online ones.
 // The action plumbing (message / lock / screenshot / power) is reused as-is.
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 
 import { getJson, sendJson } from "../api";
 import { ACCESS_LABEL, categoryLabel, resolveAccessType, type StationStatus } from "../tokens";
@@ -180,7 +180,15 @@ export default function Monitoring() {
     );
   };
 
-  const StationCard = ({ s }: { s: Station }) => {
+  // A render FUNCTION, deliberately not a component defined during render.
+  // As `const StationCard = () => ...` inside Monitoring, its identity changed
+  // on every render -- and usePolling re-renders every 10s -- so React saw a
+  // brand new component type each tick and unmounted the entire card subtree,
+  // MoreMenu included. Any open action menu was destroyed within 10 seconds of
+  // being opened, which is why Kunci/Pesan could not be reached: the menu was
+  // gone before the pointer got there. Calling it as a function keeps the tree
+  // stable, so MoreMenu (a real, module-scope component) holds its own state.
+  const renderStationCard = (s: Station) => {
     const isOffline = s.status === "offline";
     const identity = s.spec ? `${s.id} · ${s.spec}` : s.id;
     return (
@@ -272,7 +280,7 @@ export default function Monitoring() {
           }}
         >
           {stations.map((s) => (
-            <StationCard key={s.hostname} s={s} />
+            <Fragment key={s.hostname}>{renderStationCard(s)}</Fragment>
           ))}
         </div>
       )}
