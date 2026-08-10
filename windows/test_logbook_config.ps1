@@ -266,3 +266,29 @@ Assert (([regex]::Matches($timerSrc, '\$script:hoverDwell\.Stop\(\)')).Count -ge
     "every leave path cancels the dwell, so a crossed pointer never opens the card late"
 # The asymmetry is deliberate and worth pinning: slow to open, instant to close.
 Assert ($timerSrc -match 'Close-LogbookCard\s*\}') "collapse stays immediate"
+
+Write-Host "status bar bridge (YASB)"
+# The floating pill is an overlay, so it always covers something; a bar
+# RESERVES its space and covers nothing. The widget publishes to a file the bar
+# reads, rather than the bar spawning a PowerShell process every second.
+Assert ($commonSrc -match 'function Write-LogbookBarStatus') "the widget can publish its state for a bar"
+Assert ($timerSrc -match 'Write-LogbookBarStatus') "the 1s tick is what publishes it (no second poller)"
+Assert ($timerSrc -match 'Clear-LogbookBarStatus') "the slot is cleared when the session ends"
+# A partially written file read mid-poll renders as a blank slot.
+Assert ($commonSrc -match 'Move-Item -LiteralPath \$tmp') "the status file is swapped in atomically, never written in place"
+# A request that survived being read would re-fire every single tick.
+Assert ($commonSrc -match 'Remove-Item \$path -Force') "a bar action is consumed on read"
+Assert ($timerSrc -match "\`$p\.posture -in @\('pill','strip','bar'\)") "'bar' is a real posture the widget persists"
+# bar posture must draw nothing at all, or the user gets two timers.
+Assert ($timerSrc -match "showPill\s+= \(-not \`$showCard\) -and \(\`$script:posture -eq 'pill'\)") `
+    "the floating pill only draws in pill posture"
+Assert ($timerSrc -match "stripWindow\.Visibility = if \(\`$script:posture -eq 'strip'\)") `
+    "the strip line only draws in strip posture"
+
+$yasbSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logix_yasb.ps1')
+# In a DOUBLE-quoted YAML scalar a backslash is an escape, so a Windows path
+# is a parse error on \M. This bit me writing it; do not let it back.
+Assert ($yasbSrc -match "run_cmd: 'cmd /c type") "the generated YAML single-quotes the command (Windows paths contain backslashes)"
+Assert ($yasbSrc -notmatch 'run_cmd: "') "no double-quoted YAML scalar carries a path"
+Assert ($yasbSrc -match "type: 'yasb\.custom\.CustomWidget'") "targets the widget class YASB actually ships"
+Assert ($yasbSrc -match '\[char\]0xF017') "the Nerd Font glyph is built, not typed (windows/*.ps1 stays ASCII)"

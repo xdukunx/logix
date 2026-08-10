@@ -907,6 +907,84 @@ function Show-LogbookSignInFailureNotice {
     }
 }
 
+# ---- Status bar bridge (YASB and anything else that can read a file) --------
+#
+# The floating pill has one unavoidable problem: it is an overlay, so wherever
+# it sits it sits ON TOP of something -- and docked to the top edge, that
+# something is the browser tab strip. A status bar does not have that problem,
+# because a bar RESERVES its space; nothing is ever underneath it.
+#
+# So the widget publishes its state to a small file and a bar renders it. The
+# timer process is already ticking once a second and already knows all of this,
+# which is what makes this cheap: the bar runs `type <file>`, not a PowerShell
+# process per second.
+$Global:LogbookStatusFile = $null
+function Get-LogbookStatusFile {
+    if (-not $Global:LogbookStatusFile) {
+        $Global:LogbookStatusFile = Join-Path $Global:StateDir 'bar_status.json'
+    }
+    return $Global:LogbookStatusFile
+}
+
+# YASB's custom widget with return_format: json reads {"text", "alt", "tooltip"}.
+# Written whole via a temp file + move so a bar polling mid-write never reads a
+# half-flushed file and renders a blank slot.
+function Write-LogbookBarStatus {
+    param(
+        [string]$Text = '',
+        [string]$Alt = '',
+        [string]$Tooltip = '',
+        [string]$State = 'idle'
+    )
+    try {
+        $path = Get-LogbookStatusFile
+        $payload = [ordered]@{
+            text    = $Text
+            alt     = $Alt
+            tooltip = $Tooltip
+            # Not read by YASB itself -- it is there so a stylesheet or another
+            # bar can colour the slot by session state without parsing the text.
+            state   = $State
+            updated = (Get-Date).ToString('o')
+        }
+        $tmp = "$path.tmp"
+        $payload | ConvertTo-Json -Compress | Out-File -FilePath $tmp -Encoding UTF8 -Force
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } catch { }
+}
+
+# A bar slot showing a stale time is worse than one showing nothing: it says a
+# session is running when the agent may have died. Called when the timer exits.
+function Clear-LogbookBarStatus {
+    try {
+        Write-LogbookBarStatus -Text '' -Alt '' -Tooltip 'Tidak ada sesi aktif' -State 'none'
+    } catch { }
+}
+
+# One-shot action channel from a status bar back to the widget. The bar is a
+# separate process with no handle on the widget's window, and the widget is
+# already polling once a second, so a file it consumes and deletes is both the
+# cheapest and the least stateful thing that can work.
+function Request-LogbookBarAction {
+    param([ValidateSet('open', 'posture')] [string]$Action)
+    try {
+        Ensure-LogbookDirs
+        $path = Join-Path $Global:StateDir 'bar_action'
+        $Action | Out-File -FilePath $path -Encoding ASCII -Force
+    } catch { }
+}
+
+function Read-LogbookBarAction {
+    try {
+        $path = Join-Path $Global:StateDir 'bar_action'
+        if (-not (Test-Path $path)) { return '' }
+        $action = (Get-Content $path -Raw -ErrorAction Stop).Trim()
+        # Consumed on read: a request that survived would re-fire every second.
+        Remove-Item $path -Force -ErrorAction SilentlyContinue
+        return $action
+    } catch { return '' }
+}
+
 function Get-LogbookDeviceApiKey {
     # Per-device key from device.json (written by logbook_setup.ps1 on a
     # successful /api/enroll). Mirrors the server's own verify_api_key

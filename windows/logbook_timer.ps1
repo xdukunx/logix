@@ -108,7 +108,11 @@ function Get-LogbookWidgetPrefs {
     try {
         if (Test-Path $prefsPath) {
             $p = Get-Content $prefsPath -Raw | ConvertFrom-Json
-            if ($p.posture -in @('pill','strip')) { $defaults.posture = [string]$p.posture }
+            # 'bar' means an external status bar (YASB) is rendering this widget, so
+            # the floating window draws nothing at all. It is deliberately not in
+            # the double-click cycle -- that toggle stays a predictable two-state
+            # thing, and bar mode is something you configure once.
+            if ($p.posture -in @('pill','strip','bar')) { $defaults.posture = [string]$p.posture }
             $a = [double]$p.anchor
             if ($a -ge 0.0 -and $a -le 1.0) { $defaults.anchor = $a }
             if ($null -ne $p.pillOpacity) {
@@ -249,6 +253,14 @@ function Get-LogbookWidgetStatusColor {
     if ($script:overlayMode -ne 'none') { return $theme.signalCritical }
     if ($script:msgState -in @('unread','reading','replying')) { return $theme.accent }
     return $theme.signalNormal
+}
+
+# The same three states as the dot, named rather than coloured, so a status bar
+# can style its own slot without having to parse a hex out of the payload.
+function Get-LogbookBarState {
+    if ($script:overlayMode -ne 'none') { return 'critical' }
+    if ($script:msgState -eq 'unread') { return 'message' }
+    return 'active'
 }
 
 function Update-LogbookWidgetStatus {
@@ -743,6 +755,10 @@ $timer.Add_Tick({
     if (-not (Test-Path $Global:SessionFile)) {
         $script:allowClose = $true
         $timer.Stop()
+        # A bar slot still showing a running clock after the session ended is
+        # worse than an empty one: it asserts something untrue about a machine
+        # nobody is watching.
+        Clear-LogbookBarStatus
         try { $stripWindow.Close() } catch { }
         $window.Close()
         return
@@ -752,11 +768,25 @@ $timer.Add_Tick({
         if ($SessionId -and $current.session_id -ne $SessionId) {
             $script:allowClose = $true
             $timer.Stop()
+            Clear-LogbookBarStatus
             try { $stripWindow.Close() } catch { }
             $window.Close()
             return
         }
     } catch { }
+
+    # Actions a status bar asked for, e.g. YASB's on_right callback. Polled
+    # rather than pushed because the bar is a separate process with no handle
+    # on this window; a one-shot file is the cheapest honest channel.
+    $requested = Read-LogbookBarAction
+    if ($requested -eq 'open') {
+        # The card is posture-independent (Update-LogbookWidgetView keys it off
+        # cardOpen alone), so it can appear over a bar-mode setup and vanish
+        # again on collapse WITHOUT dragging the user back into pill posture.
+        Open-LogbookCard
+    } elseif ($requested -eq 'posture') {
+        Set-LogbookPosture $(if ($script:posture -eq 'bar') { 'pill' } else { 'bar' })
+    }
 
     $elapsed = (Get-Date) - $start
     $hh = [int][Math]::Floor($elapsed.TotalHours)
@@ -764,6 +794,15 @@ $timer.Add_Tick({
     $cardClock.Text = ('{0:00}:{1:00}:{2:00}' -f $hh, $elapsed.Minutes, $elapsed.Seconds)
     $sliverText.Text = $pillClock.Text + ' ' + [char]0x00B7 + ' ' + $script:stationLabel
     $script:tick += 1
+
+    # Publish for a status bar (see Write-LogbookBarStatus). Done here rather
+    # than from a separate poller because this tick already holds every value
+    # a bar wants, one second fresh.
+    Write-LogbookBarStatus `
+        -Text $pillClock.Text `
+        -Alt ($script:stationLabel + ' ' + [char]0x00B7 + ' ' + $cardClock.Text) `
+        -Tooltip ("{0} {1} {2}" -f $script:stationLabel, [char]0x00B7, $cardClock.Text) `
+        -State (Get-LogbookBarState)
 
     if ($script:selesaiArmed -and ($script:tick - $script:selesaiArmTick) -ge $script:DISARM_SECONDS) {
         Reset-LogbookSelesai
