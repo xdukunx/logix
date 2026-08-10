@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { getJson, sendJson } from "../api";
-import type { StationStatus } from "../tokens";
+import { DEVICE_CATEGORIES, categoryLabel, type StationStatus } from "../tokens";
 import type { Device, DeviceDetail, SyncStatus } from "../types";
 import { Mono, PageHeader, SectionLabel, StatusDot } from "../ui/base";
 import { Button, PillSelect, SearchChip } from "../ui/controls";
@@ -31,13 +31,8 @@ const SYNC_STATUS: Record<SyncStatus, StationStatus> = {
  * what the idle policy keys on). The two are easy to confuse; sending a
  * hardware category here is rejected with "Unknown category".
  */
-const CATEGORIES = [
-  { value: "lab_workstation", label: "Workstation lab" },
-  { value: "office_workstation", label: "Workstation kantor" },
-  { value: "loaned_laptop", label: "Laptop pinjaman" },
-  { value: "server", label: "Server" },
-  { value: "custom", label: "Lainnya" },
-];
+// Moved to tokens.ts so Monitoring shares it -- see DEVICE_CATEGORIES there.
+const CATEGORIES = DEVICE_CATEGORIES;
 
 /** Countdown to the invite's expiry, in the mm:ss the design shows. */
 const expiryLabel = (expiresAt: string | null | undefined): string => {
@@ -152,7 +147,10 @@ export default function Devices() {
         </span>
       ),
     },
-    { key: "kategori", header: "Kategori", width: "100px", phone: "secondary", render: (d) => d.category },
+    { key: "kategori", header: "Kategori", width: "100px", phone: "secondary",
+      // Humanised, not the raw CATEGORY_PROFILES key -- "lab_workstation"
+      // is an API detail, not something to show a lab admin.
+      render: (d) => categoryLabel(d.category) },
     {
       key: "sync",
       header: "Sinkronisasi",
@@ -263,7 +261,7 @@ export default function Devices() {
             <div style={{ display: "grid", rowGap: 10, marginBottom: 24 }}>
               {detailRow("Sinkronisasi", <Mono>{timeAgo(selectedDevice.last_seen)}</Mono>)}
               {detailRow("Versi client", <Mono>{String(selectedDevice.client_version ?? "-")}</Mono>)}
-              {detailRow("Kategori", selectedDevice.category)}
+              {detailRow("Kategori", categoryLabel(selectedDevice.category))}
               {detailRow("Kebijakan", detail?.policy?.description ?? "-")}
             </div>
 

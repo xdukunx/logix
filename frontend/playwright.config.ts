@@ -16,6 +16,10 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Refuses to run against a server holding real records -- this suite writes,
+  // and pointing it at production has twice seeded E2E-* fixtures into a live
+  // registry. See e2e/guard.ts.
+  globalSetup: "./e2e/guard.ts",
   // The dashboard polls every 10s; give assertions room to catch up without
   // making a genuine hang look like a slow pass.
   timeout: 45_000,

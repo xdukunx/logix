@@ -13,7 +13,7 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { getJson, sendJson } from "../api";
-import { ACCESS_LABEL, resolveAccessType, type StationStatus } from "../tokens";
+import { ACCESS_LABEL, categoryLabel, resolveAccessType, type StationStatus } from "../tokens";
 import type { ActiveWorkstation, Device } from "../types";
 import { Card, EmptyState, ErrorState, Mono, PageHeader, SkeletonGrid, StatusDot } from "../ui/base";
 import { Button, TextArea } from "../ui/controls";
@@ -89,7 +89,10 @@ export default function Monitoring() {
         return {
           hostname: d.hostname,
           id,
-          spec: spec || d.category || "",
+          // A display_name with no " - <spec>" half leaves spec empty; falling
+          // back to the raw category KEY printed "WS-01 - lab_workstation" at
+          // a lab admin.
+          spec: spec || categoryLabel(d.category),
           status: stationStatus(d, live),
           live,
           lastSeen: live?.last_seen ?? d.last_seen,
@@ -159,11 +162,21 @@ export default function Monitoring() {
       );
     }
     const access = ACCESS_LABEL[resolveAccessType(s.live?.access_type)];
+    // Only the NAME may be clipped. Ellipsising the whole line truncates from
+    // the right, which eats the duration -- the one number an admin is scanning
+    // this board for -- leaving "Nama Yang Sangat Panjang - Fisik - 5...".
+    // A long name is the expendable part; how long the machine has been in use
+    // is not.
     return (
-      <>
-        {s.live?.username || "-"} · {access} ·{" "}
-        <Mono>{s.live?.session_started_at ? durationSince(s.live.session_started_at) : "-"}</Mono>
-      </>
+      <span style={{ display: "flex", minWidth: 0, alignItems: "baseline" }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {s.live?.username || "-"}
+        </span>
+        <span style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+          {" "}· {access} ·{" "}
+          <Mono>{s.live?.session_started_at ? durationSince(s.live.session_started_at) : "-"}</Mono>
+        </span>
+      </span>
     );
   };
 
@@ -203,6 +216,10 @@ export default function Monitoring() {
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
+            // minWidth:0 lets the flex child above actually shrink; without it a
+            // flex item refuses to go below its content width and the ellipsis
+            // never engages.
+            minWidth: 0,
           }}
         >
           {sessionLine(s)}
