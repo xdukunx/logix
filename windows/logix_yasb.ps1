@@ -115,9 +115,14 @@ $widgetYaml = @"
         run_interval: 1000
         return_format: 'json'
       callbacks:
-        on_left: 'toggle_label'
+        # Left click opens the session card (details + SELESAI). YASB's
+        # default for a custom widget is toggle_label on left, but here that
+        # buries the ONLY way to end a session behind a right click nobody
+        # discovers -- the first question after switching to bar posture was
+        # "where did the SELESAI button go?". Primary action, primary button.
+        on_left: 'exec powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$selfPath" -Action open'
         on_middle: 'do_nothing'
-        on_right: 'exec powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$selfPath" -Action open'
+        on_right: 'toggle_label'
 "@
 
 $cssSnippet = @"
