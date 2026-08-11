@@ -377,3 +377,50 @@ Write-Host "a card opened from the status bar must close itself"
 # bar may never have had the pointer over it, so there was no enter, no
 # leave, and it stayed on screen indefinitely.
 Assert ($timerSrc -match 'BAR_OPEN_LINGER_SECONDS') "the bar-opened card arms its own collapse countdown"
+
+Write-Host "opening the card from a status bar must not race-close itself"
+# Reported: clicking the YASB slot opened the card and it vanished within
+# ~40ms, invisibly. The card can appear far from wherever the poll last knew
+# the cursor to be (a status bar is a separate process with its own click
+# history), so Register-LogbookClickThrough's poll can see what looks like a
+# leave on the very first tick after the card appears. The fix does not try
+# to prevent every way that could fire; it guards the CLOSE ITSELF while the
+# card is pinned.
+Assert ($timerSrc -match '\$script:cardPinnedUntilTouched') "a pin flag exists to protect a just-opened bar card"
+
+# Order matters, not just presence: the pin check must be the FIRST thing
+# Start-LogbookCollapseCountdown does after the reply-typing guard, so it
+# short-circuits before ever reaching the unconditional Close-LogbookCard
+# further down. A pin check added AFTER that branch would pass a plain grep
+# for its existence and do nothing.
+$fnStart = $timerSrc.IndexOf('function Start-LogbookCollapseCountdown')
+Assert ($fnStart -ge 0) "Start-LogbookCollapseCountdown is defined"
+if ($fnStart -ge 0) {
+    $fnEnd = $timerSrc.IndexOf("`nfunction ", $fnStart + 1)
+    $body = if ($fnEnd -gt $fnStart) { $timerSrc.Substring($fnStart, $fnEnd - $fnStart) } else { $timerSrc.Substring($fnStart) }
+    $pinAt = $body.IndexOf('cardPinnedUntilTouched')
+    $closeAt = $body.IndexOf('Close-LogbookCard')
+    Assert ($pinAt -ge 0 -and $closeAt -ge 0 -and $pinAt -lt $closeAt) `
+        "the pin is checked before the unconditional close, not after"
+}
+
+Assert ($timerSrc -match '-OnPointerEnter') "pointer-enter clears the pin -- once genuinely touched, ordinary hover rules resume"
+Assert ([regex]::IsMatch($timerSrc, '-OnPointerEnter\s*\{.{0,900}?cardPinnedUntilTouched\s*=\s*\$false', 'Singleline')) `
+    "OnPointerEnter specifically un-pins the card"
+
+Assert ($timerSrc -match '-OnOutsideClick') "a click outside the card dismisses it -- the native menu behaviour asked for"
+Assert ([regex]::IsMatch($timerSrc, '-OnOutsideClick\s*\{.{0,400}?Close-LogbookCard', 'Singleline')) `
+    "the outside-click handler actually closes the open card"
+
+# Close-LogbookCard is the one function every dismissal path funnels through
+# (SELESAI's own end-of-session path calls it too), so resetting both flags
+# there -- rather than in every caller -- is what stops the pin or the
+# borrowed cursor position from leaking into the next time the card opens.
+$closeStart = $timerSrc.IndexOf('function Close-LogbookCard')
+Assert ($closeStart -ge 0) "Close-LogbookCard is defined"
+if ($closeStart -ge 0) {
+    $closeEnd = $timerSrc.IndexOf("`nfunction ", $closeStart + 1)
+    $closeBody = if ($closeEnd -gt $closeStart) { $timerSrc.Substring($closeStart, $closeEnd - $closeStart) } else { $timerSrc.Substring($closeStart) }
+    Assert ($closeBody -match 'cardPinnedUntilTouched\s*=\s*\$false') "closing always clears the pin"
+    Assert ($closeBody -match 'cardAnchorOverride\s*=\s*\$null') "closing always clears the borrowed cursor-anchored position"
+}

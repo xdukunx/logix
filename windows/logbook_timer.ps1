@@ -197,6 +197,18 @@ $script:selesaiArmed    = $false
 $script:selesaiArmTick  = -1
 $script:collapseAtTick  = -1
 $script:sliverHideTick  = -1
+# Set the moment a status bar asks for the card (not a hover). Guards against
+# the collapse race described at Start-LogbookCollapseCountdown: the poll that
+# notices the pointer is not over a screen-centred card fires within ~40ms of
+# it opening, since the user's cursor is wherever they actually clicked (their
+# YASB bar) -- nowhere near it. Cleared the moment the pointer genuinely
+# reaches the card, which is when ordinary hover rules should resume.
+$script:cardPinnedUntilTouched = $false
+# In-memory only -- NOT persisted via Save-LogbookWidgetPrefs. $script:anchor
+# is the user's own remembered drag position for the floating pill; a card
+# opened from the bar borrows the slot for one appearance and must not
+# overwrite where they left the pill.
+$script:cardAnchorOverride = $null
 $script:msgState        = 'none'          # none|unread|reading|replying|sent
 $script:msgUnread       = 0
 $script:msgCommandId    = ''
@@ -242,7 +254,8 @@ function Update-LogbookWidgetPosition {
     $w = $window.ActualWidth
     if ($w -le 0) { $w = $window.Width }
     if ([double]::IsNaN($w) -or $w -le 0) { return }
-    $centerX = $work.Left + ($work.Width * $script:anchor)
+    $anchor = if ($null -ne $script:cardAnchorOverride) { $script:cardAnchorOverride } else { $script:anchor }
+    $centerX = $work.Left + ($work.Width * $anchor)
     $left = $centerX - ($w / 2.0)
     # Keep the visible surface on screen; the transparent bleed may hang off.
     $minL = $work.Left - $script:BLEED_SIDE
@@ -481,6 +494,10 @@ function Open-LogbookCard {
 function Close-LogbookCard {
     $script:cardOpen = $false
     $script:collapseAtTick = -1
+    $script:cardPinnedUntilTouched = $false
+    # Only ever meant for the one appearance that borrowed it; the pill's own
+    # remembered position must not drift to wherever a bar-click last landed.
+    $script:cardAnchorOverride = $null
     if ($script:selesaiArmed) { Reset-LogbookSelesai }
     if ($script:msgState -in @('reading','sent')) { $script:msgState = 'none' }
     Update-LogbookWidgetView
@@ -489,6 +506,17 @@ function Close-LogbookCard {
 function Start-LogbookCollapseCountdown {
     # The card must not vanish mid-sentence while the user is typing a reply.
     if ($script:msgState -eq 'replying' -and $replyInput.IsKeyboardFocusWithin) { return }
+
+    # A card the STATUS BAR opened gets its own linger honoured, full stop.
+    # Without this: the click-through poll runs every ~40ms, the user's cursor
+    # is wherever they actually clicked (their YASB bar) -- nowhere near a
+    # screen-centred card -- so this function was being called and reaching
+    # the instant-close branch below within one poll tick of the card
+    # appearing. The card opened and closed inside 40ms, invisibly, and every
+    # click looked like it did nothing. This is that bug's actual fix; the
+    # BAR_OPEN_LINGER_SECONDS countdown was already correct, it just never got
+    # the chance to run.
+    if ($script:cardPinnedUntilTouched) { return }
 
     # Anything the user still needs to READ gets the full linger: an admin
     # message they have just opened, and the "Terkirim ke admin" confirmation.
@@ -800,6 +828,22 @@ $timer.Add_Tick({
     # on this window; a one-shot file is the cheapest honest channel.
     $requested = Read-LogbookBarAction
     if ($requested -eq 'open') {
+        # Appear near where they actually clicked -- their YASB bar slot --
+        # instead of the pill's persisted drag anchor, which for 'bar' posture
+        # is whatever it last was and has no relationship to the bar's layout.
+        # A native menu opens at its trigger; this is that, done with the
+        # positioning math Update-LogbookWidgetPosition already has.
+        try {
+            $cur = New-Object LogixWin+POINT
+            if ([LogixWin]::GetCursorPos([ref]$cur)) {
+                $work = Get-LogbookWorkArea
+                if ($work.Width -gt 0) {
+                    $frac = ([double]$cur.X - $work.Left) / $work.Width
+                    $script:cardAnchorOverride = [Math]::Max(0.0, [Math]::Min(1.0, $frac))
+                }
+            }
+        } catch { }
+
         # The card is posture-independent (Update-LogbookWidgetView keys it off
         # cardOpen alone), so it can appear over a bar-mode setup and vanish
         # again on collapse WITHOUT dragging the user back into pill posture.
@@ -810,6 +854,12 @@ $timer.Add_Tick({
         # there permanently. Arm the countdown up front; moving onto the card
         # cancels it the same way it always did.
         $script:collapseAtTick = $script:tick + $script:BAR_OPEN_LINGER_SECONDS
+        # THE actual fix for "opens and instantly closes" -- see
+        # Start-LogbookCollapseCountdown. Without this, the click-through
+        # poll's very next tick treats the cursor being nowhere near a
+        # screen-centred card as a "leave" and closes it before a human could
+        # ever see it.
+        $script:cardPinnedUntilTouched = $true
     } elseif ($requested -eq 'posture') {
         Set-LogbookPosture $(if ($script:posture -eq 'bar') { 'pill' } else { 'bar' })
     }
@@ -945,9 +995,17 @@ $window.Add_SourceInitialized({
         # was reaching for the window underneath. Wait for them to stay.
         $script:collapseAtTick = -1
         $script:hoverDwell.Start()
+        # The pointer genuinely reached a bar-opened card -- ordinary hover
+        # rules (leave = collapse) are correct again from here on.
+        $script:cardPinnedUntilTouched = $false
     } -OnPointerLeave {
         $script:hoverDwell.Stop()
         if ($script:cardOpen) { Start-LogbookCollapseCountdown }
+    } -OnOutsideClick {
+        # The same rule every native menu/dropdown dismisses by. Reaching for
+        # SELESAI shouldn't require discovering a hover timeout first -- click
+        # away, like closing anything else on the desktop.
+        if ($script:cardOpen) { Close-LogbookCard }
     }
 })
 $stripWindow.Add_SourceInitialized({

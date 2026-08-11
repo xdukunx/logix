@@ -2029,6 +2029,12 @@ public static class LogixClickThrough {
     [DllImport("user32.dll", EntryPoint="GetWindowLong")] static extern int GetLong32(IntPtr h, int i);
     [DllImport("user32.dll", EntryPoint="SetWindowLongPtr")] static extern IntPtr SetLongPtr64(IntPtr h, int i, IntPtr v);
     [DllImport("user32.dll", EntryPoint="SetWindowLong")] static extern int SetLong32(IntPtr h, int i, int v);
+    // High bit set = physically down right now. Polled, not hooked -- this is
+    // for "did the user click OUTSIDE the popup", the same signal a native
+    // dropdown/menu uses to dismiss itself.
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+    const int VK_LBUTTON = 0x01;
+    public static bool LeftButtonDown() { return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0; }
 
     static long Ex(IntPtr h) {
         return IntPtr.Size == 8 ? GetLongPtr64(h, GWL_EXSTYLE).ToInt64() : (long)(uint)GetLong32(h, GWL_EXSTYLE);
@@ -2101,6 +2107,12 @@ function Register-LogbookClickThrough {
         [Parameter(Mandatory)] [scriptblock] $GetSurface,
         [scriptblock] $OnPointerEnter,
         [scriptblock] $OnPointerLeave,
+        # Fires on a left-click that lands OUTSIDE the current surface --
+        # dismiss-on-outside-click, the same rule every native menu/dropdown
+        # uses. Only meaningful while the caller considers something "open"
+        # (GetSurface returning non-null); a caller with nothing open should
+        # just not need it.
+        [scriptblock] $OnOutsideClick,
         [int] $PollMs = 40,
         [double] $Grace = 3
     )
@@ -2113,7 +2125,8 @@ function Register-LogbookClickThrough {
     [LogixClickThrough]::Set($hwnd, $true)
 
     $st = [pscustomobject]@{ Hwnd = $hwnd; Get = $GetSurface; Grace = $Grace
-                             Enter = $OnPointerEnter; Leave = $OnPointerLeave; Over = $false }
+                             Enter = $OnPointerEnter; Leave = $OnPointerLeave
+                             Outside = $OnOutsideClick; Over = $false; WasDown = $false }
     $timer = New-Object System.Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromMilliseconds($PollMs)
     $timer.Add_Tick({
@@ -2129,6 +2142,16 @@ function Register-LogbookClickThrough {
                 if ($over) { if ($st.Enter) { & $st.Enter } }
                 else       { if ($st.Leave) { & $st.Leave } }
             }
+
+            # Edge-triggered on the button transition, not "is it down" --
+            # otherwise a click that STARTED outside and dragged in (or a
+            # held button from before the surface even opened) would fire
+            # every single poll tick while held.
+            $down = [LogixClickThrough]::LeftButtonDown()
+            if ($down -and -not $st.WasDown -and $through -and $rect -and $st.Outside) {
+                & $st.Outside
+            }
+            $st.WasDown = $down
         } catch { }
     }.GetNewClosure())
     $timer.Start()
