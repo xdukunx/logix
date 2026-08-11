@@ -424,3 +424,31 @@ if ($closeStart -ge 0) {
     Assert ($closeBody -match 'cardPinnedUntilTouched\s*=\s*\$false') "closing always clears the pin"
     Assert ($closeBody -match 'cardAnchorOverride\s*=\s*\$null') "closing always clears the borrowed cursor-anchored position"
 }
+
+Write-Host "a card opened from the bar must actually render, every time, not just once"
+# The deeper bug behind "gaada menunya" surviving the FIRST fix: the window
+# was fully $window.Hide()-ing between appearances in 'bar' posture (since
+# nothing else -- no pill, no strip -- is ever shown there to keep it
+# visible). Every reopen therefore forced a fresh native Hide()->Show() cycle,
+# unlike pill/strip posture where the window stays continuously Shown() and
+# only toggles WS_EX_TRANSPARENT for click-through. State (cardOpen, WPF
+# Opacity/Visibility) and even raw Win32 z-order all read back correctly after
+# that cycle -- nothing exceptioned, nothing logged -- the window just never
+# painted a visible pixel. Confirmed live: three consecutive open -> 22s
+# auto-collapse -> reopen rounds against one long-lived process; only a fix
+# that survives round 2 and 3 (not just round 1, a fresh process's first-ever
+# Show()) actually closes this out.
+Assert ($timerSrc -match "elseif \(\`$script:posture -ne 'bar'\)") `
+    "bar posture is carved out of the Hide() path"
+$hideIdx = $timerSrc.IndexOf('function Update-LogbookWidgetView')
+Assert ($hideIdx -ge 0) "Update-LogbookWidgetView is defined"
+if ($hideIdx -ge 0) {
+    $hideEnd = $timerSrc.IndexOf("`nfunction ", $hideIdx + 1)
+    $hideBody = if ($hideEnd -gt $hideIdx) { $timerSrc.Substring($hideIdx, $hideEnd - $hideIdx) } else { $timerSrc.Substring($hideIdx) }
+    # Both branches must exist and in the right relationship: bar posture
+    # skips Hide() (falls into the elseif doing nothing), everything else
+    # still gets a real Hide() -- pill/strip posture legitimately has nothing
+    # to show when the sliver is retracted, and hiding there is correct.
+    Assert ($hideBody -match "posture -ne 'bar'") "the carve-out is scoped to bar posture specifically"
+    Assert ($hideBody -match '\$window\.Hide\(\)') "non-bar posture still hides normally when nothing is shown"
+}

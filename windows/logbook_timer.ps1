@@ -377,6 +377,21 @@ function Update-LogbookWidgetView {
 
     if ($showCard -or $showPill -or $showSliver) {
         if (-not $window.IsVisible) { $window.Show() }
+    } elseif ($script:posture -ne 'bar') {
+        # 'bar' posture is EXPRESSLY the one where nothing shows most of the
+        # time and a card can be summoned at any moment from a separate
+        # process. Fully Hide()-ing between appearances forces every bar-open
+        # through a fresh native Hide->Show cycle -- unlike pill/strip, which
+        # stay continuously Shown() and only ever toggle WS_EX_TRANSPARENT for
+        # click-through. That cycle is where the card actually broke: state
+        # (cardOpen, WPF Opacity/Visibility) and even raw Win32 z-order all
+        # read correctly afterward, yet nothing painted -- SizeToContent
+        # collapsing the window to ~0x0 while parked keeps it "shown" (so the
+        # next open is the SAME kind of transition the pill already does
+        # reliably) without actually occupying any visible or clickable space.
+        # No explicit sizing needed here: SizeToContent="WidthAndHeight"
+        # already shrinks the window to match its (now fully Collapsed, ~0x0)
+        # content -- that part was never the problem.
     } else {
         $window.Hide()
     }
@@ -826,7 +841,13 @@ $timer.Add_Tick({
     # Actions a status bar asked for, e.g. YASB's on_right callback. Polled
     # rather than pushed because the bar is a separate process with no handle
     # on this window; a one-shot file is the cheapest honest channel.
-    $requested = Read-LogbookBarAction
+    try {
+        $requested = Read-LogbookBarAction
+    } catch {
+        Write-LogbookError "Read-LogbookBarAction threw: $($_.Exception.Message)"
+        $requested = ''
+    }
+    if ($requested) { Write-LogbookInfo "bar action requested: $requested" }
     if ($requested -eq 'open') {
         # Appear near where they actually clicked -- their YASB bar slot --
         # instead of the pill's persisted drag anchor, which for 'bar' posture
@@ -842,24 +863,32 @@ $timer.Add_Tick({
                     $script:cardAnchorOverride = [Math]::Max(0.0, [Math]::Min(1.0, $frac))
                 }
             }
-        } catch { }
+        } catch {
+            Write-LogbookError "bar-open cursor positioning threw: $($_.Exception.Message)"
+        }
 
-        # The card is posture-independent (Update-LogbookWidgetView keys it off
-        # cardOpen alone), so it can appear over a bar-mode setup and vanish
-        # again on collapse WITHOUT dragging the user back into pill posture.
-        Open-LogbookCard
-        # ...but it has to be TOLD to vanish. Collapse is normally driven by the
-        # pointer leaving, and a card opened from the status bar may never have
-        # had the pointer over it at all -- no enter, so no leave, so it sat
-        # there permanently. Arm the countdown up front; moving onto the card
-        # cancels it the same way it always did.
-        $script:collapseAtTick = $script:tick + $script:BAR_OPEN_LINGER_SECONDS
-        # THE actual fix for "opens and instantly closes" -- see
-        # Start-LogbookCollapseCountdown. Without this, the click-through
-        # poll's very next tick treats the cursor being nowhere near a
-        # screen-centred card as a "leave" and closes it before a human could
-        # ever see it.
-        $script:cardPinnedUntilTouched = $true
+        try {
+            # The card is posture-independent (Update-LogbookWidgetView keys it
+            # off cardOpen alone), so it can appear over a bar-mode setup and
+            # vanish again on collapse WITHOUT dragging the user back into pill
+            # posture.
+            Open-LogbookCard
+            # ...but it has to be TOLD to vanish. Collapse is normally driven by
+            # the pointer leaving, and a card opened from the status bar may
+            # never have had the pointer over it at all -- no enter, so no
+            # leave, so it sat there permanently. Arm the countdown up front;
+            # moving onto the card cancels it the same way it always did.
+            $script:collapseAtTick = $script:tick + $script:BAR_OPEN_LINGER_SECONDS
+            # Blocks Start-LogbookCollapseCountdown's instant-close branch,
+            # which the very next click-through poll tick (~40ms away) would
+            # otherwise hit -- the cursor is nowhere near a card that just
+            # appeared, and that used to read as "pointer left, close now."
+            $script:cardPinnedUntilTouched = $true
+            Write-LogbookInfo ("bar-open: cardOpen={0} winIsVisible={1} anchor={2}" -f `
+                $script:cardOpen, $window.IsVisible, $script:cardAnchorOverride)
+        } catch {
+            Write-LogbookError "Open-LogbookCard (bar action) threw: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
+        }
     } elseif ($requested -eq 'posture') {
         Set-LogbookPosture $(if ($script:posture -eq 'bar') { 'pill' } else { 'bar' })
     }
