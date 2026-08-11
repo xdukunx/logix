@@ -2235,37 +2235,42 @@ $res
       <Border.Effect><DropShadowEffect BlurRadius="36" ShadowDepth="12" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
       <StackPanel>
 
-        <Grid Margin="0,0,0,12">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/>
-          </Grid.ColumnDefinitions>
-          <Ellipse Name="CardDot" Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-          <TextBlock Name="CardClock" Grid.Column="1" Text="00:00:00" FontFamily="Consolas" FontSize="18"
-                     Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
-          <TextBlock Name="CardStation" Grid.Column="2" Text="$station" FontFamily="Consolas" FontSize="11"
-                     Foreground="{StaticResource LxMuted}" HorizontalAlignment="Right" VerticalAlignment="Center"
-                     TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <!-- Session identity. Hidden while armed or while a message is open. -->
-        <StackPanel Name="CardInfo">
-          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10"/>
-          <Grid Margin="0,0,0,6">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <TextBlock Text="Nama" Style="{StaticResource LxLabel}"/>
-            <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" Style="{StaticResource LxValue}"/>
+        <!-- Session identity. Hidden while armed or while a message is open.
+             A ring plus a big centered clock, not a label/value table: the
+             "feels native" reference for this was a status-bar widget's own
+             popup (YASB's pomodoro), which anchors a circular dial with the
+             time inside it rather than a form. There is no fixed-duration
+             target here to draw a partial arc against, since a lab session
+             has no "25:00" to count down to, so the ring is a static frame,
+             not a progress indicator: an accurate one that looks decorative
+             beats a precise-looking one that lies about progress that does
+             not exist. -->
+        <StackPanel Name="CardInfo" HorizontalAlignment="Center">
+          <Grid Width="152" Height="152" Margin="0,2,0,14" HorizontalAlignment="Center">
+            <Ellipse Width="152" Height="152" Stroke="{StaticResource LxHairline}" StrokeThickness="2"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Ellipse Name="CardDot" Width="8" Height="8" Fill="{StaticResource LxActive}"
+                       HorizontalAlignment="Center" Margin="0,0,0,10"/>
+              <TextBlock Name="CardClock" Text="00:00:00" FontFamily="Consolas" FontSize="24" FontWeight="SemiBold"
+                         Foreground="{StaticResource LxText}" HorizontalAlignment="Center"/>
+              <TextBlock Name="CardStation" Text="$station" FontFamily="Consolas" FontSize="11"
+                         Foreground="{StaticResource LxMuted}" HorizontalAlignment="Center" Margin="0,6,0,0"
+                         TextTrimming="CharacterEllipsis" MaxWidth="120"/>
+            </StackPanel>
           </Grid>
-          <Grid Margin="0,0,0,6">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <TextBlock Text="Tujuan" Style="{StaticResource LxLabel}"/>
-            <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" Style="{StaticResource LxValue}"/>
-          </Grid>
-          <Grid Margin="0,0,0,12">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="76"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <TextBlock Text="Perangkat" Style="{StaticResource LxLabel}"/>
-            <TextBlock Grid.Column="1" Name="DeviceValue" Text="$perangkat" FontFamily="Consolas" FontSize="12"
-                       Foreground="{StaticResource LxText}" TextTrimming="CharacterEllipsis"/>
-          </Grid>
+          <TextBlock Name="NamaValue" Text="$nama" FontFamily="Consolas" FontSize="12.5"
+                     Foreground="{StaticResource LxText}" HorizontalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" MaxWidth="204" Margin="0,0,0,3"/>
+          <!-- Two real TextBlocks, not inline Runs: the test suite finds
+               fields by walking TextBlock elements specifically, and a Run
+               is a different element type it would silently never find. -->
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,14">
+            <TextBlock Name="TujuanValue" Text="$tujuan" FontSize="11.5" Foreground="{StaticResource LxMuted}"
+                       TextTrimming="CharacterEllipsis" MaxWidth="95"/>
+            <TextBlock Text=" &#183; " FontSize="11.5" Foreground="{StaticResource LxMuted}"/>
+            <TextBlock Name="DeviceValue" Text="$perangkat" FontSize="11.5" Foreground="{StaticResource LxMuted}"
+                       TextTrimming="CharacterEllipsis" MaxWidth="95"/>
+          </StackPanel>
         </StackPanel>
 
         <!-- Admin message. Never auto-expands; revealed when the user hovers. -->
