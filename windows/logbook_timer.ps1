@@ -93,18 +93,16 @@ $script:COLLAPSE_SECONDS   = 5     # card auto-collapses 5s after the cursor lea
 # short enough that forgetting about it does not leave a panel on screen for
 # the rest of the day.
 $script:BAR_OPEN_LINGER_SECONDS = 20
-# SELESAI auto-disarms if not confirmed. Three seconds was too short to be
-# usable: the first press turns the button red and relabels it "Tekan lagi
-# untuk selesai", and someone meeting that for the first time has to read it,
-# understand it, and press again -- inside three seconds, or it silently resets
-# and they are back where they started. Repeat that twice and the honest
-# conclusion is "this thing cannot be stopped", which is exactly what was
-# reported. Long enough to read and act, still far too short to arm by accident
-# and confirm by accident.
-$script:DISARM_SECONDS     = 8
-# The caption counts this down, so it is derived rather than written twice --
-# the XAML used to hardcode "3 dtk" and would have lied the moment this changed.
-$script:ARMED_CAPTION_FMT  = 'batal otomatis dalam {0} dtk'
+# SELESAI is a press-and-hold, not a tap. The earlier tap-to-arm/tap-to-confirm
+# pair gave no feedback while nothing was happening between the two taps, and
+# a single tap alone -- the one gesture most people actually try first --
+# looked and felt like nothing occurred, which is exactly what was reported.
+# A continuous hold fixes that at the source: the fill starts moving the
+# instant the button goes down, so there is no gap in feedback to misread as
+# "broken", and letting go early cancels cleanly like a native "hold to power
+# off" control. Long enough that a stray/accidental press cannot complete it,
+# short enough not to feel like a chore for someone who means it.
+$script:SELESAI_HOLD_MS    = 1200
 $script:DWELL_MS           = 300   # top-edge dwell before the sliver drops
 $script:AUTOPEEK_SECONDS   = 4     # sliver auto-peek on an incoming message
 $script:IDLE_WARN_SECONDS  = 300   # countdown overlay opens 5 min before auto-end
@@ -179,6 +177,8 @@ $replySend   = $window.FindName('ReplySendBtn')
 $cardSent    = $window.FindName('CardSent')
 $sentText    = $window.FindName('SentText')
 $selesaiBtn  = $window.FindName('SelesaiBtn')
+$selesaiFill = $window.FindName('SelesaiFill')
+$selesaiLabel = $window.FindName('SelesaiLabel')
 $armedCap    = $window.FindName('ArmedCaption')
 $quickOk     = $window.FindName('QuickOkBtn')
 $quickWait   = $window.FindName('QuickWaitBtn')
@@ -193,8 +193,8 @@ $script:allowClose      = $false
 $script:tick            = 0
 $script:cardOpen        = $false
 $script:sliverOpen      = $false
-$script:selesaiArmed    = $false
-$script:selesaiArmTick  = -1
+$script:selesaiHolding     = $false
+$script:selesaiHoldStarted = $null
 $script:collapseAtTick  = -1
 $script:sliverHideTick  = -1
 # Set the moment a status bar asks for the card (not a hover). Guards against
@@ -423,16 +423,17 @@ function Update-LogbookWidgetView {
     $stripWindow.Visibility = if ($script:posture -eq 'strip') { 'Visible' } else { 'Collapsed' }
 
     # Card contents depend on the message state machine.
-    $isArmed = $script:selesaiArmed
     $hasMsg  = $script:msgState -in @('reading','replying')
     $isSent  = $script:msgState -eq 'sent'
 
-    $cardInfo.Visibility    = if ($isArmed -or $hasMsg -or $isSent) { 'Collapsed' } else { 'Visible' }
+    $cardInfo.Visibility    = if ($hasMsg -or $isSent) { 'Collapsed' } else { 'Visible' }
     $cardMessage.Visibility = if ($hasMsg) { 'Visible' } else { 'Collapsed' }
     $cardQuick.Visibility   = if ($script:msgState -eq 'reading' -and $script:msgAllowReply) { 'Visible' } else { 'Collapsed' }
     $cardReplyRw.Visibility = if ($script:msgState -eq 'replying') { 'Visible' } else { 'Collapsed' }
     $cardSent.Visibility    = if ($isSent) { 'Visible' } else { 'Collapsed' }
-    $armedCap.Visibility    = if ($isArmed) { 'Visible' } else { 'Collapsed' }
+    # Hidden, never Collapsed: Collapsed would give the space back and resize
+    # the card mid-press, which is what cancelled the hold 110ms in.
+    $armedCap.Visibility    = if ($script:selesaiHolding) { 'Visible' } else { 'Hidden' }
     # SELESAI is out of the way while the user is answering the admin.
     $selesaiBtn.Visibility  = if ($hasMsg -or $isSent) { 'Collapsed' } else { 'Visible' }
     # A message card is the wider 260px variant (design M1-M3).
@@ -459,32 +460,53 @@ function Update-LogbookWidgetView {
     Update-LogbookWidgetPosition
 }
 
-# ---- SELESAI: armed -> confirm ----------------------------------------------
+# ---- SELESAI: press-and-hold to confirm -------------------------------------
+# Runs its own fast timer rather than piggybacking on the 1s widget tick --
+# a fill that visibly moves needs far finer steps than once a second, and
+# this is the one control on the whole widget where a laggy, jerky "is this
+# even doing anything" feeling is the exact complaint being fixed.
+$script:selesaiHoldTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:selesaiHoldTimer.Interval = [TimeSpan]::FromMilliseconds(16)
+
+# Round off the fill against the pill's own shape. Border.ClipToBounds clips to
+# the RECTANGLE and ignores CornerRadius entirely, so without this a fill that
+# has reached full width paints square red corners over the button's rounded
+# ends. Built from the measured size rather than hardcoded, since the card
+# swaps between its 240 and 260px variants.
+$selesaiBtn.Add_SizeChanged({
+    if ($selesaiBtn.ActualWidth -le 0 -or $selesaiBtn.ActualHeight -le 0) { return }
+    $geo = New-Object System.Windows.Media.RectangleGeometry
+    $geo.Rect = New-Object System.Windows.Rect 0, 0, $selesaiBtn.ActualWidth, $selesaiBtn.ActualHeight
+    # WPF clamps a CornerRadius to half the shorter side; matching that here
+    # keeps the clip flush with the border instead of cutting inside it.
+    $r = [Math]::Min(20, $selesaiBtn.ActualHeight / 2)
+    $geo.RadiusX = $r
+    $geo.RadiusY = $r
+    $selesaiBtn.Clip = $geo
+})
+
 function Reset-LogbookSelesai {
-    $script:selesaiArmed = $false
-    $script:selesaiArmTick = -1
-    $selesaiBtn.Content = (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
-    $selesaiBtn.Background = $brushConv.ConvertFromString('#00FFFFFF')
-    $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.border)
-    $selesaiBtn.Foreground = $brushConv.ConvertFromString($theme.text)
+    $script:selesaiHolding = $false
+    $script:selesaiHoldStarted = $null
+    $script:selesaiHoldTimer.Stop()
+    if ($selesaiBtn.IsMouseCaptured) { $selesaiBtn.ReleaseMouseCapture() }
+    $selesaiFill.Width = 0
+    $selesaiLabel.Foreground = $brushConv.ConvertFromString($theme.text)
     Update-LogbookWidgetView
 }
 
-$selesaiBtn.Add_Click({
-    if (-not $script:selesaiArmed) {
-        $script:selesaiArmed = $true
-        $script:selesaiArmTick = $script:tick
-        $selesaiBtn.Content = (Get-LogbookText $cfg 'timerEndArmed' 'Tekan lagi untuk selesai')
-        # Set here as well as on the tick: the tick is a second away, and a
-        # stale number flashing for that second is exactly the kind of small
-        # lie that makes a countdown untrustworthy.
-        $armedCap.Text = ($script:ARMED_CAPTION_FMT -f $script:DISARM_SECONDS)
-        $red = $brushConv.ConvertFromString($theme.signalCritical)
-        $selesaiBtn.Background = $red
-        $selesaiBtn.BorderBrush = $red
-        $selesaiBtn.Foreground = $brushConv.ConvertFromString('#FFFFFF')
-        Update-LogbookWidgetView
-    } else {
+$script:selesaiHoldTimer.Add_Tick({
+    if (-not $script:selesaiHolding) { $script:selesaiHoldTimer.Stop(); return }
+    $elapsedMs = ((Get-Date) - $script:selesaiHoldStarted).TotalMilliseconds
+    $frac = [Math]::Min(1.0, $elapsedMs / $script:SELESAI_HOLD_MS)
+    $selesaiFill.Width = $frac * $selesaiBtn.ActualWidth
+    # The label crosses into the filled (red) region as it grows, so it needs
+    # to flip to white partway through rather than staying dark-on-dark.
+    $selesaiLabel.Foreground = $brushConv.ConvertFromString($(if ($frac -gt 0.55) { '#FFFFFF' } else { $theme.text }))
+    if ($frac -ge 1.0) {
+        $script:selesaiHoldTimer.Stop()
+        $script:selesaiHolding = $false
+        if ($selesaiBtn.IsMouseCaptured) { $selesaiBtn.ReleaseMouseCapture() }
         # Confirmed. The end-session routine is called completely unchanged.
         try { Close-LogbookSessionAndLock } catch { Write-LogbookError "SELESAI failed: $($_.Exception.Message)" }
         $script:allowClose = $true
@@ -493,6 +515,33 @@ $selesaiBtn.Add_Click({
         $window.Close()
     }
 })
+
+$selesaiBtn.Add_PreviewMouseLeftButtonDown({
+    $script:selesaiHolding = $true
+    $script:selesaiHoldStarted = Get-Date
+    # Capture so the release is delivered here no matter where the pointer
+    # ends up. Without it a hold that drifts off the button never sees its
+    # mouse-up, and the fill would keep running to completion after the user
+    # had already let go -- the worst possible failure for this control.
+    try {
+        [void]$selesaiBtn.CaptureMouse()
+        Update-LogbookWidgetView
+        $script:selesaiHoldTimer.Start()
+    } catch {
+        # A hold that half-starts is worse than one that never starts: the
+        # fill would sit part-grown with no timer to finish or clear it.
+        Write-LogbookError "SELESAI hold failed to start: $($_.Exception.Message)"
+        Reset-LogbookSelesai
+    }
+})
+# Letting go before the fill completes cancels cleanly. Deliberately NOT wired
+# to MouseLeave: the card is anchored under the cursor, and any wobble in its
+# position would read as a leave and cancel a hold the user is still making.
+# The release is the honest signal, and capture guarantees we get it.
+$cancelSelesaiHold = {
+    if ($script:selesaiHolding) { Reset-LogbookSelesai }
+}
+$selesaiBtn.Add_PreviewMouseLeftButtonUp($cancelSelesaiHold)
 
 # ---- Expand / collapse ------------------------------------------------------
 function Open-LogbookCard {
@@ -513,7 +562,7 @@ function Close-LogbookCard {
     # Only ever meant for the one appearance that borrowed it; the pill's own
     # remembered position must not drift to wherever a bar-click last landed.
     $script:cardAnchorOverride = $null
-    if ($script:selesaiArmed) { Reset-LogbookSelesai }
+    if ($script:selesaiHolding) { Reset-LogbookSelesai }
     if ($script:msgState -in @('reading','sent')) { $script:msgState = 'none' }
     Update-LogbookWidgetView
 }
@@ -521,6 +570,13 @@ function Close-LogbookCard {
 function Start-LogbookCollapseCountdown {
     # The card must not vanish mid-sentence while the user is typing a reply.
     if ($script:msgState -eq 'replying' -and $replyInput.IsKeyboardFocusWithin) { return }
+
+    # A hold in progress is sustained, deliberate input -- the one moment the
+    # card must not be pulled out from under the pointer. The poll can briefly
+    # read a leave here (the card is anchored near the cursor and the pointer
+    # sits right on its edge), and acting on it cancelled the very gesture the
+    # user was making.
+    if ($script:selesaiHolding) { return }
 
     # A card the STATUS BAR opened gets its own linger honoured, full stop.
     # Without this: the click-through poll runs every ~40ms, the user's cursor
@@ -907,16 +963,6 @@ $timer.Add_Tick({
         -Tooltip ("{0} {1} {2}" -f $script:stationLabel, [char]0x00B7, $cardClock.Text) `
         -State (Get-LogbookBarState)
 
-    if ($script:selesaiArmed) {
-        $left = $script:DISARM_SECONDS - ($script:tick - $script:selesaiArmTick)
-        if ($left -le 0) {
-            Reset-LogbookSelesai
-        } else {
-            # A live countdown, so the window you have is visible rather than
-            # something you discover by missing it.
-            $armedCap.Text = ($script:ARMED_CAPTION_FMT -f $left)
-        }
-    }
     if ($script:collapseAtTick -ge 0 -and $script:tick -ge $script:collapseAtTick) {
         if ($script:msgState -eq 'replying' -and $replyInput.IsKeyboardFocusWithin) {
             $script:collapseAtTick = $script:tick + $script:COLLAPSE_SECONDS
@@ -1032,7 +1078,9 @@ $window.Add_SourceInitialized({
         # The same rule every native menu/dropdown dismisses by. Reaching for
         # SELESAI shouldn't require discovering a hover timeout first -- click
         # away, like closing anything else on the desktop.
-        if ($script:cardOpen) { Close-LogbookCard }
+        # A press being held ON the button is never an outside click, however
+        # the poll's rect happens to land at that instant.
+        if ($script:cardOpen -and -not $script:selesaiHolding) { Close-LogbookCard }
     }
 })
 $stripWindow.Add_SourceInitialized({

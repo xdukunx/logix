@@ -663,7 +663,7 @@ function Get-LogbookDefaultConfig {
             privacyOneLiner  = 'Siapa, cara & kapan - bukan ketikan.'
             # Timer widget (C8.2)
             timerEnd         = 'SELESAI'
-            timerEndArmed    = 'Tekan lagi untuk selesai'
+            timerEndArmed    = 'Tahan terus untuk menyelesaikan'
             timerNama        = 'Nama'
             timerTujuan      = 'Tujuan'
             timerPerangkat   = 'Perangkat'
@@ -709,7 +709,7 @@ function Get-LogbookDefaultConfig {
                 notYou         = 'Not you / change details'
                 whatsRecorded  = "What's recorded?"
                 timerEnd       = 'END'
-                timerEndArmed  = 'Press again to end'
+                timerEndArmed  = 'Keep holding to finish'
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
                 msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'
                 noticePrivacyTitle = 'Privacy Notice'
@@ -2204,6 +2204,10 @@ function Register-LogbookClickThrough {
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $res = Build-LogbookClientResources $cfg
     $tSelesai = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
+    # Baked in rather than filled at press time. The caption has to occupy its
+    # final height from the very first layout: it is Hidden, not Collapsed, so
+    # revealing it cannot change the card's size. See the XAML note below.
+    $tArmed = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEndArmed' 'Tahan terus untuk menyelesaikan')
 
     $nama   = ConvertTo-LogbookXmlText ([string]$session.nama)
     $tujuan = ConvertTo-LogbookXmlText ([string]$session.tujuan)
@@ -2364,14 +2368,34 @@ $res
                      Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
         </StackPanel>
 
-        <!-- SELESAI: a real armed -> confirm state machine, not a CSS trick.
-             The controller arms it red on first click and auto-disarms after 3s. -->
-        <Button Name="SelesaiBtn" Content="$tSelesai" Style="{StaticResource LxPill}"
-                Padding="0,9" HorizontalContentAlignment="Center"/>
-        <!-- Text is filled at runtime from $script:ARMED_CAPTION_FMT and counts
-             down; hardcoding a number here made the caption lie the moment
-             DISARM_SECONDS changed. -->
-        <TextBlock Name="ArmedCaption" Visibility="Collapsed" Text=""
+        <!-- SELESAI: press-and-hold to confirm, not a tap. SelesaiFill is an
+             empty-width Border the controller grows left-to-right over the
+             hold. The fill is deliberately SQUARE-cornered and relies on the
+             controller's rounded Clip to shape it: giving the fill its own
+             CornerRadius instead made a part-grown fill render as a floating
+             lozenge that had visibly detached from the left edge, rather than
+             as the pill filling up. ClipToBounds cannot do this job on its
+             own, because a Border clips to its rectangle, corner radius and
+             all; the controller installs a real rounded clip instead. -->
+        <Border Name="SelesaiBtn" Height="36" CornerRadius="20" ClipToBounds="True"
+                Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
+                BorderThickness="1" Cursor="Hand">
+          <Grid>
+            <Border Name="SelesaiFill" Background="{StaticResource LxCritical}"
+                    HorizontalAlignment="Left" Width="0"/>
+            <TextBlock Name="SelesaiLabel" Text="$tSelesai" HorizontalAlignment="Center"
+                       VerticalAlignment="Center" TextWrapping="NoWrap"
+                       FontFamily="Segoe UI Semibold" FontSize="12.5"
+                       Foreground="{StaticResource LxText}"/>
+          </Grid>
+        </Border>
+        <!-- Hidden, NOT Collapsed, and its text is baked in rather than set on
+             press. Collapsed reserves no space, so revealing this on mouse-down
+             grew the card, slid SELESAI out from under the stationary cursor,
+             and WPF fired MouseLeave on the button, cancelling the hold about
+             110ms after it started, every time. Reserving the space means
+             pressing changes no geometry at all. -->
+        <TextBlock Name="ArmedCaption" Visibility="Hidden" Text="$tArmed"
                    FontSize="11" Foreground="{StaticResource LxMuted}"
                    HorizontalAlignment="Center" Margin="0,8,0,0"/>
       </StackPanel>

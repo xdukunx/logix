@@ -110,7 +110,16 @@ Assert ((& $tb 'CardClock').Text -eq '00:00:00') "card clock carries seconds"
 Assert ((& $bd 'PillBadge').Visibility -eq 'Collapsed') "unread badge hidden until a message arrives"
 $cardMsg = $timerDoc.SelectNodes("//*[local-name()='StackPanel']") | Where-Object { $_.Name -eq 'CardMessage' }
 Assert ($cardMsg.Visibility -eq 'Collapsed') "message block collapsed by default (never auto-expands)"
-Assert ((& $tb 'ArmedCaption').Visibility -eq 'Collapsed') "armed caption hidden until SELESAI is armed"
+# Hidden, not Collapsed, and carrying its final text from the start: revealing
+# it must not change the card's height. When it was Collapsed with empty text,
+# showing it on mouse-down grew the card, slid SELESAI out from under the
+# cursor and cancelled the hold ~110ms in -- the press looked like it did
+# nothing, which is exactly the bug this control was meant to fix.
+$armedCapNode = & $tb 'ArmedCaption'
+Assert ($armedCapNode.Visibility -eq 'Hidden') "hold hint reserves its space (Hidden, never Collapsed)"
+Assert (-not [string]::IsNullOrWhiteSpace($armedCapNode.Text)) "hold hint carries its text from the first layout, so revealing it cannot resize the card"
+$selesaiFill = $timerDoc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'SelesaiFill' }
+Assert ($selesaiFill.Width -eq '0') "the hold fill starts empty -- SELESAI reads as untouched until pressed"
 
 Write-Host "v3 anti-pattern guard rails (client)"
 Assert ($timerXaml -notmatch 'GradientBrush') "no gradient anywhere in the timer widget"
@@ -358,19 +367,71 @@ try {
     Assert $false "the file round-trips through the exact decode+parse path YASB uses: $($_.Exception.Message)"
 }
 
-Write-Host "SELESAI confirm window (reported as 'cannot be stopped')"
-# Two-step by design: press once to arm, again to confirm. The window was 3
-# seconds, which is not enough time to read a button you have never seen,
-# understand it and press again -- it silently re-disarmed and the honest
-# reading was that the session could not be ended at all.
-Assert ($timerSrc -match '\$script:DISARM_SECONDS\s*=\s*(\d+)') "the confirm window is a named constant"
-$disarm = [int]$Matches[1]
-Write-Host "  confirm window: ${disarm}s"
-Assert ($disarm -ge 5 -and $disarm -le 15) "long enough to read and act on, short enough not to arm by accident (${disarm}s)"
-# The caption used to hardcode '3 dtk' in the XAML, so changing the constant
-# would have made the countdown lie.
-Assert ($timerSrc -match 'ARMED_CAPTION_FMT') "the caption text is derived from the constant, not written twice"
-Assert ($commonSrc -notmatch 'batal otomatis dalam 3 dtk') "no hardcoded countdown number left in the XAML"
+Write-Host "XAML comments must be legal XML"
+# '--' is illegal inside an XML comment, and this repo's prose comment style
+# reaches for it constantly. Every occurrence has surfaced as a XamlReader
+# cast failure at runtime with a stack trace pointing at the loader rather
+# than at the comment, so it is worth naming directly.
+$badComments = @()
+foreach ($srcFile in @('logbook_common.ps1', 'logbook_timer.ps1')) {
+    $p = Join-Path $PSScriptRoot $srcFile
+    if (-not (Test-Path $p)) { continue }
+    $text = [System.IO.File]::ReadAllText($p)
+    foreach ($m in [regex]::Matches($text, '(?s)<!--(.*?)-->')) {
+        $body = $m.Groups[1].Value
+        if ($body -match '--' -or $body.EndsWith('-')) {
+            $ln = ($text.Substring(0, $m.Index) -split "`n").Count
+            $badComments += "${srcFile}:${ln}"
+        }
+    }
+}
+Assert ($badComments.Count -eq 0) "no XML comment contains '--' ($($badComments -join ', '))"
+
+Write-Host "SELESAI: press-and-hold (reported as 'cannot be stopped')"
+# Was tap-to-arm then tap-to-confirm. Between the two taps nothing moved, and
+# a single tap -- the gesture everyone tries first -- looked like nothing had
+# happened at all, so the honest reading was that the session could not be
+# ended. A hold gives continuous feedback from the first millisecond, so there
+# is no silent gap left to misread.
+Assert ($timerSrc -match '\$script:SELESAI_HOLD_MS\s*=\s*(\d+)') "the hold duration is a named constant"
+$holdMs = [int]$Matches[1]
+Write-Host "  hold duration: ${holdMs}ms"
+Assert ($holdMs -ge 800 -and $holdMs -le 2500) "long enough that a stray press cannot finish it, short enough not to be a chore (${holdMs}ms)"
+Assert ($timerSrc -match 'Add_PreviewMouseLeftButtonDown') "the hold starts on button-down, not on a completed click"
+Assert ($timerSrc -match 'Add_PreviewMouseLeftButtonUp') "releasing early cancels the hold"
+# Capture, not MouseLeave. MouseLeave cancelled holds the user was still
+# making whenever the anchored card shifted under the pointer; capture makes
+# the release the only thing that ends a hold, and guarantees it arrives.
+Assert ($timerSrc -match 'CaptureMouse\(\)') "the button captures the mouse so the release is never missed"
+Assert ($timerSrc -match 'ReleaseMouseCapture\(\)') "and releases that capture again"
+Assert ($timerSrc -notmatch 'selesaiBtn\.Add_MouseLeave') "a stray MouseLeave cannot cancel a hold in progress"
+# Nothing else may yank the card away mid-hold either.
+$collapseFn = [regex]::Match($timerSrc, 'function Start-LogbookCollapseCountdown\s*\{(?s).*?\n\}').Value
+Assert ($collapseFn -match 'selesaiHolding') "the collapse countdown refuses to close the card during a hold"
+Assert ($timerSrc -match 'cardOpen -and -not \$script:selesaiHolding') "a held press is never treated as an outside click"
+# The fill has to be driven far finer than the widget's 1s tick or the bar
+# visibly jumps, which is the same 'is this even doing anything' feeling the
+# hold exists to remove.
+Assert ($timerSrc -match 'selesaiHoldTimer\.Interval\s*=\s*\[TimeSpan\]::FromMilliseconds\((\d+)\)') "the fill runs on its own fast timer"
+$fillMs = [int]$Matches[1]
+Assert ($fillMs -le 33) "the fill animates at 30fps or better (got ${fillMs}ms/frame)"
+Assert ($commonSrc -match 'Name="SelesaiFill"') "the card exposes the fill the hold grows"
+Assert ($commonSrc -match 'Name="SelesaiLabel"') "the label is addressable so it can flip colour over the fill"
+# Border.ClipToBounds clips to the RECTANGLE and ignores CornerRadius, so the
+# rounded shape has to come from a real geometry clip. Without it a part-grown
+# fill detached from the left edge into a floating lozenge, and a full fill
+# painted square red corners over the pill's rounded ends.
+Assert ($timerSrc -match 'selesaiBtn\.Clip\s*=') "the controller installs a real rounded clip on the button"
+Assert ($timerSrc -match 'RectangleGeometry') "the clip is a geometry, not a bounds flag that ignores corner radius"
+Assert ($timerSrc -match 'Add_SizeChanged') "the clip is rebuilt from the measured size, not hardcoded to one card width"
+# A fill carrying its own CornerRadius is what produced the floating-lozenge
+# look; it must stay square and let the clip do the rounding.
+$fillTag = [regex]::Match($commonSrc, '<Border Name="SelesaiFill"[^>]*>').Value
+Assert ($fillTag -notmatch 'CornerRadius') "the fill itself is square-cornered (the clip rounds it, not the fill)"
+# The old arm/confirm vocabulary must be gone, not merely unused -- a stale
+# constant here is how a half-migrated control ends up with two state machines.
+Assert ($timerSrc -notmatch 'DISARM_SECONDS|ARMED_CAPTION_FMT|selesaiArmed|selesaiArmTick') "no leftovers from the old arm/confirm state machine"
+Assert ($commonSrc -notmatch 'batal otomatis dalam') "no leftover auto-cancel countdown copy in the XAML"
 
 Write-Host "a card opened from the status bar must close itself"
 # Collapse is normally driven by the pointer LEAVING. A card opened from the
@@ -409,7 +470,7 @@ Assert ([regex]::IsMatch($timerSrc, '-OnPointerEnter\s*\{.{0,900}?cardPinnedUnti
     "OnPointerEnter specifically un-pins the card"
 
 Assert ($timerSrc -match '-OnOutsideClick') "a click outside the card dismisses it -- the native menu behaviour asked for"
-Assert ([regex]::IsMatch($timerSrc, '-OnOutsideClick\s*\{.{0,400}?Close-LogbookCard', 'Singleline')) `
+Assert ([regex]::IsMatch($timerSrc, '-OnOutsideClick\s*\{.{0,800}?Close-LogbookCard', 'Singleline')) `
     "the outside-click handler actually closes the open card"
 
 # Close-LogbookCard is the one function every dismissal path funnels through
