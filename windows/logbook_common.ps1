@@ -2053,6 +2053,20 @@ public static class LogixClickThrough {
         if (IntPtr.Size == 8) { SetLongPtr64(h, GWL_EXSTYLE, new IntPtr(next)); }
         else { SetLong32(h, GWL_EXSTYLE, (int)(uint)next); }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int L, T, R, B; }
+    [DllImport("user32.dll", EntryPoint = "GetWindowRect")] static extern bool GetWindowRectRaw(IntPtr h, out RECT r);
+    // The window's TRUE on-screen footprint, in the same physical pixels
+    // GetCursorPos reports. Needed because this host (plain powershell.exe,
+    // no per-monitor-v2 manifest) is not DPI-aware -- Windows silently
+    // bitmap-scales the whole window for display, and WPF's own
+    // PointToScreen has no idea that happened, so it keeps answering in the
+    // UN-scaled logical space. The two agree near the window's origin and
+    // drift apart with distance from it, which is why a short pill was fine
+    // and a tall card was not: the drift is proportional to how far down
+    // the element sits.
+    public static RECT WindowRect(IntPtr h) { RECT r; GetWindowRectRaw(h, out r); return r; }
 }
 "@
 
@@ -2077,12 +2091,39 @@ function Use-LogbookNativeType {
 # calls rather than ActualWidth arithmetic, so it is correct at any DPI and
 # follows the pill as it auto-sizes -- no rectangle here can drift out of step
 # with the XAML.
-function Get-LogbookSurfaceRect($Element) {
+# PointToScreen alone is wrong on this host: plain powershell.exe carries no
+# per-monitor-v2 manifest, so Windows bitmap-scales the whole window for
+# display while WPF's PointToScreen keeps answering in the un-scaled logical
+# space. The two agree near the window's origin and drift apart with distance
+# from it -- harmless for a short pill, but the redesigned card is tall enough
+# that its bottom (the SELESAI button) landed outside its own click-through
+# rect. Ground truth instead in the window's real GetWindowRect (physical
+# pixels, same space GetCursorPos reports) and scale this element's
+# window-relative DIP offset into that space.
+function Get-LogbookSurfaceRect($Element, [IntPtr]$Hwnd = [IntPtr]::Zero) {
     if (-not $Element -or -not $Element.IsVisible -or $Element.ActualWidth -le 0) { return $null }
-    $tl = $Element.PointToScreen((New-Object System.Windows.Point 0, 0))
-    $br = $Element.PointToScreen(
-        (New-Object System.Windows.Point $Element.ActualWidth, $Element.ActualHeight))
-    return @{ L = $tl.X; T = $tl.Y; R = $br.X; B = $br.Y }
+    $win = [System.Windows.Window]::GetWindow($Element)
+    if (-not $win -or $win.ActualWidth -le 0 -or $win.ActualHeight -le 0) { return $null }
+    if ($Hwnd -eq [IntPtr]::Zero) {
+        $Hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $win).Handle
+    }
+    if ($Hwnd -eq [IntPtr]::Zero) { return $null }
+    Use-LogbookNativeType -Name 'LogixClickThrough' -Source $script:LogixClickThroughSrc
+
+    $native = [LogixClickThrough]::WindowRect($Hwnd)
+    $scaleX = ($native.R - $native.L) / $win.ActualWidth
+    $scaleY = ($native.B - $native.T) / $win.ActualHeight
+
+    $toWin = $Element.TransformToVisual($win)
+    $tl = $toWin.Transform((New-Object System.Windows.Point 0, 0))
+    $br = $toWin.Transform((New-Object System.Windows.Point $Element.ActualWidth, $Element.ActualHeight))
+
+    return @{
+        L = $native.L + ($tl.X * $scaleX)
+        T = $native.T + ($tl.Y * $scaleY)
+        R = $native.L + ($br.X * $scaleX)
+        B = $native.T + ($br.Y * $scaleY)
+    }
 }
 
 # Should the window pass clicks through, given where the pointer is? Pure, so
@@ -2132,7 +2173,7 @@ function Register-LogbookClickThrough {
     $timer.Add_Tick({
         try {
             $p = [LogixClickThrough]::Cursor()
-            $rect = Get-LogbookSurfaceRect (& $st.Get)
+            $rect = Get-LogbookSurfaceRect (& $st.Get) $st.Hwnd
             $through = Test-LogbookClickThrough -Rect $rect -X $p.X -Y $p.Y -Grace $st.Grace
             [LogixClickThrough]::Set($st.Hwnd, $through)
 

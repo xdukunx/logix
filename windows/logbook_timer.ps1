@@ -884,8 +884,6 @@ $timer.Add_Tick({
             # otherwise hit -- the cursor is nowhere near a card that just
             # appeared, and that used to read as "pointer left, close now."
             $script:cardPinnedUntilTouched = $true
-            Write-LogbookInfo ("bar-open: cardOpen={0} winIsVisible={1} anchor={2}" -f `
-                $script:cardOpen, $window.IsVisible, $script:cardAnchorOverride)
         } catch {
             Write-LogbookError "Open-LogbookCard (bar action) threw: $($_.Exception.Message)`n$($_.ScriptStackTrace)"
         }
