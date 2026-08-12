@@ -3,6 +3,12 @@
 How the pieces fit together in a production (central-server) deployment.
 Operations for each piece: [RUNBOOK.md](RUNBOOK.md). Hosting: [HOSTING.md](HOSTING.md).
 
+> **This page describes the server deployment only.** The server is optional:
+> a Logix Device logs sessions, stores them locally and reports on them with
+> no server present at all. For the product split, the device-local data path,
+> the session lifecycle and pairing, see
+> [DEVICE_AND_SERVER.md](DEVICE_AND_SERVER.md).
+
 ```mermaid
 flowchart TB
     subgraph Lab["Lab devices"]

@@ -79,7 +79,14 @@ at the keyboard), and **when** — then turns that into attendance/usage reports
 It was built for a shared computational-chemistry workstation at **FTMM UNAIR**
 and published as a reference you can adapt.
 
-* Works standalone on a single machine — no server, no network, nothing leaves the box.
+Logix ships as **two things**: **Logix Device** (a workstation — logs sessions,
+stores them locally, reports on them) and **Logix Server** (optional, one per
+lab — dashboard, fleet management, combined reports). A device is a finished
+product on its own; the server is a layer on top of it, and a device can be
+paired to one, or unpaired from one, at any time from the app itself. See
+[docs/DEVICE_AND_SERVER.md](docs/DEVICE_AND_SERVER.md).
+
+* Works standalone on a single machine — no server, no network, nothing leaves the box. Sessions are logged to local SQLite and **reports open on the device itself**, no terminal required.
 * Optionally scales to a whole lab with a central server, a live admin dashboard, and remote lock/message/screenshot commands (Logix Control).
 * Treats personal data (names, student IDs, IPs) as a first-class concern, not an afterthought — see [Privacy](#privacy-read-this) below.
 

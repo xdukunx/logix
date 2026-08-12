@@ -87,14 +87,30 @@ The installer prints the exact next step for your platform. In short:
   this step is already done — skip ahead to
   [Using the sign-in popup](#using-the-sign-in-popup).
 
-### 4. Generate a report
+### 4. See the reports
+
+On the device itself, open **Laporan Logix** (or run
+`windows\logix_reports.ps1`). It opens a page on this computer only, showing
+today / this week / this month / everything, with an `.xlsx` export. No server
+and no terminal required — see
+[DEVICE_AND_SERVER.md §5](DEVICE_AND_SERVER.md#5-reports-without-a-server).
+
+The command-line generator still exists and is unchanged:
 
 ```bash
 python <install-dir>/logbook_report.py
 ```
 
 Writes an `.xlsx` into `<install-dir>/reports` with hours per user, per
-session type.
+session type. The export button produces the same file — both call the same
+generator, so they cannot disagree.
+
+### 5. Connect to a server (optional)
+
+Open **Koneksi Server** on the device (or run `windows\logix_server.ps1`),
+enter the server address and a single-use pairing code from your admin. The
+same screen unpairs the device again; neither reinstalls anything, and
+unpairing keeps every session already recorded locally.
 
 ### 5. (Optional) Mirror redacted data to a Google Sheet
 
