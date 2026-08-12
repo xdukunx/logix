@@ -195,6 +195,96 @@ $replyRow = $widget.FindName('CardReplyRow')
 Assert ($message.Visibility -eq 'Collapsed') "no message block until an admin sends one"
 if ($replyRow) { Assert ($replyRow.Visibility -eq 'Collapsed') "no reply row until then either" }
 
+# ---- multi-monitor placement ------------------------------------------------
+Write-Host ""
+Write-Host "sign-in card: one display, never the seam between two"
+# The sign-in WINDOW covers every screen and must: it is a kiosk lock paired
+# with the keyboard lockdown, and an uncovered second monitor is a way around
+# both. The CARD inside it is what was wrong -- centred on the combined virtual
+# desktop, which on an extended pair is the bezel, and on a pair with a gap in
+# the layout is a coordinate with no physical display behind it at all.
+# Synthetic layouts, because the machine running this has whatever it has.
+Import-LogbookFormsAssembly
+function FakeScreen($l, $t, $w, $h, $primary, $name, $idx) {
+    [pscustomobject]@{
+        Index = $idx; Primary = $primary
+        Screen = [pscustomobject]@{ DeviceName = $name; Primary = $primary }
+        Bounds = New-Object System.Drawing.Rectangle $l, $t, $w, $h
+        Label = "Layar $($idx + 1)"; Detail = "${w} x ${h}"
+    }
+}
+$mcard = New-Object System.Windows.Controls.Border
+$mcard.Width = 320
+$mcard.Measure((New-Object System.Windows.Size 320, 400))
+$mcard.Arrange((New-Object System.Windows.Rect 0, 0, 320, 400))
+$mwin = New-Object System.Windows.Window
+$virt = [System.Windows.Forms.SystemInformation]::VirtualScreen
+
+foreach ($case in @(
+    @{ n = 'left panel';  s = (FakeScreen 0 0 1920 1080 $true '\\.\DISPLAY1' 0) },
+    @{ n = 'right panel'; s = (FakeScreen 1920 0 1920 1080 $false '\\.\DISPLAY2' 1) },
+    # A layout with a GAP: the two panels are not adjacent, so the midpoint of
+    # the virtual desktop is a coordinate no monitor can display.
+    @{ n = 'gapped right'; s = (FakeScreen 2400 0 1600 900 $false '\\.\DISPLAY5' 1) }
+)) {
+    Set-LogbookCardOnScreen -Window $mwin -Card $mcard -Target $case.s
+    $left = $mcard.Margin.Left + $virt.Left
+    $b = $case.s.Bounds
+    Assert ($left -ge $b.Left -and ($left + 320) -le ($b.Left + $b.Width)) `
+        "$($case.n): the card lands wholly inside its display ($left..$($left + 320) within $($b.Left)..$($b.Left + $b.Width))"
+}
+Assert ($mcard.HorizontalAlignment -eq 'Left' -and $mcard.VerticalAlignment -eq 'Top') `
+    "alignment leaves Center, or the margin that does the positioning is ignored"
+
+# A card taller than the display must not be pushed off the top, where the
+# fields the user has to reach would go with it.
+Set-LogbookCardOnScreen -Window $mwin -Card $mcard -Target (FakeScreen 0 0 1920 200 $true '\\.\SHORT' 0)
+Assert (($mcard.Margin.Top + $virt.Top) -ge 0) "a card taller than its display is clamped to the top edge"
+
+Write-Host ""
+Write-Host "the display choice is remembered, but only while it still means something"
+$twoScreens = @((FakeScreen 0 0 1920 1080 $true '\\.\DISPLAY1' 0),
+                (FakeScreen 1920 0 2560 1440 $false '\\.\DISPLAY2' 1))
+$prefPath = Join-Path $Global:StateDir 'monitor_pref.json'
+$prefBackup = if (Test-Path $prefPath) { Get-Content $prefPath -Raw } else { $null }
+try {
+    Save-LogbookPreferredMonitor $twoScreens[1]
+    $found = Get-LogbookSavedMonitor $twoScreens
+    Assert ($null -ne $found -and $found.Screen.DeviceName -eq '\\.\DISPLAY2') `
+        "the chosen display is found again next session (no re-asking a question already answered)"
+    # Same device NAME, different geometry: the panel was swapped or re-arranged,
+    # so the remembered answer is about a display that no longer exists.
+    $rearranged = @((FakeScreen 0 0 1920 1080 $true '\\.\DISPLAY1' 0),
+                    (FakeScreen 1920 0 1280 720 $false '\\.\DISPLAY2' 1))
+    Assert ($null -eq (Get-LogbookSavedMonitor $rearranged)) `
+        "a remembered display whose geometry changed is not trusted"
+} finally {
+    if ($null -ne $prefBackup) { $prefBackup | Set-Content -LiteralPath $prefPath -Encoding UTF8 }
+    else { Remove-Item $prefPath -Force -ErrorAction SilentlyContinue }
+}
+
+Write-Host ""
+Write-Host "the picker only exists when there is a choice to make"
+$pickWin = [Windows.Markup.XamlReader]::Load(
+    (New-Object System.Xml.XmlNodeReader ([xml](Build-LogbookPopupXaml $cfg))))
+$pickPanel = $pickWin.FindName('MonitorPicker')
+$pickCard = $pickWin.FindName('MainCard')
+Assert ($null -ne $pickPanel) "the sign-in card carries a MonitorPicker slot"
+Add-LogbookMonitorPicker -Window $pickWin -Card $pickCard -Panel $pickPanel -cfg $cfg -Screens @($twoScreens[0]) -Current $twoScreens[0]
+Assert ($pickPanel.Visibility -eq 'Collapsed') `
+    "one display: no picker, no extra question, no extra pixel of height"
+Add-LogbookMonitorPicker -Window $pickWin -Card $pickCard -Panel $pickPanel -cfg $cfg -Screens $twoScreens -Current $twoScreens[0]
+Assert ($pickPanel.Visibility -eq 'Visible') "two displays: the picker appears"
+$chips = @($pickPanel.Children | Where-Object { $_ -is [System.Windows.Controls.Button] })
+Assert ($chips.Count -eq 2) "one chip per display (got $($chips.Count))"
+# Clicking a chip must MOVE the card, not merely look selected.
+$beforeLeft = $pickCard.Margin.Left
+$chips[1].RaiseEvent((New-Object System.Windows.RoutedEventArgs ([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+Assert ($pickCard.Margin.Left -ne $beforeLeft) `
+    "clicking a chip actually relocates the card ($beforeLeft -> $($pickCard.Margin.Left))"
+Remove-Item (Join-Path $Global:StateDir 'monitor_pref.json') -Force -ErrorAction SilentlyContinue
+if ($null -ne $prefBackup) { $prefBackup | Set-Content -LiteralPath $prefPath -Encoding UTF8 }
+
 Write-Host ""
 if ($script:failed -gt 0) {
     Write-Host "$($script:failed) interaction check(s) failed." -ForegroundColor Red

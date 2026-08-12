@@ -674,6 +674,8 @@ function Get-LogbookDefaultConfig {
             timerNama        = 'Nama'
             timerTujuan      = 'Tujuan'
             timerPerangkat   = 'Perangkat'
+            # Multi-monitor picker (only rendered when there are 2+ displays)
+            monitorPicker    = 'Tampilkan di'
             # Notifications (C8.3)
             msgFromAdmin     = 'Pesan dari Admin'
             msgReply         = 'Balas'
@@ -719,6 +721,7 @@ function Get-LogbookDefaultConfig {
                 timerEndHold   = 'Hold to end session'
                 timerEndArmed  = 'Keep holding...'
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
+                monitorPicker  = 'Show on'
                 msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'
                 noticePrivacyTitle = 'Privacy Notice'
                 noticeAlwaysTold = 'You are always notified - never silently.'
@@ -1410,6 +1413,255 @@ function Get-LogbookMixedHex([string]$From, [string]$To, [double]$Amount) {
     return ('#{0:X2}{1:X2}{2:X2}' -f $c[0], $c[1], $c[2])
 }
 
+# ---- Multi-monitor placement -------------------------------------------------
+#
+# The sign-in surface COVERS every screen on purpose: it is a kiosk lock, paired
+# with the keyboard lockdown and the Task Manager gate, and a second monitor
+# left uncovered is simply a way around all three. That part is correct and
+# must not be traded away.
+#
+# What was wrong is that the 320px card inside it was centred on the WHOLE
+# virtual desktop. On an extended pair that centre is the seam between the two
+# monitors, so the dialog a user is supposed to type into was split down the
+# middle across a bezel. Coverage is a property of the WINDOW; which display
+# the dialog belongs to is a property of the CARD. Separating those two is the
+# whole fix.
+function Import-LogbookFormsAssembly {
+    # Loaded on demand, never at file scope. This file is dot-sourced by the
+    # monitor and the bar bridge too, and they have no use for WinForms; the
+    # sign-in path already pays enough startup cost for a person who is
+    # standing there waiting. Idempotent -- Add-Type on an already-loaded
+    # assembly is a no-op, but the type check skips even that.
+    if (-not ([System.Management.Automation.PSTypeName]'System.Windows.Forms.Screen').Type) {
+        Add-Type -AssemblyName System.Windows.Forms
+    }
+    if (-not ([System.Management.Automation.PSTypeName]'System.Drawing.Rectangle').Type) {
+        Add-Type -AssemblyName System.Drawing
+    }
+}
+
+function Get-LogbookScreens {
+    # Every display, left-to-right, with the label the picker shows.
+    Import-LogbookFormsAssembly
+    $screens = @([System.Windows.Forms.Screen]::AllScreens | Sort-Object { $_.Bounds.Left })
+    $out = @()
+    for ($i = 0; $i -lt $screens.Count; $i++) {
+        $s = $screens[$i]
+        $out += [pscustomobject]@{
+            Index   = $i
+            Screen  = $s
+            Primary = $s.Primary
+            Bounds  = $s.Bounds
+            Label   = "Layar $($i + 1)"
+            Detail  = ("{0} x {1}{2}" -f $s.Bounds.Width, $s.Bounds.Height,
+                        $(if ($s.Primary) { ' - Utama' } else { '' }))
+        }
+    }
+    return $out
+}
+
+function Get-LogbookPreferredScreen {
+    Import-LogbookFormsAssembly
+    # Where the person actually is. The cursor is the only signal available
+    # before anything is on screen -- they were just using that machine, and on
+    # a lab workstation the mouse is where their attention is. Primary is the
+    # fallback, never the assumption: on a docked setup the primary display is
+    # routinely the one that is switched off.
+    try {
+        $screens = Get-LogbookScreens
+        $pos = [System.Windows.Forms.Cursor]::Position
+        foreach ($s in $screens) {
+            if ($s.Bounds.Contains($pos)) { return $s }
+        }
+        foreach ($s in $screens) { if ($s.Primary) { return $s } }
+        if ($screens.Count -gt 0) { return $screens[0] }
+    } catch { }
+    return $null
+}
+
+function Get-LogbookDipScale($Window) {
+    # Window.Left/Width are device-INDEPENDENT units; Screen.Bounds is physical
+    # pixels. They are equal only at 100% scaling, which is why placing a card
+    # by raw pixel arithmetic lands it somewhere else entirely on a 125%/150%
+    # laptop panel. Returns the px -> DIP factors, or 1,1 before the window has
+    # an HWND (nothing to scale against yet).
+    try {
+        $src = [System.Windows.PresentationSource]::FromVisual($Window)
+        if ($src -and $src.CompositionTarget) {
+            $m = $src.CompositionTarget.TransformFromDevice
+            if ($m.M11 -gt 0 -and $m.M22 -gt 0) { return @($m.M11, $m.M22) }
+        }
+    } catch { }
+    return @(1.0, 1.0)
+}
+
+function Set-LogbookWindowToVirtualScreen($Window) {
+    Import-LogbookFormsAssembly
+    # Cover everything. Deliberately in the same call as the DIP conversion:
+    # sized in raw pixels on a scaled display the window OVER-covers, which is
+    # harmless for a lock screen but makes every coordinate inside it lie.
+    $v = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $scale = Get-LogbookDipScale $Window
+    $Window.WindowState = 'Normal'
+    $Window.Left   = $v.Left * $scale[0]
+    $Window.Top    = $v.Top * $scale[1]
+    $Window.Width  = $v.Width * $scale[0]
+    $Window.Height = $v.Height * $scale[1]
+}
+
+function Set-LogbookCardOnScreen($Window, $Card, $Target) {
+    # Pin the card inside ONE display's bounds. Alignment moves from Center to
+    # Left/Top because "centre of the window" is precisely the wrong anchor
+    # when the window spans several displays; the margin then does the real
+    # positioning, in the window's own coordinate space.
+    if (-not $Window -or -not $Card -or -not $Target) { return }
+    Import-LogbookFormsAssembly
+    try {
+        $v = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $scale = Get-LogbookDipScale $Window
+        $b = $Target.Bounds
+
+        $cardW = $Card.Width
+        if ([double]::IsNaN($cardW) -or $cardW -le 0) { $cardW = $Card.ActualWidth }
+        $cardH = $Card.ActualHeight
+        if ($cardH -le 0) { $cardH = $Card.DesiredSize.Height }
+
+        # Centre of the target display, expressed relative to the window origin.
+        $left = (($b.Left - $v.Left) + ($b.Width / 2.0)) * $scale[0] - ($cardW / 2.0)
+        $top  = (($b.Top - $v.Top) + ($b.Height / 2.0)) * $scale[1] - ($cardH / 2.0)
+
+        # A card taller than the display would otherwise hang off the top edge,
+        # where the title bar and the close affordance live.
+        $minLeft = ($b.Left - $v.Left) * $scale[0]
+        $minTop  = ($b.Top - $v.Top) * $scale[1]
+        if ($left -lt $minLeft) { $left = $minLeft }
+        if ($top -lt $minTop) { $top = $minTop }
+
+        $Card.HorizontalAlignment = 'Left'
+        $Card.VerticalAlignment   = 'Top'
+        $Card.Margin = New-Object System.Windows.Thickness ([Math]::Round($left)), ([Math]::Round($top)), 0, 0
+    } catch {
+        Write-LogbookError "Card placement failed: $($_.Exception.Message)"
+    }
+}
+
+function Add-LogbookMonitorPicker($Window, $Card, $Panel, $cfg, $Screens, $Current) {
+    # Builds the display chips. Returns nothing; wiring is done by side effect
+    # on $Panel. Stays hidden for a single display -- a "choose a display"
+    # control on a one-display machine is a question with one answer, which is
+    # not a choice, it is an obstacle.
+    if (-not $Panel) { return }
+    if (-not $Screens -or $Screens.Count -lt 2) { $Panel.Visibility = 'Collapsed'; return }
+
+    $theme = Get-LogbookTheme $cfg
+    $conv = New-Object System.Windows.Media.BrushConverter
+    $Panel.Children.Clear()
+
+    $lbl = New-Object System.Windows.Controls.TextBlock
+    $lbl.Text = (Get-LogbookText $cfg 'monitorPicker' 'Tampilkan di')
+    $lbl.FontSize = 11
+    $lbl.Foreground = $conv.ConvertFromString($theme.muted)
+    $lbl.VerticalAlignment = 'Center'
+    $lbl.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
+    [void]$Panel.Children.Add($lbl)
+
+    foreach ($s in $Screens) {
+        $btn = New-Object System.Windows.Controls.Button
+        $btn.Content = [string]($s.Index + 1)
+        $btn.ToolTip = "$($s.Label) - $($s.Detail)"
+        $btn.Width = 26
+        $btn.Height = 22
+        $btn.FontSize = 11
+        $btn.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+        $btn.Cursor = 'Hand'
+        $btn.BorderThickness = New-Object System.Windows.Thickness 1
+        $btn.Tag = $s
+
+        $isCurrent = ($Current -and $s.Index -eq $Current.Index)
+        $btn.Background = $conv.ConvertFromString($(if ($isCurrent) { $theme.accent } else { $theme.surfaceWidget }))
+        $btn.BorderBrush = $conv.ConvertFromString($(if ($isCurrent) { $theme.accent } else { $theme.border }))
+        $btn.Foreground = $conv.ConvertFromString($(if ($isCurrent) { '#FFFFFF' } else { $theme.muted }))
+
+        # A pill, not a default WPF button: the chrome-free chip is the whole
+        # reason this reads as a choice rather than as an error dialog.
+        $tpl = [Windows.Markup.XamlReader]::Parse(@"
+<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button">
+  <Border CornerRadius="11" Background="{TemplateBinding Background}"
+          BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+  </Border>
+</ControlTemplate>
+"@)
+        $btn.Template = $tpl
+
+        $btn.Add_Click({
+            param($sender, $e)
+            $target = $sender.Tag
+            Set-LogbookCardOnScreen -Window $Window -Card $Card -Target $target
+            # Repaint the chips so the selected one is unambiguous.
+            foreach ($child in $Panel.Children) {
+                if ($child -is [System.Windows.Controls.Button]) {
+                    $on = ($child.Tag.Index -eq $target.Index)
+                    $child.Background  = $conv.ConvertFromString($(if ($on) { $theme.accent } else { $theme.surfaceWidget }))
+                    $child.BorderBrush = $conv.ConvertFromString($(if ($on) { $theme.accent } else { $theme.border }))
+                    $child.Foreground  = $conv.ConvertFromString($(if ($on) { '#FFFFFF' } else { $theme.muted }))
+                }
+            }
+            Save-LogbookPreferredMonitor $target
+        }.GetNewClosure())
+
+        [void]$Panel.Children.Add($btn)
+    }
+    $Panel.Visibility = 'Visible'
+}
+
+# The chosen display is remembered per machine. A lab workstation's monitor
+# layout does not change between sessions, so asking again every single sign-in
+# would be asking a question whose answer we already have.
+function Save-LogbookPreferredMonitor($Target) {
+    try {
+        if (-not $Target) { return }
+        Ensure-LogbookDirs
+        $path = Join-Path $Global:StateDir 'monitor_pref.json'
+        $obj = @{ deviceName = $Target.Screen.DeviceName
+                  bounds = ("{0},{1},{2},{3}" -f $Target.Bounds.Left, $Target.Bounds.Top, $Target.Bounds.Width, $Target.Bounds.Height) }
+        $tmp = "$path.tmp"
+        [System.IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Compress),
+            (New-Object System.Text.UTF8Encoding $false))
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } catch { }
+}
+
+function Get-LogbookSavedMonitor($Screens) {
+    # Matched on DeviceName AND geometry: a remembered "\\.\DISPLAY2" means
+    # nothing if that display was unplugged and a different one took the name.
+    try {
+        $path = Join-Path $Global:StateDir 'monitor_pref.json'
+        if (-not (Test-Path $path)) { return $null }
+        $saved = Get-Content $path -Raw | ConvertFrom-Json
+        foreach ($s in $Screens) {
+            $geo = "{0},{1},{2},{3}" -f $s.Bounds.Left, $s.Bounds.Top, $s.Bounds.Width, $s.Bounds.Height
+            if ($s.Screen.DeviceName -eq [string]$saved.deviceName -and $geo -eq [string]$saved.bounds) {
+                return $s
+            }
+        }
+    } catch { }
+    return $null
+}
+
+function Set-LogbookPopupMonitorPlacement($Window, $Card, $Panel, $cfg) {
+    # One call the popup controllers use. Order matters: saved choice wins over
+    # the cursor, because it is an explicit instruction and the cursor is only
+    # ever an inference.
+    $screens = Get-LogbookScreens
+    $target = Get-LogbookSavedMonitor $screens
+    if (-not $target) { $target = Get-LogbookPreferredScreen }
+    if (-not $target -and $screens.Count -gt 0) { $target = $screens[0] }
+    if ($target) { Set-LogbookCardOnScreen -Window $Window -Card $Card -Target $target }
+    if ($Panel) { Add-LogbookMonitorPicker -Window $Window -Card $Card -Panel $Panel -cfg $cfg -Screens $screens -Current $target }
+    return $target
+}
+
 function Get-LogbookTheme($cfg) {
     # Resolve the full client palette from config, with the Client Foundation
     # defaults as fallbacks. Backward-compatible: a config that only sets the
@@ -1835,6 +2087,16 @@ $accessItems
 
         <TextBlock Name="StartTimeText" Text="$tStart" FontSize="11" TextWrapping="Wrap"
                    TextAlignment="Center" LineHeight="16" Foreground="{StaticResource LxMuted}"/>
+
+        <!-- Multi-monitor: one chip per display, filled in by the controller
+             (Add-LogbookMonitorPicker) because the number of displays is not
+             known until runtime. Collapsed by default and left that way on a
+             single-screen machine, so the ordinary case gains no extra step,
+             no extra question, and not one pixel of height. It is only ever
+             a CORRECTION affordance: the dialog has already placed itself on
+             the display the user is working at. -->
+        <StackPanel Name="MonitorPicker" Visibility="Collapsed" Orientation="Horizontal"
+                    HorizontalAlignment="Center" Margin="0,16,0,0"/>
       </StackPanel>
     </Border>
   </Grid>

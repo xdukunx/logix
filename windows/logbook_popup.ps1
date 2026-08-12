@@ -432,11 +432,18 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
         if ($fpProfile.nama -and $fpProfile.nim) {
             $fpWindow = [Windows.Markup.XamlReader]::Load(
                 (New-Object System.Xml.XmlNodeReader ([xml](Build-LogbookWelcomeBackXaml $cfg $fpProfile $detectedSessionType))))
-            $fpWindow.WindowState = 'Normal'
-            $fpWindow.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
-            $fpWindow.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
-            $fpWindow.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
-            $fpWindow.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+            # Covers every screen (kiosk), then puts the CARD on one of them.
+            # See Set-LogbookWindowToVirtualScreen / Set-LogbookCardOnScreen.
+            Set-LogbookWindowToVirtualScreen $fpWindow
+            $fpWindow.Add_Loaded({
+                # Re-applied here because the DIP scale is only knowable once
+                # the window has an HWND; before that a 150% display is sized
+                # in raw pixels and every coordinate inside it is off by half.
+                Set-LogbookWindowToVirtualScreen $fpWindow
+                # No picker on the resume card: it is a one-tap confirmation,
+                # not a form, and it is on screen for a couple of seconds.
+                [void](Set-LogbookPopupMonitorPlacement -Window $fpWindow -Card $fpWindow.FindName('MainCard') -Panel $null -cfg $cfg)
+            })
             $fpWindow.Topmost = $true
             $fpBg = New-BlurredBackgroundImage
             if ($fpBg) { $fpWindow.FindName('BgImage').Source = $fpBg; $script:cachedBg = $fpBg }
@@ -494,21 +501,23 @@ $xaml = Build-LogbookPopupXaml $cfg
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-# Override WindowState to normal and span all connected screens (multi-monitor coverage)
-$window.WindowState = 'Normal'
-$window.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
-$window.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
-$window.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
-$window.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+# The window still spans every connected screen, and must: this is a kiosk
+# lock, and an uncovered second monitor is a way around it. What changed is
+# that the CARD inside it is no longer centred on the combined desktop -- on an
+# extended pair that centre is the seam between two panels, which is where the
+# sign-in dialog used to appear, split across a bezel.
+Set-LogbookWindowToVirtualScreen $window
 
 $window.Add_StateChanged({
-    if ($window.WindowState -ne 'Normal') {
-        $window.WindowState = 'Normal'
-        $window.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
-        $window.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
-        $window.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
-        $window.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
-    }
+    if ($window.WindowState -ne 'Normal') { Set-LogbookWindowToVirtualScreen $window }
+})
+
+$window.Add_Loaded({
+    # Both of these need an HWND: the DIP scale to size the window truthfully,
+    # and the card's measured height to centre it vertically on its display.
+    Set-LogbookWindowToVirtualScreen $window
+    [void](Set-LogbookPopupMonitorPlacement -Window $window -Card $window.FindName('MainCard') `
+            -Panel $window.FindName('MonitorPicker') -cfg $cfg)
 })
 
 $window.Topmost = $true
