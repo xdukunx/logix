@@ -181,6 +181,7 @@ $selesaiTrack = $window.FindName('SelesaiTrack')
 $selesaiFill = $window.FindName('SelesaiFill')
 $selesaiLabel = $window.FindName('SelesaiLabel')
 $selesaiSweep = $window.FindName('SelesaiSweep')
+$selesaiSweepLabel = $window.FindName('SelesaiSweepLabel')
 $selesaiSweepInner = $window.FindName('SelesaiSweepInner')
 $armedCap    = $window.FindName('ArmedCaption')
 $quickOk     = $window.FindName('QuickOkBtn')
@@ -198,6 +199,9 @@ $script:cardOpen        = $false
 $script:sliverOpen      = $false
 $script:selesaiHolding     = $false
 $script:selesaiHoldStarted = $null
+# Latched once a hold completes. Mouse and keyboard can both reach the finish
+# line, and ending the session twice is not a thing that should be possible.
+$script:selesaiCompleting  = $false
 $script:collapseAtTick  = -1
 $script:sliverHideTick  = -1
 # Set the moment a status bar asks for the card (not a hover). Guards against
@@ -532,14 +536,50 @@ $script:selesaiHoldTimer.Add_Tick({
         $script:selesaiHoldTimer.Stop()
         $script:selesaiHolding = $false
         if ($selesaiBtn.IsMouseCaptured) { $selesaiBtn.ReleaseMouseCapture() }
-        # Confirmed. The end-session routine is called completely unchanged.
+        Complete-LogbookSelesai
+    }
+})
+
+# A hold that completes should say so before the screen goes away. Without
+# this the workstation locks the instant the fill lands, and the last thing
+# the user sees is a button mid-gesture -- which reads as "did that work?"
+# about an action they cannot check afterwards, because the machine is now
+# locked. The pause is short enough that nobody waits on it and long enough
+# to register as a confirmation rather than a flicker.
+$script:SELESAI_DONE_MS = 650
+
+function Complete-LogbookSelesai {
+    if ($script:selesaiCompleting) { return }   # keyboard + mouse must not both fire it
+    $script:selesaiCompleting = $true
+    try {
+        $selesaiFill.Width = $selesaiTrack.ActualWidth
+        $selesaiSweep.Width = $selesaiTrack.ActualWidth
+        $selesaiLabel.Text = Get-LogbookText $cfg 'timerEndDone' 'Sesi selesai'
+        $selesaiSweepLabel.Text = $selesaiLabel.Text
+        $armedCap.Visibility = 'Hidden'
+        # The confirmed state is the ONE place the full-strength signal colour
+        # is right: it is a moment, not a surface, and it is the last frame of
+        # a deliberate destructive action.
+        $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.signalCritical)
+    } catch { }
+
+    # The end routine runs on a one-shot timer rather than inline, so WPF gets
+    # a chance to paint the confirmation first. Close-LogbookSessionAndLock
+    # blocks (it writes the session, syncs and locks the workstation), and a
+    # blocking call on the dispatcher thread means the frame above never
+    # reaches the screen at all.
+    $done = New-Object System.Windows.Threading.DispatcherTimer
+    $done.Interval = [TimeSpan]::FromMilliseconds($script:SELESAI_DONE_MS)
+    $done.Add_Tick({
+        $done.Stop()
         try { Close-LogbookSessionAndLock } catch { Write-LogbookError "SELESAI failed: $($_.Exception.Message)" }
         $script:allowClose = $true
         $timer.Stop()
-        $stripWindow.Close()
+        try { $stripWindow.Close() } catch { }
         $window.Close()
-    }
-})
+    }.GetNewClosure())
+    $done.Start()
+}
 
 $selesaiBtn.Add_PreviewMouseLeftButtonDown({
     $script:selesaiHolding = $true
@@ -573,6 +613,35 @@ $cancelSelesaiHold = {
     if ($script:selesaiHolding) { Reset-LogbookSelesai }
 }
 $selesaiBtn.Add_PreviewMouseLeftButtonUp($cancelSelesaiHold)
+
+# ---- the same gesture, from the keyboard ------------------------------------
+# A confirmation reachable only by holding a mouse button is a confirmation
+# some people cannot give at all, and this one ends their session. Space or
+# Enter held on the focused button does exactly what the pointer does: the
+# fill starts on key-down and letting go cancels it.
+#
+# Border is not focusable by default, so it is made so explicitly. IsRepeat is
+# the crux: Windows delivers a held key as a stream of KeyDown events, so
+# without that guard every repeat would restart the hold from zero and the
+# fill would never advance past one repeat interval.
+$selesaiBtn.Focusable = $true
+$selesaiBtn.Add_KeyDown({
+    param($sender, $e)
+    if ($e.Key -ne 'Space' -and $e.Key -ne 'Enter' -and $e.Key -ne 'Return') { return }
+    $e.Handled = $true
+    if ($e.IsRepeat -or $script:selesaiHolding -or $script:selesaiCompleting) { return }
+    $script:selesaiHolding = $true
+    $script:selesaiHoldStarted = Get-Date
+    $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.criticalEdge)
+    Update-LogbookWidgetView
+    $script:selesaiHoldTimer.Start()
+})
+$selesaiBtn.Add_KeyUp({
+    param($sender, $e)
+    if ($e.Key -ne 'Space' -and $e.Key -ne 'Enter' -and $e.Key -ne 'Return') { return }
+    $e.Handled = $true
+    if ($script:selesaiHolding) { Reset-LogbookSelesai }
+})
 
 # ---- Expand / collapse ------------------------------------------------------
 function Open-LogbookCard {

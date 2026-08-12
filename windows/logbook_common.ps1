@@ -671,6 +671,7 @@ function Get-LogbookDefaultConfig {
             # other surfaces (the preview client) present it as a plain button.
             timerEndHold     = 'Tahan untuk selesai'
             timerEndArmed    = 'Terus tahan...'
+            timerEndDone     = 'Sesi selesai'
             timerNama        = 'Nama'
             timerTujuan      = 'Tujuan'
             timerPerangkat   = 'Perangkat'
@@ -720,6 +721,7 @@ function Get-LogbookDefaultConfig {
                 timerEnd       = 'END'
                 timerEndHold   = 'Hold to end session'
                 timerEndArmed  = 'Keep holding...'
+                timerEndDone   = 'Session ended'
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
                 monitorPicker  = 'Show on'
                 msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'

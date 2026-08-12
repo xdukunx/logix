@@ -524,6 +524,26 @@ Assert ($timerSrc -match '\$selesaiSweepInner\.Width\s*=\s*\$selesaiTrack\.Actua
 Assert ($timerSrc -notmatch "ConvertFromString\(\`$\(if \(\`$frac") "no threshold recolour left over from the flood version"
 Assert ($timerSrc -match 'BorderBrush = \$brushConv\.ConvertFromString\(\$theme\.criticalEdge\)') `
     "the press lands on the outline on frame one, before the fill is wide enough to see"
+
+# A confirmation reachable only by holding a mouse button is one that some
+# people cannot give at all -- and this one ends their session.
+Assert ($timerSrc -match '\$selesaiBtn\.Focusable\s*=\s*\$true') "SELESAI can take keyboard focus"
+Assert ($timerSrc -match '\$selesaiBtn\.Add_KeyDown') "a held key starts the same hold a held pointer does"
+Assert ($timerSrc -match '\$selesaiBtn\.Add_KeyUp') "and releasing the key cancels it"
+# Windows delivers a held key as a STREAM of KeyDown events. Without this
+# guard each repeat restarts the hold from zero and the fill never advances
+# past one repeat interval, so the gesture can never be completed by keyboard.
+Assert ($timerSrc -match '\$e\.IsRepeat') "key repeats do not restart the hold"
+
+# The workstation locks the instant a hold lands, so without a confirmation
+# frame the last thing the user sees is a button mid-gesture -- about an
+# action they then cannot check, because the machine is locked.
+Assert ($timerSrc -match 'function Complete-LogbookSelesai') "completion has its own state, not just a teardown"
+Assert ($timerSrc -match '\$script:selesaiCompleting') "completing twice is not possible (mouse and keyboard both reach it)"
+$completeFn = [regex]::Match($timerSrc, '(?s)function Complete-LogbookSelesai \{.*?\n\}\n').Value
+Assert ($completeFn -match 'DispatcherTimer') `
+    "the end routine is deferred, so WPF can paint the confirmation before Close-LogbookSessionAndLock blocks"
+Assert ($commonSrc -match "timerEndDone") "the confirmed state has its own configurable string"
 # The old arm/confirm vocabulary must be gone, not merely unused -- a stale
 # constant here is how a half-migrated control ends up with two state machines.
 Assert ($timerSrc -notmatch 'DISARM_SECONDS|ARMED_CAPTION_FMT|selesaiArmed|selesaiArmTick') "no leftovers from the old arm/confirm state machine"
