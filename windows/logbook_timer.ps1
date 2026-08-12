@@ -177,8 +177,11 @@ $replySend   = $window.FindName('ReplySendBtn')
 $cardSent    = $window.FindName('CardSent')
 $sentText    = $window.FindName('SentText')
 $selesaiBtn  = $window.FindName('SelesaiBtn')
+$selesaiTrack = $window.FindName('SelesaiTrack')
 $selesaiFill = $window.FindName('SelesaiFill')
 $selesaiLabel = $window.FindName('SelesaiLabel')
+$selesaiSweep = $window.FindName('SelesaiSweep')
+$selesaiSweepInner = $window.FindName('SelesaiSweepInner')
 $armedCap    = $window.FindName('ArmedCaption')
 $quickOk     = $window.FindName('QuickOkBtn')
 $quickWait   = $window.FindName('QuickWaitBtn')
@@ -377,13 +380,13 @@ function Update-LogbookWidgetView {
 
     if ($showCard -or $showPill -or $showSliver) {
         if (-not $window.IsVisible) { $window.Show() }
-    } elseif ($script:posture -ne 'bar') {
-        # 'bar' posture is EXPRESSLY the one where nothing shows most of the
-        # time and a card can be summoned at any moment from a separate
-        # process. Fully Hide()-ing between appearances forces every bar-open
-        # through a fresh native Hide->Show cycle -- unlike pill/strip, which
-        # stay continuously Shown() and only ever toggle WS_EX_TRANSPARENT for
-        # click-through. That cycle is where the card actually broke: state
+    } elseif ($script:posture -eq 'bar') {
+        # Deliberately empty. 'bar' posture is EXPRESSLY the one where nothing
+        # shows most of the time and a card can be summoned at any moment from
+        # a separate process. Fully Hide()-ing between appearances forces every
+        # bar-open through a fresh native Hide->Show cycle -- unlike pill/strip,
+        # which stay continuously Shown() and only ever toggle WS_EX_TRANSPARENT
+        # for click-through. That cycle is where the card actually broke: state
         # (cardOpen, WPF Opacity/Visibility) and even raw Win32 z-order all
         # read correctly afterward, yet nothing painted -- SizeToContent
         # collapsing the window to ~0x0 while parked keeps it "shown" (so the
@@ -392,6 +395,15 @@ function Update-LogbookWidgetView {
         # No explicit sizing needed here: SizeToContent="WidthAndHeight"
         # already shrinks the window to match its (now fully Collapsed, ~0x0)
         # content -- that part was never the problem.
+        #
+        # THE CONDITION WAS INVERTED ('-ne bar'), which is why this fix was
+        # believed to be in place while the bug it describes was still live:
+        # bar posture took the Hide() this branch exists to avoid, and
+        # pill/strip took the do-nothing. Every click on the YASB slot was
+        # logged, set cardOpen, and painted no pixel -- reported, accurately,
+        # as "logix ga responsif". A test that only greps for the two branch
+        # strings passes either way round, so the checks in
+        # test_logbook_config.ps1 now assert which branch is which.
     } else {
         $window.Hide()
     }
@@ -485,13 +497,24 @@ $selesaiBtn.Add_SizeChanged({
     $selesaiBtn.Clip = $geo
 })
 
+# The swept copy of the label is centred against the FULL track while living
+# inside a container only as wide as the fill, so its own width has to be
+# pinned to the track's. Hooked on the track rather than on the button because
+# the button's SizeChanged can run before its child has been arranged, and this
+# needs a measured child width, not a guess at one minus the border.
+$selesaiTrack.Add_SizeChanged({
+    if ($selesaiTrack.ActualWidth -le 0) { return }
+    $selesaiSweepInner.Width = $selesaiTrack.ActualWidth
+})
+
 function Reset-LogbookSelesai {
     $script:selesaiHolding = $false
     $script:selesaiHoldStarted = $null
     $script:selesaiHoldTimer.Stop()
     if ($selesaiBtn.IsMouseCaptured) { $selesaiBtn.ReleaseMouseCapture() }
     $selesaiFill.Width = 0
-    $selesaiLabel.Foreground = $brushConv.ConvertFromString($theme.text)
+    $selesaiSweep.Width = 0
+    $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.border)
     Update-LogbookWidgetView
 }
 
@@ -499,10 +522,12 @@ $script:selesaiHoldTimer.Add_Tick({
     if (-not $script:selesaiHolding) { $script:selesaiHoldTimer.Stop(); return }
     $elapsedMs = ((Get-Date) - $script:selesaiHoldStarted).TotalMilliseconds
     $frac = [Math]::Min(1.0, $elapsedMs / $script:SELESAI_HOLD_MS)
-    $selesaiFill.Width = $frac * $selesaiBtn.ActualWidth
-    # The label crosses into the filled (red) region as it grows, so it needs
-    # to flip to white partway through rather than staying dark-on-dark.
-    $selesaiLabel.Foreground = $brushConv.ConvertFromString($(if ($frac -gt 0.55) { '#FFFFFF' } else { $theme.text }))
+    # One number drives both layers, so the colour boundary in the text and the
+    # edge of the wash are the same pixel: the fill is not a bar moving BEHIND
+    # the label, it is the thing revealing it.
+    $w = $frac * $selesaiTrack.ActualWidth
+    $selesaiFill.Width = $w
+    $selesaiSweep.Width = $w
     if ($frac -ge 1.0) {
         $script:selesaiHoldTimer.Stop()
         $script:selesaiHolding = $false
@@ -525,6 +550,12 @@ $selesaiBtn.Add_PreviewMouseLeftButtonDown({
     # had already let go -- the worst possible failure for this control.
     try {
         [void]$selesaiBtn.CaptureMouse()
+        # The outline is the design's sanctioned home for a status colour (the
+        # dot and the 3px strip are the others), so it carries the state change
+        # the flooded background used to. It also lands on the FIRST frame,
+        # before the fill has grown wide enough to see, which is the frame that
+        # decides whether the press felt registered.
+        $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.criticalEdge)
         Update-LogbookWidgetView
         $script:selesaiHoldTimer.Start()
     } catch {
@@ -867,43 +898,33 @@ function Show-LogbookOverlay {
     }
 }
 
-# ---- The one-second session clock ------------------------------------------
-$timer = New-Object Windows.Threading.DispatcherTimer
-$timer.Interval = [TimeSpan]::FromSeconds(1)
-$timer.Add_Tick({
-    if (-not (Test-Path $Global:SessionFile)) {
-        $script:allowClose = $true
-        $timer.Stop()
-        # A bar slot still showing a running clock after the session ended is
-        # worse than an empty one: it asserts something untrue about a machine
-        # nobody is watching.
-        Clear-LogbookBarStatus
-        try { $stripWindow.Close() } catch { }
-        $window.Close()
-        return
-    }
-    try {
-        $current = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
-        if ($SessionId -and $current.session_id -ne $SessionId) {
-            $script:allowClose = $true
-            $timer.Stop()
-            Clear-LogbookBarStatus
-            try { $stripWindow.Close() } catch { }
-            $window.Close()
-            return
-        }
-    } catch { }
+# ---- Status bar requests ----------------------------------------------------
+# Actions a status bar asked for, e.g. YASB's on_left callback. Polled rather
+# than pushed because the bar is a separate process with no handle on this
+# window; a one-shot file is the cheapest honest channel.
+#
+# This used to ride the one-second clock, and that was HALF THE LAG in "the
+# widget is unresponsive in YASB". A click therefore waited on average 500ms
+# and at worst a full second before anything began, on top of the process the
+# bar had to launch to make the request at all. Nobody experiences a second of
+# nothing as a slow window; they experience it as a click that missed.
+#
+# So it gets its own poll at 100ms, an order of magnitude under the ~200ms that
+# still reads as a direct response. The cost is a Test-Path on a file that is
+# almost never there: microseconds, on the same dispatcher that is already
+# waking every second anyway.
+$script:BAR_POLL_MS = 100
 
-    # Actions a status bar asked for, e.g. YASB's on_right callback. Polled
-    # rather than pushed because the bar is a separate process with no handle
-    # on this window; a one-shot file is the cheapest honest channel.
+function Invoke-LogbookBarRequest {
     try {
         $requested = Read-LogbookBarAction
     } catch {
         Write-LogbookError "Read-LogbookBarAction threw: $($_.Exception.Message)"
-        $requested = ''
+        return
     }
-    if ($requested) { Write-LogbookInfo "bar action requested: $requested" }
+    if (-not $requested) { return }
+    Write-LogbookInfo "bar action requested: $requested"
+
     if ($requested -eq 'open') {
         # Appear near where they actually clicked -- their YASB bar slot --
         # instead of the pill's persisted drag anchor, which for 'bar' posture
@@ -946,6 +967,38 @@ $timer.Add_Tick({
     } elseif ($requested -eq 'posture') {
         Set-LogbookPosture $(if ($script:posture -eq 'bar') { 'pill' } else { 'bar' })
     }
+}
+
+$script:barPollTimer = New-Object Windows.Threading.DispatcherTimer
+$script:barPollTimer.Interval = [TimeSpan]::FromMilliseconds($script:BAR_POLL_MS)
+$script:barPollTimer.Add_Tick({ Invoke-LogbookBarRequest })
+
+# ---- The one-second session clock ------------------------------------------
+$timer = New-Object Windows.Threading.DispatcherTimer
+$timer.Interval = [TimeSpan]::FromSeconds(1)
+$timer.Add_Tick({
+    if (-not (Test-Path $Global:SessionFile)) {
+        $script:allowClose = $true
+        $timer.Stop()
+        # A bar slot still showing a running clock after the session ended is
+        # worse than an empty one: it asserts something untrue about a machine
+        # nobody is watching.
+        Clear-LogbookBarStatus
+        try { $stripWindow.Close() } catch { }
+        $window.Close()
+        return
+    }
+    try {
+        $current = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
+        if ($SessionId -and $current.session_id -ne $SessionId) {
+            $script:allowClose = $true
+            $timer.Stop()
+            Clear-LogbookBarStatus
+            try { $stripWindow.Close() } catch { }
+            $window.Close()
+            return
+        }
+    } catch { }
 
     $elapsed = (Get-Date) - $start
     $hh = [int][Math]::Floor($elapsed.TotalHours)
@@ -1101,7 +1154,14 @@ $window.Add_Loaded({
 # non-modal always-on-top surface, and Update-LogbookWidgetView legitimately
 # calls Hide() (strip posture with the sliver retracted) -- ShowDialog would
 # fight that by forcing the window back up.
-$window.Add_Closed({ [System.Windows.Threading.Dispatcher]::CurrentDispatcher.InvokeShutdown() })
+# The bar poll is stopped HERE rather than at each of the four places that end
+# a session, because it is the one thing that can put a card back on screen
+# after the widget has decided to go away: every teardown path ends at Closed,
+# so every teardown path stops it.
+$window.Add_Closed({
+    try { $script:barPollTimer.Stop() } catch { }
+    [System.Windows.Threading.Dispatcher]::CurrentDispatcher.InvokeShutdown()
+})
 
 [void]$stripWindow.Show()
 Update-LogbookStripPosition
@@ -1112,5 +1172,9 @@ if ($script:posture -eq 'strip') { $script:edgeTimer.Start() }
 # A message that landed while this process was still starting would otherwise
 # wait a full second for the first tick.
 Show-LogbookPendingMessage
+# Runs in every posture, not just 'bar'. A bar can be added to a machine whose
+# widget is already up, and a request that lands in a posture nobody expected
+# is still a request the user made.
+$script:barPollTimer.Start()
 $timer.Start()
 [System.Windows.Threading.Dispatcher]::Run()

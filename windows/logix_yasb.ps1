@@ -33,6 +33,38 @@ param(
     [Parameter(ParameterSetName = 'Status')]  [switch]$Status
 )
 $ErrorActionPreference = 'Stop'
+
+# ---- callback fast path (served BEFORE anything is loaded) ------------------
+# This branch is what a bar CLICK runs, so it sits on the critical path of
+# "click -> card appears" and every millisecond in it is felt as lag. Measured:
+# dot-sourcing logbook_common.ps1 first cost ~350ms of pure parse time -- it is
+# 140KB+ of PowerShell -- to then write four bytes to a file. That was most of
+# the reason the widget felt dead on click (586ms total, before the widget's
+# own poll had even seen the request).
+#
+# So the write is done here from the ONE line of state that it needs, which is
+# the same derivation $Global:StateDir uses in logbook_common.ps1. That is a
+# deliberate, contained duplication: this path must not load that file, and the
+# canonical writer (Request-LogbookBarAction) stays where it is for every other
+# caller. Read-LogbookBarAction trims what it reads, so no-BOM UTF8 -- what
+# File::WriteAllText emits -- is read back identically to the ASCII the
+# canonical writer produces.
+# Written via a temp file and a rename, for the same reason bar_status.json is
+# (see Write-LogbookBarStatus). The widget now looks for this file ten times a
+# second, so the window between "file exists" and "file has contents" is one it
+# will land in: it would read an empty string, find no action in it, and delete
+# the file -- swallowing the click entirely. A rename is atomic; there is no
+# moment at which the file exists but is empty.
+if ($PSCmdlet.ParameterSetName -eq 'Action') {
+    $dir = Join-Path $env:ProgramData 'MindLabLogbook'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $dest = Join-Path $dir 'bar_action'
+    $tmp = "$dest.tmp"
+    [System.IO.File]::WriteAllText($tmp, $Action)
+    Move-Item -LiteralPath $tmp -Destination $dest -Force
+    exit 0
+}
+
 . (Join-Path $PSScriptRoot 'logbook_common.ps1')
 Ensure-LogbookDirs
 
@@ -53,11 +85,8 @@ function Set-LogbookPosturePref([string]$Posture) {
     Write-Host "posture -> $Posture  ($prefsPath)" -ForegroundColor Green
 }
 
-# ---- callback / status paths (fast, no output formatting) -------------------
-if ($PSCmdlet.ParameterSetName -eq 'Action') {
-    Request-LogbookBarAction -Action $Action
-    exit 0
-}
+# ---- status path (fast, no output formatting) -------------------------------
+# ('Action' is handled at the top of the file, before the dot-source.)
 if ($PSCmdlet.ParameterSetName -eq 'Status') {
     if (Test-Path $statusFile) { Get-Content $statusFile -Raw }
     else { '{"text":"","alt":"","tooltip":"Logix: tidak ada sesi aktif","state":"none"}' }
@@ -132,8 +161,29 @@ $cssSnippet = @"
     padding: 0 8px 0 6px;
     font-family: "JetBrainsMono NFP", Consolas, monospace;
 }
+/* Give the slot the same container every other widget on the bar has. Without
+   it the Logix slot is the only bare one in the row, which is most of why it
+   does not read as a button you can press. Match whatever background your own
+   theme gives .clock-widget .widget-container. */
+.logix-widget .widget-container {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-radius: 6px;
+}
+/* There is deliberately NO :hover rule. It is the obvious first answer to "the
+   slot feels dead", and it does not work: measured on a live bar with the
+   container painted a flat colour, hovering changes nothing, and neither does
+   the .home-widget .icon:hover that ships in other people's themes. Qt only
+   evaluates a pseudo-state on the LAST element of a selector, and these frames
+   never get WA_Hover. The click has to BE fast rather than look pressed, which
+   is what the -Action fast path and the widget's 100ms poll are for. */
 .logix-widget .label {
     color: #EEF3FB;
+}
+/* The clock is the value; the glyph is a label for it, so it sits back a step
+   rather than competing at the same weight. */
+.logix-widget .icon {
+    color: #93A1B8;
+    font-size: 13px;
 }
 /* Empty payload = no session. Collapse the slot rather than leave a gap. */
 .logix-widget .label:empty {

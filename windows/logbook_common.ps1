@@ -663,7 +663,14 @@ function Get-LogbookDefaultConfig {
             privacyOneLiner  = 'Siapa, cara & kapan - bukan ketikan.'
             # Timer widget (C8.2)
             timerEnd         = 'SELESAI'
-            timerEndArmed    = 'Tahan terus untuk menyelesaikan'
+            # The button says what the gesture IS, not just what it does. A pill
+            # labelled only 'SELESAI' promises a tap, so the first tap -- which
+            # correctly does nothing -- reads as a broken button; the label is
+            # the cheapest place to fix that, and it fixes it before the press
+            # rather than during it. timerEnd stays as the bare verb because
+            # other surfaces (the preview client) present it as a plain button.
+            timerEndHold     = 'Tahan untuk selesai'
+            timerEndArmed    = 'Terus tahan...'
             timerNama        = 'Nama'
             timerTujuan      = 'Tujuan'
             timerPerangkat   = 'Perangkat'
@@ -709,7 +716,8 @@ function Get-LogbookDefaultConfig {
                 notYou         = 'Not you / change details'
                 whatsRecorded  = "What's recorded?"
                 timerEnd       = 'END'
-                timerEndArmed  = 'Keep holding to finish'
+                timerEndHold   = 'Hold to end session'
+                timerEndArmed  = 'Keep holding...'
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
                 msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'
                 noticePrivacyTitle = 'Privacy Notice'
@@ -980,7 +988,14 @@ function Request-LogbookBarAction {
     try {
         Ensure-LogbookDirs
         $path = Join-Path $Global:StateDir 'bar_action'
-        $Action | Out-File -FilePath $path -Encoding ASCII -Force
+        # Temp file plus rename, matching Write-LogbookBarStatus and the copy of
+        # this write in logix_yasb.ps1's callback fast path: the widget polls
+        # for this file ten times a second, so a reader CAN arrive between the
+        # file being created and being written, and it would consume an empty
+        # file and drop the request. A rename has no such in-between state.
+        $tmp = "$path.tmp"
+        $Action | Out-File -FilePath $tmp -Encoding ASCII -Force
+        Move-Item -LiteralPath $tmp -Destination $path -Force
     } catch { }
 }
 
@@ -1361,6 +1376,40 @@ function Get-LogbookText($cfg, [string]$Key, [string]$Fallback = '') {
     return $Fallback
 }
 
+function Get-LogbookMixedHex([string]$From, [string]$To, [double]$Amount) {
+    # Linear mix of two #RRGGBB strings, returned as #RRGGBB. Used to DERIVE the
+    # quiet members of the palette from the loud ones rather than inventing new
+    # hex values: a wash is its signal colour laid over the surface it sits on,
+    # a soft text is the same colour lifted toward white. That is the whole
+    # reason they stay in tune when a faculty rebrand changes the signal, and
+    # the reason they cannot drift out of tune by hand-editing.
+    #
+    # Opaque on purpose, not an alpha brush: the result is composited ONCE here
+    # against the surface it is known to sit on, so a fill that grows across a
+    # button cannot pick up whatever happens to be behind it.
+    # Parsed by hand rather than through a colour helper: this file is dot-
+    # sourced by processes that never load System.Drawing or WPF (the monitor,
+    # the bar bridge), and adding an assembly load to all of them to mix two
+    # numbers would be the expensive way to do arithmetic.
+    $parse = {
+        param($hex)
+        $h = ([string]$hex).Trim().TrimStart('#')
+        if ($h.Length -ne 6) { return $null }
+        try {
+            return @([Convert]::ToInt32($h.Substring(0, 2), 16),
+                     [Convert]::ToInt32($h.Substring(2, 2), 16),
+                     [Convert]::ToInt32($h.Substring(4, 2), 16))
+        } catch { return $null }
+    }
+    $a = & $parse $From
+    $b = & $parse $To
+    # A bad override must not take the whole widget down with it.
+    if (-not $a -or -not $b) { return $From }
+    $t = [Math]::Max(0.0, [Math]::Min(1.0, $Amount))
+    $c = 0..2 | ForEach-Object { [int][Math]::Round($a[$_] + ($b[$_] - $a[$_]) * $t) }
+    return ('#{0:X2}{1:X2}{2:X2}' -f $c[0], $c[1], $c[2])
+}
+
 function Get-LogbookTheme($cfg) {
     # Resolve the full client palette from config, with the Client Foundation
     # defaults as fallbacks. Backward-compatible: a config that only sets the
@@ -1380,18 +1429,39 @@ function Get-LogbookTheme($cfg) {
     $text            = & $val $c 'text'            '#EEF3FB'
     $muted           = & $val $c 'muted'           '#93A1B8'
     $surfaceElevated = & $val $c 'surfaceElevated' (& $val $c 'primary' '#0E1626')
+    $surfaceWidget   = & $val $c 'surfaceWidget'   '#0B1017'
+    $critical        = & $val $s 'critical'        '#EF4444'
     return @{
         accent          = $accent
         text            = $text
         muted           = $muted
         surface         = & $val $c 'surface'       '#070C15'
-        surfaceWidget   = & $val $c 'surfaceWidget' '#0B1017'
+        surfaceWidget   = $surfaceWidget
         surfaceElevated = $surfaceElevated
         border          = & $val $c 'border'        '#223451'
         signalNormal    = & $val $s 'normal'        '#22C55E'
         signalNotice    = & $val $s 'notice'        '#3B82F6'
         signalWarning   = & $val $s 'warning'       '#F59E0B'
-        signalCritical  = & $val $s 'critical'      '#EF4444'
+        signalCritical  = $critical
+        # The quiet half of the critical signal, derived (see
+        # Get-LogbookMixedHex) rather than picked. Full-strength #EF4444 is a
+        # correct ALERT colour and a wrong SURFACE colour: on a card whose
+        # whole palette is deep navy, muted slate and a green dot, a button
+        # that floods solid red on press does not read as "this is serious",
+        # it reads as a different application's button. The guard rail this
+        # file already states -- status colour appears only as a dot or an
+        # edge, never as a tinted background -- is exactly the rule that flood
+        # broke. These three keep the meaning and drop the shouting:
+        #   Wash: the signal laid over the widget surface at low strength, so
+        #         a growing fill stays a member of this palette.
+        #   Edge: the same mix at border strength, for the 1px outline that is
+        #         the design's sanctioned place for a status colour.
+        #   Soft: the signal lifted toward white, for TEXT that has to stay
+        #         legible on the wash -- #EF4444 on a near-black wash is under
+        #         the contrast the body text on this card holds itself to.
+        criticalWash    = Get-LogbookMixedHex $surfaceWidget $critical 0.16
+        criticalEdge    = Get-LogbookMixedHex $surfaceWidget $critical 0.45
+        criticalSoft    = Get-LogbookMixedHex $critical      '#FFFFFF' 0.35
     }
 }
 
@@ -1421,6 +1491,9 @@ function Build-LogbookClientResources($cfg) {
     <SolidColorBrush x:Key="LxNotice"   Color="$($t.accent)"/>
     <SolidColorBrush x:Key="LxWarning"  Color="$($t.signalWarning)"/>
     <SolidColorBrush x:Key="LxCritical" Color="$($t.signalCritical)"/>
+    <SolidColorBrush x:Key="LxCriticalWash" Color="$($t.criticalWash)"/>
+    <SolidColorBrush x:Key="LxCriticalEdge" Color="$($t.criticalEdge)"/>
+    <SolidColorBrush x:Key="LxCriticalSoft" Color="$($t.criticalSoft)"/>
 
     <!-- Two type voices only: Segoe UI for words, Consolas for time/ID/duration. -->
     <Style x:Key="LxLabel" TargetType="TextBlock">
@@ -2203,11 +2276,11 @@ function Register-LogbookClickThrough {
 
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
     $res = Build-LogbookClientResources $cfg
-    $tSelesai = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
+    $tSelesai = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEndHold' 'Tahan untuk selesai')
     # Baked in rather than filled at press time. The caption has to occupy its
     # final height from the very first layout: it is Hidden, not Collapsed, so
     # revealing it cannot change the card's size. See the XAML note below.
-    $tArmed = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEndArmed' 'Tahan terus untuk menyelesaikan')
+    $tArmed = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEndArmed' 'Terus tahan...')
 
     $nama   = ConvertTo-LogbookXmlText ([string]$session.nama)
     $tujuan = ConvertTo-LogbookXmlText ([string]$session.tujuan)
@@ -2376,17 +2449,42 @@ $res
              lozenge that had visibly detached from the left edge, rather than
              as the pill filling up. ClipToBounds cannot do this job on its
              own, because a Border clips to its rectangle, corner radius and
-             all; the controller installs a real rounded clip instead. -->
+             all; the controller installs a real rounded clip instead.
+
+             THE LABEL IS DRAWN TWICE, and that is the point of the control.
+             SelesaiLabel is the resting copy; SelesaiSweepLabel is an
+             identical copy in the critical colour, sitting inside a clipping
+             Border (SelesaiSweep) that the controller grows to exactly the
+             fill's width. So the hold does not repaint the text, it UNCOVERS
+             it: the words change colour one at a time as the fill passes
+             under them, which is what reads as a progress meter without a
+             progress bar's chrome. The alternative already tried here (one
+             label swapping colour wholesale partway through) has to pick a
+             threshold, and at that threshold the entire label blinks.
+
+             SelesaiSweepInner is a fixed-width Grid, not an auto-width one.
+             The copy has to stay centred against the WHOLE button while its
+             container is only a slice of it, so the controller sets this to
+             the track's measured width; letting it size to the slice would
+             slide the text leftward as the fill grew. -->
         <Border Name="SelesaiBtn" Height="36" CornerRadius="20" ClipToBounds="True"
                 Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
                 BorderThickness="1" Cursor="Hand">
-          <Grid>
-            <Border Name="SelesaiFill" Background="{StaticResource LxCritical}"
+          <Grid Name="SelesaiTrack">
+            <Border Name="SelesaiFill" Background="{StaticResource LxCriticalWash}"
                     HorizontalAlignment="Left" Width="0"/>
             <TextBlock Name="SelesaiLabel" Text="$tSelesai" HorizontalAlignment="Center"
                        VerticalAlignment="Center" TextWrapping="NoWrap"
                        FontFamily="Segoe UI Semibold" FontSize="12.5"
                        Foreground="{StaticResource LxText}"/>
+            <Border Name="SelesaiSweep" HorizontalAlignment="Left" Width="0" ClipToBounds="True">
+              <Grid Name="SelesaiSweepInner" HorizontalAlignment="Left">
+                <TextBlock Name="SelesaiSweepLabel" Text="$tSelesai" HorizontalAlignment="Center"
+                           VerticalAlignment="Center" TextWrapping="NoWrap"
+                           FontFamily="Segoe UI Semibold" FontSize="12.5"
+                           Foreground="{StaticResource LxCriticalSoft}"/>
+              </Grid>
+            </Border>
           </Grid>
         </Border>
         <!-- Hidden, NOT Collapsed, and its text is baked in rather than set on

@@ -64,6 +64,36 @@ foreach ($k in @('LxSurface','LxElevated','LxHairline','LxText','LxMuted','LxAcc
 }
 Assert ($res -notmatch 'GradientBrush') "no gradient brush in the client token set (v3 guard rail)"
 
+# The quiet half of the critical signal. #EF4444 at full strength is a correct
+# alert colour and a wrong surface colour: on a card of deep navy, slate and a
+# green dot, a control that floods solid red on press reads as belonging to a
+# different application. These are DERIVED from the configured signal so a
+# faculty rebrand carries them along instead of stranding three literals.
+foreach ($k in @('LxCriticalWash','LxCriticalEdge','LxCriticalSoft')) {
+    Assert ($brushKeys -contains $k) "resource dictionary defines $k"
+}
+$theme = Get-LogbookTheme $cfg
+Assert ($theme.criticalWash -ne $theme.signalCritical) "the wash is not simply the raw signal colour"
+# A wash has to sit nearer its surface than its signal, or it is a flood with
+# a gentler name. Compared on luminance, which is what the eye actually reads.
+$lum = {
+    param($hex)
+    $h = $hex.TrimStart('#')
+    (0.2126 * [Convert]::ToInt32($h.Substring(0,2),16) +
+     0.7152 * [Convert]::ToInt32($h.Substring(2,2),16) +
+     0.0722 * [Convert]::ToInt32($h.Substring(4,2),16))
+}
+$lSurface  = & $lum $theme.surfaceWidget
+$lWash     = & $lum $theme.criticalWash
+$lCritical = & $lum $theme.signalCritical
+Assert (([Math]::Abs($lWash - $lSurface)) -lt ([Math]::Abs($lWash - $lCritical))) `
+    "the wash reads as the surface tinted, not as the signal dimmed"
+# The swept label sits on that wash, so it has to be lifted off the signal.
+Assert ((& $lum $theme.criticalSoft) -gt $lCritical) "the swept label colour is lighter than the raw signal, for contrast on the wash"
+Assert ((Get-LogbookMixedHex '#000000' '#FFFFFF' 0.5) -eq '#808080') "the mixer is a plain linear blend"
+Assert ((Get-LogbookMixedHex '#0B1017' '#EF4444' 0.0) -eq '#0B1017') "mixing nothing in returns the base untouched"
+Assert ((Get-LogbookMixedHex 'nonsense' '#EF4444' 0.5) -eq 'nonsense') "a malformed override degrades to the base instead of throwing"
+
 Write-Host "session timer -> XAML (v3 Pill & Strip)"
 $session = [pscustomobject]@{ session_type = 'SSH'; nama = 'Nama & "Contoh"'; tujuan = 'Running Data' }
 $timerXaml = Build-LogbookTimerXaml -cfg $cfg -session $session -deviceName 'LAB-PC-01 <Test> - GPU-A100'
@@ -223,9 +253,6 @@ try {
     if (Test-Path $probeDir) { [System.IO.Directory]::Delete($probeDir, $true) }
 }
 
-if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
-Write-Host "`nAll popup-config checks passed." -ForegroundColor Green
-
 Write-Host "startup cost (this is the login path -- a person is waiting)"
 # Add-Type shells out to csc.exe: ~370ms for the first type in a process, ~250ms
 # each after. A helper compiled at FILE scope in logbook_common.ps1 charges that
@@ -287,6 +314,24 @@ Assert ($timerSrc -match 'Clear-LogbookBarStatus') "the slot is cleared when the
 Assert ($commonSrc -match 'Move-Item -LiteralPath \$tmp') "the status file is swapped in atomically, never written in place"
 # A request that survived being read would re-fire every single tick.
 Assert ($commonSrc -match 'Remove-Item \$path -Force') "a bar action is consumed on read"
+
+# ---- how fast a bar CLICK turns into a card ---------------------------------
+# Reported as "logix is unresponsive in YASB". It was not one slow thing, it
+# was two waits stacked on a gesture that has to feel direct: the request took
+# ~586ms to even be made, then sat on disk for up to another second before the
+# widget looked. Both are pinned here because both are easy to reintroduce by
+# accident -- one by adding a convenience dot-source, one by folding the poll
+# back into the tick that already exists.
+Assert ($timerSrc -match '\$script:barPollTimer\.Interval\s*=\s*\[TimeSpan\]::FromMilliseconds\(\$script:BAR_POLL_MS\)') `
+    "bar requests get their own timer, not a ride on the one-second clock"
+Assert ($timerSrc -match '\$script:BAR_POLL_MS\s*=\s*(\d+)') "the poll cadence is a named constant"
+$barPollMs = [int]$Matches[1]
+Assert ($barPollMs -le 200) "a click is picked up inside the window that still reads as direct (${barPollMs}ms)"
+Assert ($timerSrc -match '\$script:barPollTimer\.Start\(\)') "the poll is actually started"
+Assert ($timerSrc -match '\$script:barPollTimer\.Stop\(\)') "and stopped, so it cannot re-open a card during teardown"
+$tickBody = [regex]::Match($timerSrc, '\$timer\.Add_Tick\(\{(?s).*?\n\}\)').Value
+Assert ($tickBody -notmatch 'Read-LogbookBarAction') `
+    "the one-second tick no longer owns bar requests (that was up to 1s of the lag)"
 Assert ($timerSrc -match "\`$p\.posture -in @\('pill','strip','bar'\)") "'bar' is a real posture the widget persists"
 # bar posture must draw nothing at all, or the user gets two timers.
 Assert ($timerSrc -match "showPill\s+= \(-not \`$showCard\) -and \(\`$script:posture -eq 'pill'\)") `
@@ -346,6 +391,40 @@ print('OK')
 # byte sequence, which is exactly the non-ASCII windows/*.ps1 must never carry.
 Assert ($yasbSrc -match '"<span>\\uf017</span>') "the icon is a YAML unicode escape in a double-quoted scalar, not a raw byte"
 Assert ($yasbSrc -notmatch '\[char\]0xF017') "no raw Unicode char object -- the ASCII-safe escape text is emitted directly"
+
+# The click path must be served before logbook_common.ps1 is loaded. Parsing
+# 140KB+ of PowerShell to write four bytes was ~350ms of the 586ms a click
+# spent before the widget had even been told to do anything.
+$yasbActionIdx = $yasbSrc.IndexOf("if (`$PSCmdlet.ParameterSetName -eq 'Action')")
+$yasbSourceIdx = $yasbSrc.IndexOf(". (Join-Path `$PSScriptRoot 'logbook_common.ps1')")
+Assert ($yasbActionIdx -ge 0 -and $yasbSourceIdx -ge 0) "the callback branch and the dot-source are both present"
+Assert ($yasbActionIdx -lt $yasbSourceIdx) `
+    "the click callback is answered BEFORE logbook_common.ps1 is dot-sourced"
+Assert ($yasbSrc -match "Join-Path \`$env:ProgramData 'MindLabLogbook'") `
+    "the fast path derives the state dir the same way logbook_common.ps1 does"
+# At a 100ms poll a reader really does arrive between create and write.
+Assert ($yasbSrc -match 'Move-Item -LiteralPath \$tmp') "the request is renamed into place, never written in place"
+Assert ($commonSrc -match '(?s)function Request-LogbookBarAction.*?Move-Item -LiteralPath \$tmp') `
+    "the canonical writer is atomic too"
+# Measured, not assumed: this is the number the complaint was actually about.
+# Best of three, and a threshold well clear of the pass/fail line. This measures
+# a process launch on a shared machine, so any single run can be starved by
+# whatever else is scheduled; the FLOOR is the honest figure, and the regression
+# it guards against (dot-sourcing 140KB of PowerShell first) costs ~250ms, far
+# more than the noise. A tighter bound here would fail on load and teach people
+# to ignore the suite.
+$yasbSelf = Join-Path $PSScriptRoot 'logix_yasb.ps1'
+$best = [int]::MaxValue
+foreach ($i in 1..3) {
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    & powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $yasbSelf -Action open | Out-Null
+    $sw.Stop()
+    if ($sw.ElapsedMilliseconds -lt $best) { $best = [int]$sw.ElapsedMilliseconds }
+}
+Remove-Item (Join-Path $Global:StateDir 'bar_action') -Force -ErrorAction SilentlyContinue
+Write-Host "  click -> request written: ${best}ms (best of 3)"
+Assert ($best -lt 500) `
+    "a bar click makes its request promptly (${best}ms; it was 586ms with the dot-source)"
 
 Write-Host "status bar output has no BOM (YASB's json.loads chokes on one)"
 # Out-File -Encoding UTF8 in Windows PowerShell 5.1 always writes a BOM.
@@ -428,6 +507,23 @@ Assert ($timerSrc -match 'Add_SizeChanged') "the clip is rebuilt from the measur
 # look; it must stay square and let the clip do the rounding.
 $fillTag = [regex]::Match($commonSrc, '<Border Name="SelesaiFill"[^>]*>').Value
 Assert ($fillTag -notmatch 'CornerRadius') "the fill itself is square-cornered (the clip rounds it, not the fill)"
+# "ngapain tiba2 ada merah, ga senada": the fill was the raw critical signal,
+# which is the one thing this file's own guard rail says a status colour may
+# never be used as (dot or edge only, never a tinted background).
+Assert ($fillTag -match 'LxCriticalWash') "the fill is the derived wash, in the card's own key"
+Assert ($fillTag -notmatch 'StaticResource LxCritical\}') "the fill is never the raw alert red"
+# The label is drawn twice and the top copy is uncovered by the fill, so the
+# colour boundary in the text IS the fill's edge. One label recoloured at a
+# threshold makes the whole word blink at that threshold instead.
+Assert ($commonSrc -match 'Name="SelesaiSweep"') "a clipping layer exists for the swept copy of the label"
+Assert ($commonSrc -match 'Name="SelesaiSweepLabel"[^>]*(?s).*?LxCriticalSoft') "the swept copy carries the soft critical colour"
+Assert ($timerSrc -match '\$selesaiSweep\.Width\s*=\s*\$w' -and $timerSrc -match '\$selesaiFill\.Width\s*=\s*\$w') `
+    "one number drives both layers, so the text boundary and the fill edge are the same pixel"
+Assert ($timerSrc -match '\$selesaiSweepInner\.Width\s*=\s*\$selesaiTrack\.ActualWidth') `
+    "the swept copy stays centred on the whole button, not on the slice showing it"
+Assert ($timerSrc -notmatch "ConvertFromString\(\`$\(if \(\`$frac") "no threshold recolour left over from the flood version"
+Assert ($timerSrc -match 'BorderBrush = \$brushConv\.ConvertFromString\(\$theme\.criticalEdge\)') `
+    "the press lands on the outline on frame one, before the fill is wide enough to see"
 # The old arm/confirm vocabulary must be gone, not merely unused -- a stale
 # constant here is how a half-migrated control ends up with two state machines.
 Assert ($timerSrc -notmatch 'DISARM_SECONDS|ARMED_CAPTION_FMT|selesaiArmed|selesaiArmTick') "no leftovers from the old arm/confirm state machine"
@@ -499,7 +595,7 @@ Write-Host "a card opened from the bar must actually render, every time, not jus
 # auto-collapse -> reopen rounds against one long-lived process; only a fix
 # that survives round 2 and 3 (not just round 1, a fresh process's first-ever
 # Show()) actually closes this out.
-Assert ($timerSrc -match "elseif \(\`$script:posture -ne 'bar'\)") `
+Assert ($timerSrc -match "elseif \(\`$script:posture -eq 'bar'\)") `
     "bar posture is carved out of the Hide() path"
 $hideIdx = $timerSrc.IndexOf('function Update-LogbookWidgetView')
 Assert ($hideIdx -ge 0) "Update-LogbookWidgetView is defined"
@@ -510,6 +606,31 @@ if ($hideIdx -ge 0) {
     # skips Hide() (falls into the elseif doing nothing), everything else
     # still gets a real Hide() -- pill/strip posture legitimately has nothing
     # to show when the sliver is retracted, and hiding there is correct.
-    Assert ($hideBody -match "posture -ne 'bar'") "the carve-out is scoped to bar posture specifically"
+    Assert ($hideBody -match "posture -eq 'bar'") "the carve-out is scoped to bar posture specifically"
     Assert ($hideBody -match '\$window\.Hide\(\)') "non-bar posture still hides normally when nothing is shown"
+    # WHICH branch is which, not merely that both strings appear. The condition
+    # shipped inverted for exactly this reason: bar posture was taking the
+    # Hide() the comment above it says must never happen there, pill/strip was
+    # taking the do-nothing, and a grep for the two strings passed all the same.
+    # Every YASB click set cardOpen, logged, and painted nothing.
+    $branch = [regex]::Match($hideBody,
+        "(?s)elseif \(\`$script:posture -eq 'bar'\) \{(.*?)\} else \{(.*?)\n\s*\}")
+    Assert ($branch.Success) "the two tail branches are shaped as expected"
+    if ($branch.Success) {
+        $barBranch  = $branch.Groups[1].Value
+        $elseBranch = $branch.Groups[2].Value
+        Assert ($barBranch -notmatch '\$window\.Hide\(\)') `
+            "the BAR branch does not hide -- a hidden window is what never repaints on the next open"
+        Assert ($elseBranch -match '\$window\.Hide\(\)') `
+            "and the non-bar branch is the one that actually hides"
+    }
 }
+
+# The summary lives at the END of the file, which sounds too obvious to write
+# down until you notice it did not: it sat at what was once the last line, and
+# every section added after it -- roughly half this suite, including the checks
+# on the very bug this run was chasing -- printed FAIL and still exited 0. A
+# test that cannot fail the build is documentation with a stopwatch.
+if ($fail -gt 0) { Write-Host "`n$fail check(s) failed." -ForegroundColor Red; exit 1 }
+Write-Host "`nAll popup-config checks passed." -ForegroundColor Green
+exit 0
