@@ -125,6 +125,25 @@ Source: "{#BrandDir}\logix.ico"; DestDir: "{app}"; Flags: ignoreversion skipifso
 ; Native Python logging core -> C:\ProgramData\Logix (Get-LogixCoreDir default)
 Source: "{#SrcRoot}\logix\log_physical.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
 Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+; Reporting core. Without these two a Logix Device can record sessions and
+; then not show them, which is most of the way to not being a product: the
+; report shortcut below resolves report_server.py out of this directory, and
+; report_server.py drives logbook_report.py for both the table and the export.
+Source: "{#SrcRoot}\logix\logbook_report.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+Source: "{#SrcRoot}\logix\report_server.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+
+[Icons]
+; The two things a device owner does outside a session. Both were reachable
+; only from a command line before, which for the person actually using a lab
+; workstation means not reachable at all.
+Name: "{group}\Laporan Logix"; \
+    Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+    Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\logix_reports.ps1"""; \
+    IconFilename: "{app}\logix.ico"; Comment: "Lihat dan ekspor riwayat sesi komputer ini"
+Name: "{group}\Koneksi Server Logix"; \
+    Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+    Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\logix_server.ps1"""; \
+    IconFilename: "{app}\logix.ico"; Comment: "Hubungkan atau putuskan perangkat ini dari Logix Server"
 
 [Run]
 ; Register the monitor task (non-elevated principal), install AnyDesk, write

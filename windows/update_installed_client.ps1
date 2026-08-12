@@ -69,8 +69,16 @@ $scripts = @(
     'logbook_common.ps1', 'logbook_popup.ps1', 'logbook_timer.ps1', 'logbook_monitor.ps1',
     'logbook_end.ps1', 'logbook_screenshot.ps1', 'logbook_setup.ps1', 'install_logbook_tasks.ps1',
     'uninstall_logbook.ps1', 'cleanup_logbook_state.ps1', 'repair_logbook_permissions.ps1',
-    'logix_yasb.ps1'
+    'logix_yasb.ps1', 'logix_reports.ps1', 'logix_server.ps1'
 )
+
+# The Python core lives in the data dir, not beside the scripts (see
+# Get-LogixCoreDir). It has to ride along with them: logix_reports.ps1
+# resolves report_server.py out of there, and a redeploy that refreshed the
+# PowerShell half only is exactly how a mixed-version install happens -- the
+# thing this script exists to prevent.
+$coreFiles = @('log_physical.py', 'paths.py', 'logbook_report.py', 'report_server.py')
+$coreDir = Join-Path $env:ProgramData 'Logix'
 
 # ---- stop the agent so nothing is mid-read while files change ---------------
 $taskName = 'MindLab Report Logbook Monitor'
@@ -96,6 +104,15 @@ foreach ($s in $scripts) {
 }
 Say "copied $copied script(s) to $InstallDir" 'Green'
 if ($missing) { Say "  not in repo, left alone: $($missing -join ', ')" 'DarkGray' }
+
+$coreCopied = 0
+New-Item -ItemType Directory -Force -Path $coreDir | Out-Null
+foreach ($c in $coreFiles) {
+    $src = Join-Path (Join-Path (Split-Path $repo -Parent) 'logix') $c
+    if (Test-Path $src) { Copy-Item $src (Join-Path $coreDir $c) -Force; $coreCopied++ }
+    else { Say "  core file missing from repo: $c" 'Yellow' }
+}
+Say "copied $coreCopied core file(s) to $coreDir" 'Green'
 
 $logo = Join-Path $repo 'logo.png'
 if (Test-Path $logo) { Copy-Item $logo (Join-Path $InstallDir 'logo.png') -Force }
