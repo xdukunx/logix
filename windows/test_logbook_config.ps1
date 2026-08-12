@@ -626,6 +626,111 @@ if ($hideIdx -ge 0) {
     }
 }
 
+Write-Host "server pairing: a device can join a server, and leave one, after install"
+# Isolated through the two env vars the resolution path already honours:
+# LOGIX_HOME moves the core dir (so device.json and config.env are written to a
+# temp folder), and LOGIX_SERVER_URL is read before config.env is opened at
+# all. Nothing here may touch the real pairing on the machine running the
+# suite -- a test that unpairs the developer's own workstation is a test that
+# gets deleted rather than fixed.
+$pairDir = Join-Path $env:TEMP ('lxpair_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$savedHome = $env:LOGIX_HOME
+$savedUrl = $env:LOGIX_SERVER_URL
+try {
+    New-Item -ItemType Directory -Force -Path $pairDir | Out-Null
+    $env:LOGIX_HOME = $pairDir
+    $env:LOGIX_SERVER_URL = ''
+
+    Assert ((Get-LogixCoreDir) -eq $pairDir) "the test really is pointed at a scratch core dir"
+
+    # --- a fresh device is unpaired, and says so ---
+    $st = Get-LogbookPairingState
+    Assert (-not $st.Paired) "a device with no identity and no server is not paired"
+
+    # --- half a pairing is not a pairing ---
+    # A URL with no identity is a server we were never let into; an identity
+    # with no URL cannot reach anything. Calling either 'connected' is how a
+    # device silently stops syncing while the UI shows a green dot.
+    $env:LOGIX_SERVER_URL = 'https://logix.example'
+    Assert (-not (Get-LogbookPairingState).Paired) "a server URL alone is not a pairing"
+
+    $idPath = Get-LogbookDeviceIdentityPath
+    @{ device_id = 'dev_test01'; api_key = 'k'; category = 'lab_workstation' } |
+        ConvertTo-Json | Out-File -FilePath $idPath -Encoding UTF8 -Force
+    $st = Get-LogbookPairingState
+    Assert ($st.Paired) "URL plus identity plus key is a pairing"
+    Assert ($st.DeviceId -eq 'dev_test01') "the device id is surfaced for the UI"
+    Assert ($st.Category -eq 'lab_workstation') "so is the category the server assigned"
+
+    $env:LOGIX_SERVER_URL = ''
+    Assert (-not (Get-LogbookPairingState).Paired) "an identity alone is not a pairing either"
+    $env:LOGIX_SERVER_URL = 'https://logix.example'
+
+    # --- leaving a server ---
+    $r = Remove-LogbookServerPairing
+    Assert ($r.Ok) "unpairing succeeds"
+    Assert (-not (Test-Path $idPath)) "the device identity is gone"
+    $cfgAfter = Get-Content (Join-Path $pairDir 'config.env') -Raw
+    Assert ($cfgAfter -match 'LOGIX_SERVER_URL=\s*$|LOGIX_SERVER_URL=$') "the server address is cleared in config.env"
+
+    # --- the address check runs before a single-use code is spent ---
+    # An invite is single-use per API_CONTRACT.md, so firing one at a mistyped
+    # address burns it and sends the operator back to an admin for another.
+    foreach ($bad in @('', '   ', 'logix.example', 'ftp://logix.example')) {
+        $probe = Test-LogbookServerReachable -Url $bad -TimeoutSec 2
+        Assert (-not $probe.Ok) "'$bad' is rejected without a network call"
+        Assert ($probe.Detail -ne '') "and says why ('$($probe.Detail)')"
+    }
+
+    # --- pairing refuses to spend a code it cannot use ---
+    foreach ($case in @(@{ u = ''; c = 'ABC' }, @{ u = 'https://x'; c = '' })) {
+        $res = Invoke-LogbookServerPairing -Url $case.u -Code $case.c
+        Assert (-not $res.Ok) "pairing needs both an address and a code"
+        Assert ($res.Error -ne '') "and reports which is missing"
+    }
+
+    # --- config.env round-trip, same semantics as the installer's copy ---
+    Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value 'https://a.example'
+    Set-LogbookConfigValue -Key 'LOGIX_DEVICE_NAME' -Value 'WS-99'
+    Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value 'https://b.example'
+    $lines = @(Get-Content (Join-Path $pairDir 'config.env'))
+    Assert (@($lines | Where-Object { $_ -like 'LOGIX_SERVER_URL=*' }).Count -eq 1) "rewriting a key replaces it rather than appending"
+    Assert (@($lines | Where-Object { $_ -eq 'LOGIX_SERVER_URL=https://b.example' }).Count -eq 1) "and keeps the newest value"
+    Assert (@($lines | Where-Object { $_ -eq 'LOGIX_DEVICE_NAME=WS-99' }).Count -eq 1) "sibling keys survive"
+} finally {
+    $env:LOGIX_HOME = $savedHome
+    $env:LOGIX_SERVER_URL = $savedUrl
+    Remove-Item $pairDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "server pairing: one enrolment path, not two"
+$pairUiSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logix_server.ps1')
+# The UI must drive the helpers, not speak to /api/enroll itself. A second
+# enrolment path is a second thing to keep secure and a second thing to
+# forget when the contract changes.
+Assert ($pairUiSrc -match 'Invoke-LogbookServerPairing') "the pairing screen uses the shared enrolment helper"
+# Checked on the CALL, not on the string: the file is allowed to name the
+# endpoint in a comment explaining which one the helper drives.
+Assert ($pairUiSrc -notmatch 'Invoke-RestMethod|Invoke-WebRequest') "and makes no HTTP call of its own"
+Assert ($pairUiSrc -match 'Test-LogbookServerReachable') "it checks the address before spending the code"
+Assert ($commonSrc -match "Invoke-RestMethod -Uri \(\`$trimmed \+ '/api/enroll'\)") "the helper is what talks to /api/enroll"
+# Leaving a server must not touch what this device recorded locally: the
+# session log is the device's own record, not the server's to take back.
+$unpairFn = [regex]::Match($commonSrc, '(?s)function Remove-LogbookServerPairing \{.*?\n\}').Value
+Assert ($unpairFn -ne '') "Remove-LogbookServerPairing is defined"
+Assert ($unpairFn -notmatch 'logix\.db|physical_log|Remove-Item.*\.db') "unpairing never deletes local session data"
+
+Write-Host "server pairing: the screen parses and opens on status, not on a form"
+$pairXaml = [xml](Build-LogbookServerPairingXaml (Get-LogbookDefaultConfig) ([ordered]@{
+    Paired = $false; ServerUrl = ''; DeviceId = ''; Category = ''; HasKey = $false }))
+$named = @{}
+foreach ($n in @('StatusDot','StatusText','ServerBox','CodeBox','CodeRow','ConnectBtn','TestBtn','DisconnectBtn','MessageText','DeviceIdText','CloseBtn')) {
+    $hit = $pairXaml.SelectNodes("//*[@Name='$n']")
+    Assert ($hit.Count -eq 1) "the pairing screen exposes $n"
+}
+$disc = $pairXaml.SelectNodes("//*[@Name='DisconnectBtn']")[0]
+Assert ($disc.Visibility -eq 'Collapsed') "an unpaired device is not offered a Disconnect button"
+
 # The summary lives at the END of the file, which sounds too obvious to write
 # down until you notice it did not: it sat at what was once the last line, and
 # every section added after it -- roughly half this suite, including the checks

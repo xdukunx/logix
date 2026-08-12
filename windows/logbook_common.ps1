@@ -787,7 +787,22 @@ function Get-LogbookConfigEnv {
     param([string]$Key)
     $envVal = [System.Environment]::GetEnvironmentVariable($Key)
     if ($envVal) { return $envVal }
-    $cfgPath = 'C:\ProgramData\Logix\config.env'
+    # Where config.env lives is resolved from the ENVIRONMENT only, never via
+    # Get-LogixCoreDir: that function asks this one for LOGIX_HOME, so routing
+    # this lookup back through it is an infinite loop. logix/paths.py breaks
+    # the same cycle the same way and already documents both overrides
+    # (LOGIX_CONFIG, then the data home) -- the PowerShell side simply never
+    # honoured them, so a machine whose core lives anywhere but the default
+    # read its settings from a directory it does not use.
+    $cfgPath = ''
+    $explicit = [System.Environment]::GetEnvironmentVariable('LOGIX_CONFIG')
+    if ($explicit -and (Test-Path $explicit)) {
+        $cfgPath = $explicit
+    } else {
+        $home2 = [System.Environment]::GetEnvironmentVariable('LOGIX_HOME')
+        if ($home2) { $cfgPath = Join-Path $home2 'config.env' }
+    }
+    if (-not $cfgPath) { $cfgPath = Join-Path $env:ProgramData 'Logix\config.env' }
     if (Test-Path $cfgPath) {
         try {
             $lines = Get-Content $cfgPath -ErrorAction SilentlyContinue
@@ -1411,6 +1426,178 @@ function Get-LogbookMixedHex([string]$From, [string]$To, [double]$Amount) {
     $t = [Math]::Max(0.0, [Math]::Min(1.0, $Amount))
     $c = 0..2 | ForEach-Object { [int][Math]::Round($a[$_] + ($b[$_] - $a[$_]) * $t) }
     return ('#{0:X2}{1:X2}{2:X2}' -f $c[0], $c[1], $c[2])
+}
+
+# ---- Server pairing (Device <-> Server), from the client ---------------------
+#
+# A Logix Device is a complete product on its own; a server is an OPTIONAL
+# layer on top of it. That framing only holds if a device can be joined to a
+# server, and unjoined from one, after installation -- by the person using it,
+# from the application. Until now enrolment existed only inside the setup
+# wizard, which is a thing you run once at install time, and there was no way
+# to leave a server at all: changing or dropping one meant hand-editing
+# config.env or reinstalling. Both are answers for a maintainer, not a user.
+#
+# The transport is NOT new. This drives the same POST /api/enroll and the same
+# device.json identity file that API_CONTRACT.md already specifies, because a
+# second enrolment path would be a second thing to keep secure.
+
+function Set-LogbookConfigValue {
+    param([string]$Key, [string]$Value)
+    # Canonical runtime writer for config.env. install_logbook_tasks.ps1
+    # deliberately keeps its own copy (Set-LogixConfigValue): the installer has
+    # to write this file BEFORE the install directory it would load this
+    # library from exists. Same semantics on purpose -- if one changes, change
+    # both, which is what the check in test_logbook_config.ps1 is for.
+    $cfgDir = Get-LogixCoreDir
+    New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+    $cfgPath = Join-Path $cfgDir 'config.env'
+    $lines = if (Test-Path $cfgPath) { @(Get-Content $cfgPath) } else { @() }
+    $pattern = "^\s*#?\s*(?:export\s+)?$Key\s*="
+    $found = $false
+    # @(...) is load-bearing: without it a 0- or 1-line config.env makes $out a
+    # single STRING and += concatenates text instead of appending a line, which
+    # welds every key onto one line. Only bites on a fresh machine -- which is
+    # exactly the machine being paired for the first time.
+    $out = @(foreach ($line in $lines) {
+        if ($line -match $pattern) { $found = $true; "$Key=$Value" } else { $line }
+    })
+    if (-not $found) { $out += "$Key=$Value" }
+    $out | Set-Content -Path $cfgPath -Encoding UTF8
+}
+
+function Get-LogbookDeviceIdentityPath {
+    return (Join-Path (Get-LogixCoreDir) 'device.json')
+}
+
+function Get-LogbookPairingState {
+    # One place that answers "is this device joined to a server, and which".
+    # Deliberately does NOT touch the network: this is the state the UI opens
+    # with, and a settings screen that blocks on a dead server before it can
+    # draw itself is how "not connected" becomes indistinguishable from "hung".
+    $state = [ordered]@{
+        Paired    = $false
+        ServerUrl = ''
+        DeviceId  = ''
+        Category  = ''
+        HasKey    = $false
+    }
+    try {
+        $url = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+        if ($url) { $state.ServerUrl = $url.Trim() }
+        $path = Get-LogbookDeviceIdentityPath
+        if (Test-Path $path) {
+            $id = Get-Content $path -Raw | ConvertFrom-Json
+            $state.DeviceId = [string]$id.device_id
+            $state.Category = [string]$id.category
+            $state.HasKey = -not [string]::IsNullOrWhiteSpace([string]$id.api_key)
+        }
+    } catch { }
+    # Paired means BOTH halves: an identity without a server URL cannot reach
+    # anything, and a URL without an identity is a server we were never let
+    # into. Either one alone is a half-finished pairing, and calling that
+    # "connected" is how a device silently stops syncing.
+    $state.Paired = ($state.ServerUrl -ne '') -and ($state.DeviceId -ne '') -and $state.HasKey
+    return $state
+}
+
+function Test-LogbookServerReachable {
+    param([string]$Url, [int]$TimeoutSec = 8)
+    # Checked BEFORE spending an invite code. An invite is single-use
+    # (API_CONTRACT.md), so firing one at a typo'd address burns it and the
+    # operator has to go back to an admin for another.
+    $result = [ordered]@{ Ok = $false; Detail = '' }
+    if ([string]::IsNullOrWhiteSpace($Url)) { $result.Detail = 'Alamat server kosong.'; return $result }
+    $trimmed = $Url.Trim().TrimEnd('/')
+    if ($trimmed -notmatch '^https?://') { $result.Detail = 'Alamat harus diawali http:// atau https://'; return $result }
+    try {
+        $resp = Invoke-RestMethod -Uri ($trimmed + '/api/health') -Method Get `
+                    -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
+        $result.Ok = $true
+        $result.Detail = if ($resp.version) { "Server terjangkau (versi $($resp.version))." } else { 'Server terjangkau.' }
+    } catch {
+        $result.Detail = "Tidak bisa menghubungi server: $($_.Exception.Message)"
+    }
+    return $result
+}
+
+function Invoke-LogbookServerPairing {
+    param([string]$Url, [string]$Code)
+    # Redeems an invite and stores what comes back. Order matters: device.json
+    # is written BEFORE config.env gains the URL, so a crash between the two
+    # leaves a device that is not "connected" (Get-LogbookPairingState needs
+    # both) rather than one that believes it is enrolled and is not.
+    $out = [ordered]@{ Ok = $false; DeviceId = ''; Category = ''; Error = '' }
+    $trimmed = ([string]$Url).Trim().TrimEnd('/')
+    $code = ([string]$Code).Trim()
+    if (-not $trimmed) { $out.Error = 'Alamat server wajib diisi.'; return $out }
+    if (-not $code) { $out.Error = 'Kode pairing wajib diisi.'; return $out }
+    try {
+        $body = @{
+            invite_code = $code
+            hostname    = $env:COMPUTERNAME
+            os          = 'windows'
+            os_version  = [System.Environment]::OSVersion.VersionString
+        } | ConvertTo-Json
+        $enrolled = Invoke-RestMethod -Uri ($trimmed + '/api/enroll') -Method Post -Body $body `
+                        -ContentType 'application/json' -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop
+        if (-not $enrolled.device_id -or -not $enrolled.api_key) {
+            $out.Error = 'Server menerima kode tetapi tidak mengirim identitas perangkat.'
+            return $out
+        }
+        $identityPath = Get-LogbookDeviceIdentityPath
+        New-Item -ItemType Directory -Force -Path (Split-Path $identityPath -Parent) | Out-Null
+        @{ device_id = $enrolled.device_id; api_key = $enrolled.api_key; category = $enrolled.category } |
+            ConvertTo-Json | Out-File -FilePath $identityPath -Encoding UTF8 -Force
+        Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value $trimmed
+
+        $out.Ok = $true
+        $out.DeviceId = [string]$enrolled.device_id
+        $out.Category = [string]$enrolled.category
+        # The code itself is never logged: it is a credential, and this log is
+        # readable by anyone who can read the state directory.
+        Write-LogbookInfo "Paired with server $trimmed as device $($out.DeviceId)"
+    } catch {
+        $msg = $_.Exception.Message
+        try {
+            $resp = $_.Exception.Response
+            if ($resp) {
+                $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+                $raw = $reader.ReadToEnd()
+                if ($raw) {
+                    $parsed = $raw | ConvertFrom-Json
+                    if ($parsed.detail) { $msg = [string]$parsed.detail }
+                }
+            }
+        } catch { }
+        $out.Error = $msg
+        Write-LogbookError "Pairing failed against $trimmed : $msg"
+    }
+    return $out
+}
+
+function Remove-LogbookServerPairing {
+    # Leaves the server WITHOUT touching a single session: the local database
+    # is this device's own record and is not the server's to take back. What
+    # goes is the identity and the address, which is exactly what "this device
+    # is no longer joined to that server" means.
+    #
+    # Note this is local only. It cannot revoke the key server-side -- that is
+    # an admin action (POST /api/devices/{id}/revoke) and a device being able
+    # to revoke itself remotely would be a device being able to delete its own
+    # audit trail.
+    $out = [ordered]@{ Ok = $false; Error = '' }
+    try {
+        $path = Get-LogbookDeviceIdentityPath
+        if (Test-Path $path) { Remove-Item $path -Force -ErrorAction Stop }
+        Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value ''
+        $out.Ok = $true
+        Write-LogbookInfo "Server pairing removed on this device (local sessions untouched)."
+    } catch {
+        $out.Error = $_.Exception.Message
+        Write-LogbookError "Unpair failed: $($_.Exception.Message)"
+    }
+    return $out
 }
 
 # ---- Multi-monitor placement -------------------------------------------------
@@ -2761,6 +2948,100 @@ $res
       </StackPanel>
     </Border>
   </Grid>
+</Window>
+"@
+}
+
+function Build-LogbookServerPairingXaml($cfg, $state) {
+    # "Koneksi Server": the screen that makes the server optional in practice
+    # and not just on paper. Deliberately shaped as a STATUS panel with actions
+    # rather than as a wizard -- a wizard implies a thing you must finish, and
+    # the correct outcome here is very often "stay unpaired".
+    $res = Build-LogbookClientResources $cfg
+    $serverUrl = ConvertTo-LogbookXmlText ([string]$state.ServerUrl)
+    $deviceId  = ConvertTo-LogbookXmlText ([string]$state.DeviceId)
+    $idLine = if ($state.DeviceId) { "ID perangkat: $deviceId" } else { '' }
+
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" SizeToContent="Height"
+        Width="420" WindowStartupLocation="CenterScreen"
+        Topmost="False" ShowInTaskbar="True" AllowsTransparency="True"
+        Background="Transparent" FontFamily="Segoe UI">
+  <Window.Resources>
+$res
+  </Window.Resources>
+  <Border CornerRadius="20" Background="{StaticResource LxElevated}" Margin="18"
+          BorderBrush="{StaticResource LxHairline}" BorderThickness="1" Padding="26,24">
+    <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="14" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
+    <StackPanel>
+
+      <Grid Margin="0,0,0,18">
+        <TextBlock Text="Koneksi Server" FontFamily="Segoe UI Semibold" FontSize="17"
+                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+        <Button Name="CloseBtn" Content="Tutup" Style="{StaticResource LxPill}" Padding="12,5"
+                FontSize="11.5" HorizontalAlignment="Right" Foreground="{StaticResource LxMuted}"/>
+      </Grid>
+
+      <!-- Status first. Someone opening this screen is usually asking "is it
+           connected?", not "how do I connect?" -->
+      <Border CornerRadius="14" Background="{StaticResource LxSurface}" Padding="14,12" Margin="0,0,0,18"
+              BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+        <StackPanel>
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Name="StatusDot" Width="8" Height="8" Fill="{StaticResource LxMuted}"
+                     VerticalAlignment="Center" Margin="0,0,9,0"/>
+            <TextBlock Name="StatusText" Text="Tidak terhubung" FontSize="13"
+                       Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <TextBlock Name="DeviceIdText" Text="$idLine" FontFamily="Consolas" FontSize="11"
+                     Foreground="{StaticResource LxMuted}" Margin="17,5,0,0"
+                     TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+      </Border>
+
+      <TextBlock Text="Alamat server" FontSize="11.5" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
+      <Border CornerRadius="10" Background="{StaticResource LxSurface}" Padding="12,9" Margin="0,0,0,14"
+              BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+        <TextBox Name="ServerBox" Text="$serverUrl" Background="Transparent" BorderThickness="0"
+                 FontSize="12.5" FontFamily="Consolas" Foreground="{StaticResource LxText}"
+                 CaretBrush="{StaticResource LxAccent}"/>
+      </Border>
+
+      <StackPanel Name="CodeRow">
+        <TextBlock Text="Kode pairing" FontSize="11.5" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
+        <Border CornerRadius="10" Background="{StaticResource LxSurface}" Padding="12,9" Margin="0,0,0,6"
+                BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+          <TextBox Name="CodeBox" Background="Transparent" BorderThickness="0"
+                   FontSize="12.5" FontFamily="Consolas" Foreground="{StaticResource LxText}"
+                   CaretBrush="{StaticResource LxAccent}"/>
+        </Border>
+        <TextBlock Text="Minta kode sekali-pakai ini ke admin lab." FontSize="11"
+                   Foreground="{StaticResource LxMuted}" Margin="0,0,0,14"/>
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+        <Button Name="ConnectBtn" Content="Hubungkan" Style="{StaticResource LxPill}" Padding="16,8"
+                FontSize="12.5" Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                Foreground="#FFFFFF" Margin="0,0,7,0"/>
+        <Button Name="TestBtn" Content="Uji koneksi" Style="{StaticResource LxPill}" Padding="14,8"
+                FontSize="12.5" Margin="0,0,7,0"/>
+        <Button Name="DisconnectBtn" Content="Putuskan" Style="{StaticResource LxPill}" Padding="14,8"
+                FontSize="12.5" Foreground="{StaticResource LxMuted}" Visibility="Collapsed"/>
+      </StackPanel>
+
+      <TextBlock Name="MessageText" Text="" FontSize="11.5" TextWrapping="Wrap" LineHeight="17"
+                 Foreground="{StaticResource LxMuted}" Margin="0,14,0,0"/>
+
+      <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,16,0,12"/>
+      <!-- Said plainly, because the alternative reading (that an unpaired
+           device is a crippled one) is the exact misunderstanding this whole
+           screen exists to prevent. -->
+      <TextBlock FontSize="11" TextWrapping="Wrap" LineHeight="17" Foreground="{StaticResource LxMuted}"
+                 Text="Tanpa server pun Logix tetap mencatat sesi dan membuat laporan di komputer ini. Menghubungkan ke server hanya menambah pemantauan terpusat dan laporan gabungan."/>
+    </StackPanel>
+  </Border>
 </Window>
 "@
 }
