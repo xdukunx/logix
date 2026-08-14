@@ -652,7 +652,34 @@ function Open-LogbookCard {
         $script:msgState = 'reading'
         $script:msgUnread = 0
     }
+    Assert-LogbookTopmost
     Update-LogbookWidgetView
+}
+
+# Topmost is not a rank, it is a BAND -- and within it, last one in wins.
+#
+# This window sets Topmost=True once, when the widget starts, and then lives
+# for the whole session. Any other always-on-top window that appears later
+# goes in ABOVE it and stays there. Electron apps do this routinely (Figma
+# and Ferdium were the two caught doing it here), and the failure is
+# invisible from every angle that usually matters: the window is still
+# WS_EX_TOPMOST, still WS_EX_VISIBLE, still the right size at the right
+# coordinates, and WPF still renders its content perfectly -- PrintWindow
+# returns the full card. It simply composites underneath something else, so
+# clicking the status bar looks like it did nothing at all.
+#
+# Toggling Topmost is what forces Windows to re-insert the window at the TOP
+# of the topmost band. Doing it from inside the widget's own process matters:
+# a cross-process SetWindowPos was tried first and did not move it.
+# WS_EX_NOACTIVATE is untouched, so nothing steals focus from whatever the
+# user is actually working in.
+function Assert-LogbookTopmost {
+    try {
+        $window.Topmost = $false
+        $window.Topmost = $true
+    } catch {
+        Write-LogbookError "Could not re-assert topmost: $($_.Exception.Message)"
+    }
 }
 
 function Close-LogbookCard {

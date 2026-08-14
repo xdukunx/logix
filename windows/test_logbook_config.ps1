@@ -595,6 +595,27 @@ Assert ($doneTick -match '\$window\.Close\(\)') "and the widget only closes afte
 Assert ($timerSrc -notmatch 'DISARM_SECONDS|ARMED_CAPTION_FMT|selesaiArmed|selesaiArmTick') "no leftovers from the old arm/confirm state machine"
 Assert ($commonSrc -notmatch 'batal otomatis dalam') "no leftover auto-cancel countdown copy in the XAML"
 
+Write-Host "a bar-opened card must come back to the TOP of the topmost band"
+# Topmost is a band, not a rank, and within it the last window inserted wins.
+# This widget sets Topmost=True once at startup and then lives for the whole
+# session, so any always-on-top window that appears LATER sits above it
+# permanently. Electron apps do this routinely (Figma and Ferdium were both
+# caught doing it on this machine). The failure is invisible from every angle
+# that normally matters -- still WS_EX_TOPMOST, still visible, right size,
+# right coordinates, and WPF still renders the card perfectly (PrintWindow
+# returns it in full) -- it just composites underneath something else, so
+# clicking the status bar looks like it did nothing at all.
+Assert ($timerSrc -match 'function Assert-LogbookTopmost') "there is a single place that re-asserts z-order"
+$openFn = [regex]::Match($timerSrc, '(?s)function Open-LogbookCard \{.*?\n\}').Value
+Assert ($openFn -match 'Assert-LogbookTopmost') "opening the card re-asserts it"
+$topFn = [regex]::Match($timerSrc, '(?s)function Assert-LogbookTopmost \{.*?\n\}').Value
+# The toggle is the mechanism: setting Topmost=True on a window that is
+# already topmost is a no-op, so only false-then-true forces re-insertion.
+Assert ($topFn -match '\$window\.Topmost\s*=\s*\$false' -and $topFn -match '\$window\.Topmost\s*=\s*\$true') `
+    "it toggles rather than re-setting True, which would be a no-op"
+Assert ($topFn -notmatch 'Activate\(\)|Focus\(\)') `
+    "and never activates the window -- WS_EX_NOACTIVATE exists so this cannot steal focus from the user's real work"
+
 Write-Host "a card opened from the status bar must close itself"
 # Collapse is normally driven by the pointer LEAVING. A card opened from the
 # bar may never have had the pointer over it, so there was no enter, no
