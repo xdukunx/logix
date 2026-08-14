@@ -171,6 +171,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--close-open", action="store_true", help="close all open workstation sessions using session.json or CLI fields")
     p.add_argument("--sync-to-server", action="store_true", help="sync all unsynced local logs to central API server")
     p.add_argument("--sync-preview", action="store_true", help="show what --sync-to-server would send, without sending it")
+    p.add_argument("--sync-status", action="store_true", help="print connection_state/pending_count/last_success/last_error as JSON, for a future Device UI")
     p.add_argument("--event", default="START", help="START, END, AUTO_FINISH, SSH_LOGIN, SSH_LOGOUT, UNLOCK, LOCK")
     p.add_argument("--username", default=os.environ.get("USER") or os.environ.get("USERNAME") or getpass.getuser())
     p.add_argument("--nama", default="")
@@ -432,6 +433,111 @@ def unsynced_log_rows(con: sqlite3.Connection) -> list[sqlite3.Row]:
     return con.execute("SELECT * FROM physical_log WHERE COALESCE(synced, 0) = 0 ORDER BY id ASC").fetchall()
 
 
+# ---- Sync status, for a future Device UI ------------------------------------
+#
+# "Server: Connected" / "Server: Offline - 7 sessions pending" / "Server:
+# Connected - all sessions synced" needs two kinds of fact: pending_count is
+# cheap to compute live from SQLite every time it's asked, but whether the
+# LAST actual network attempt succeeded is not something the database
+# remembers -- log_physical.py is a fresh process per invocation, so that has
+# to be written down somewhere that outlives the process. A one-file JSON
+# sidecar is the whole mechanism: no new subsystem, no polling loop of its
+# own, written only from inside sync_unsynced_logs() at the point it already
+# knows the outcome.
+def _sync_state_path(con: sqlite3.Connection) -> Path:
+    # Colocated with whatever DB FILE the connection actually points at
+    # (via PRAGMA database_list), not paths.data_home() unconditionally --
+    # a caller running against --db /custom/path.db (every test in this
+    # project's suite included) must not have its sync status attributed
+    # to, or its state file collide with, the system-default install.
+    try:
+        for row in con.execute("PRAGMA database_list").fetchall():
+            name, file = row[1], row[2]
+            if name == "main" and file:
+                return Path(file).parent / "sync_state.json"
+    except Exception:
+        pass
+    return paths.data_home() / "sync_state.json"
+
+
+def _record_sync_attempt(con: sqlite3.Connection, ok: bool, detail: str = "") -> None:
+    """Best-effort. A failure to WRITE the status file must never be treated
+    as a sync failure -- this is observability, not the sync itself."""
+    try:
+        path = _sync_state_path(con)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        now = now_iso()
+        state = {}
+        if path.exists():
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                state = {}
+        state["last_attempt"] = now
+        if ok:
+            state["last_success"] = now
+            state["last_error"] = None
+        else:
+            state["last_error"] = detail
+        # Temp file + rename: the same atomic-write idiom already used for
+        # report_server.py's report_url file, so a status reader can never
+        # observe a half-written line.
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def sync_status(con: sqlite3.Connection) -> dict:
+    """A snapshot for a UI to render, computed fresh every call -- pending
+    count from SQLite (always current), attempt history from the sidecar
+    file (whatever the last real process to sync left behind).
+
+    connection_state is one of:
+      disabled  -- no server paired (device-only mode; this is a normal,
+                   complete state, not an error)
+      blocked   -- a server IS configured, but LOGIX_PRIVACY_MODE is not
+                   admin_full_sync, so nothing is being sent on purpose
+      pending   -- configured and allowed to sync, but nothing has actually
+                   been attempted yet (fresh install, or state file missing)
+      connected -- the most recent real attempt succeeded
+      offline   -- the most recent real attempt failed
+    """
+    pending = len(unsynced_log_rows(con))
+    url = paths.server_url()
+    mode = paths.privacy_mode()
+
+    state = {}
+    p = _sync_state_path(con)
+    if p.exists():
+        try:
+            state = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            state = {}
+
+    if not url:
+        connection_state = "disabled"
+    elif mode != "admin_full_sync":
+        connection_state = "blocked"
+    elif not state.get("last_attempt"):
+        connection_state = "pending"
+    elif state.get("last_error"):
+        connection_state = "offline"
+    else:
+        connection_state = "connected"
+
+    return {
+        "connection_state": connection_state,
+        "server_configured": bool(url),
+        "privacy_mode": mode,
+        "pending_count": pending,
+        "last_attempt": state.get("last_attempt"),
+        "last_success": state.get("last_success"),
+        "last_error": state.get("last_error"),
+    }
+
+
 def preview_sync(con: sqlite3.Connection) -> int:
     """--sync-preview: report what WOULD be sent, without sending it.
     Deliberately prints only timestamp/event/hostname/session_type -- a
@@ -459,9 +565,11 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
     failure there just waits for the next sync opportunity. A higher
     max_attempts (used by the explicit --sync-to-server CLI path, where the
     operator/scheduled task is already committing to waiting) retries with
-    exponential backoff (1s, 2s, 4s, ...), but only on network-level
-    failures -- an HTTP error status (4xx/5xx) means the server actively
-    rejected the request, which won't fix itself by retrying."""
+    exponential backoff (1s, 2s, 4s, ...) on network-level failures AND on
+    a 5xx HTTP status (the server's own fault, plausibly transient -- see
+    the HTTPError branch below). A 4xx is different: the server actively
+    rejected THIS request (bad auth, bad payload), and resending identical
+    bytes will not fix that, so it fails fast without retrying."""
     url = paths.server_url()
     if not url:
         return 0
@@ -515,6 +623,7 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
     )
 
     backoff = 1
+    last_error = "unknown failure"
     for attempt in range(1, max(1, max_attempts) + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -523,17 +632,38 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
                     placeholders = ",".join("?" for _ in row_ids)
                     con.execute(f"UPDATE physical_log SET synced = 1 WHERE id IN ({placeholders})", row_ids)
                     con.commit()
+                    _record_sync_attempt(con, ok=True)
                     return len(row_ids)
+                last_error = f"unexpected HTTP status {response.status}"
             break  # unexpected non-200/201 without an exception -- not retryable
         except urllib.error.HTTPError as e:
+            # A 5xx is the SERVER's fault -- restarting, momentarily
+            # overloaded, or (proven live against a real server: see
+            # test_sync_integration.py's concurrent-sync test) two syncs
+            # racing the same rows, where the loser's whole batch gets
+            # rolled back and reported as a 500 even though the data is
+            # safe (the winner already committed it). That is exactly the
+            # kind of failure retrying fixes, so it takes the same backoff
+            # as a network-level exception below. A 4xx is different: the
+            # server actively rejected THIS request (bad auth, bad
+            # payload), and resending identical bytes will not change that
+            # -- it fails fast, unretried, same as before.
+            last_error = f"HTTP {e.code}: {e}"
+            if e.code >= 500 and attempt < max_attempts:
+                print(f"Sync to server failed (HTTP {e.code}, retrying): {e}", file=sys.stderr)
+                time.sleep(backoff)
+                backoff *= 2
+                continue
             print(f"Sync to server failed (HTTP {e.code}, not retrying): {e}", file=sys.stderr)
             break
         except Exception as e:
+            last_error = str(e)
             print(f"Sync to server failed (attempt {attempt}/{max_attempts}): {e}", file=sys.stderr)
             if attempt < max_attempts:
                 time.sleep(backoff)
                 backoff *= 2
 
+    _record_sync_attempt(con, ok=False, detail=last_error)
     return 0
 
 
@@ -548,6 +678,9 @@ def main(argv: list[str]) -> int:
             return 0
         if ns.sync_preview:
             preview_sync(con)
+            return 0
+        if ns.sync_status:
+            print(json.dumps(sync_status(con)))
             return 0
         if ns.sync_to_server:
             n = sync_unsynced_logs(con, max_attempts=3)

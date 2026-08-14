@@ -11,6 +11,8 @@ monkeypatch fixture executes, permanently poisoning that constant for the
 rest of the test session.
 """
 
+import json  # stdlib only -- safe at module scope, no log_physical/paths state involved
+
 
 def test_payload_from_args_generates_event_uid_when_absent():
     import log_physical
@@ -313,3 +315,219 @@ def test_preview_reports_skip_reason_under_local_only(tmp_path, monkeypatch, cap
 
     assert "none would actually be sent" in out
     assert "local_only" in out
+
+
+# --- sync_status (backend-only groundwork for a future Device UI) ----------
+# The state file is colocated with whatever DB file the connection actually
+# points at (PRAGMA database_list), not paths.data_home() unconditionally --
+# every test here uses a tmp_path db, so this also doubles as the guarantee
+# that these tests cannot leak a sync_state.json into a real machine's
+# C:\ProgramData\Logix.
+
+def test_sync_status_disabled_with_no_server_configured(tmp_path, monkeypatch):
+    import log_physical
+    # delenv alone is not enough on a machine that has a real config.env
+    # with a server URL already written to it (paths.get() falls back to
+    # that file once the env var is gone) -- monkeypatch the resolved
+    # function directly so this test's meaning ("no server at all") does
+    # not depend on what happens to be installed on whatever machine runs
+    # the suite.
+    monkeypatch.setattr(log_physical.paths, "server_url", lambda: "")
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["connection_state"] == "disabled"
+    assert status["server_configured"] is False
+
+
+def test_sync_status_blocked_under_local_only(tmp_path, monkeypatch):
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.delenv("LOGIX_PRIVACY_MODE", raising=False)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["connection_state"] == "blocked"
+    assert status["server_configured"] is True
+
+
+def test_sync_status_pending_before_any_attempt(tmp_path, monkeypatch):
+    """Configured and allowed, but nothing has actually reached the network
+    yet -- distinct from 'offline', which means an attempt was MADE and it
+    failed. A fresh install must not claim it's offline before it has ever
+    tried."""
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["connection_state"] == "pending"
+    assert status["last_attempt"] is None
+
+
+def test_sync_status_pending_count_reflects_unsynced_rows(tmp_path, monkeypatch):
+    import log_physical
+    monkeypatch.delenv("LOGIX_SERVER_URL", raising=False)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        _seed_one_unsynced_row(log_physical, con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["pending_count"] == 2
+
+
+def test_sync_status_connected_after_successful_sync(tmp_path, monkeypatch):
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+
+    class _FakeResponse:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse())
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        log_physical.sync_unsynced_logs(con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["connection_state"] == "connected"
+    assert status["pending_count"] == 0
+    assert status["last_success"] is not None
+    assert status["last_error"] is None
+
+
+def test_sync_status_offline_after_failed_sync(tmp_path, monkeypatch):
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+
+    def _boom(*a, **kw):
+        raise ConnectionRefusedError("simulated: server unreachable")
+    monkeypatch.setattr(log_physical.urllib.request, "urlopen", _boom)
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+        log_physical.sync_unsynced_logs(con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["connection_state"] == "offline"
+    assert status["pending_count"] == 1
+    assert status["last_error"] is not None
+    assert "simulated" in status["last_error"]
+
+
+def test_sync_status_recovers_to_connected_after_a_later_success(tmp_path, monkeypatch):
+    """last_error must actually clear on the next success, not just get
+    overwritten alongside a stale success timestamp -- a UI reading this
+    file should never show a lingering error next to 'Connected'."""
+    import log_physical
+    monkeypatch.setenv("LOGIX_SERVER_URL", "http://example.invalid")
+    monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        _seed_one_unsynced_row(log_physical, con)
+
+        monkeypatch.setattr(log_physical.urllib.request, "urlopen",
+                             lambda *a, **kw: (_ for _ in ()).throw(ConnectionRefusedError("down")))
+        log_physical.sync_unsynced_logs(con)
+        assert log_physical.sync_status(con)["connection_state"] == "offline"
+
+        class _FakeResponse:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        monkeypatch.setattr(log_physical.urllib.request, "urlopen", lambda *a, **kw: _FakeResponse())
+        log_physical.sync_unsynced_logs(con)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["connection_state"] == "connected"
+    assert status["last_error"] is None
+
+
+def test_sync_status_state_file_is_colocated_with_the_actual_db_not_the_system_default(tmp_path):
+    """The whole reason PRAGMA database_list is used instead of
+    paths.data_home(): a device running against a non-default --db must not
+    have its sync status attributed to (or collide with) the system
+    install's sync_state.json. sync_status() itself is read-only (it never
+    writes), so this records a real attempt first, the same way
+    sync_unsynced_logs() would, then checks where that landed."""
+    import log_physical
+
+    db_path = tmp_path / "custom" / "wherever.db"
+    con = log_physical.connect(db_path)
+    try:
+        log_physical.migrate(con)
+        log_physical._record_sync_attempt(con, ok=True)
+        status = log_physical.sync_status(con)
+    finally:
+        con.close()
+
+    assert status["last_success"] is not None
+    assert (tmp_path / "custom" / "sync_state.json").exists()
+    assert not (tmp_path / "sync_state.json").exists(), "must not have landed one directory up either"
+
+
+def test_record_sync_attempt_write_failure_does_not_raise(tmp_path, monkeypatch):
+    """Observability must be best-effort -- a broken/unwritable state file
+    must never turn into a sync failure that wasn't otherwise one."""
+    import log_physical
+
+    con = log_physical.connect(tmp_path / "test.db")
+    try:
+        log_physical.migrate(con)
+        monkeypatch.setattr(log_physical.Path, "write_text",
+                             lambda self, *a, **kw: (_ for _ in ()).throw(OSError("disk full")))
+        log_physical._record_sync_attempt(con, ok=True)  # must not raise
+    finally:
+        con.close()
+
+
+def test_sync_status_cli_flag_prints_json(tmp_path, monkeypatch, capsys):
+    import log_physical
+    monkeypatch.setattr(log_physical.paths, "server_url", lambda: "")
+
+    con = log_physical.connect(tmp_path / "test.db")
+    log_physical.migrate(con)
+    con.close()
+
+    rc = log_physical.main(["--db", str(tmp_path / "test.db"), "--sync-status"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert parsed["connection_state"] == "disabled"
