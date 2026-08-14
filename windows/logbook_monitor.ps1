@@ -196,6 +196,12 @@ while ($true) {
         }
     } catch { Write-LogbookError "Monitor heartbeat failed: $($_.Exception.Message)" }
 
+    # Failed-sync retry, unattended. See Invoke-LogbookPeriodicSyncRetry's own
+    # comment for why this exists (nothing anywhere else in the codebase ever
+    # called --sync-to-server before this) and why it launches detached
+    # rather than blocking this loop.
+    try { Invoke-LogbookPeriodicSyncRetry } catch { Write-LogbookError "Periodic sync retry threw: $($_.Exception.Message)" }
+
     # Cap total session span even while locked/slept: a session older than
     # Get-LogbookMaxSessionSeconds is closed regardless of lock state, so it
     # never resumes -- or reports to the dashboard -- as a multi-day "active"

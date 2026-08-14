@@ -13,6 +13,13 @@ $Global:StateDir = Join-Path $env:ProgramData 'MindLabLogbook'
 $Global:SessionFile = Join-Path $Global:StateDir 'session.json'
 $Global:ErrorLog = Join-Path $Global:StateDir 'logbook_error.log'
 $Global:PopupLock = Join-Path $Global:StateDir 'popup.lock'
+# Defined HERE rather than only in logbook_monitor.ps1, which set it for
+# itself: the monitor owns this flag's lifecycle, but every process that
+# dot-sources this file needs to be able to READ it -- Get-LogbookSessionState
+# reports PAUSED off it, and a $null path there would silently read as
+# "not locked" in every process except the monitor. The monitor's own
+# assignment is the same value and stays where it is.
+$Global:LockedFlagPath = Join-Path $Global:StateDir 'workstation_locked.flag'
 
 function Write-LogbookError {
     param([string]$Message)
@@ -3090,6 +3097,14 @@ function Get-ActiveLogbookSessionAgeSeconds {
 function Close-ActiveLogbookSession {
     param([string]$Reason = 'END')
     Ensure-LogbookDirs
+    # Marks the ENDING state for any other process that asks (see
+    # Get-LogbookSessionState). Best-effort in both directions: failing to
+    # WRITE it must not stop a close, and it is deliberately NOT removed on
+    # the failure path below -- a marker left next to a session file that is
+    # still there is exactly how the "close was attempted and did not
+    # finish" case becomes visible instead of looking like a healthy
+    # running session.
+    try { Set-Content -LiteralPath $Global:SessionEndingFlag -Value (Get-Date).ToString('o') -Encoding ASCII -Force } catch { }
     try {
         if (Test-Path $Global:SessionFile) {
             $session = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
@@ -3113,6 +3128,9 @@ function Close-ActiveLogbookSession {
             Write-LogbookInfo "Closed active session sid=$($session.session_id) reason=$Reason"
         }
         Stop-LogbookTimers
+        # Cleared only on the success path. Every `return $false` above and
+        # below leaves it in place on purpose.
+        try { Remove-Item $Global:SessionEndingFlag -Force -ErrorAction SilentlyContinue } catch { }
         return $true
     } catch {
         Write-LogbookError "Close active session failed: $($_.Exception.Message)"
@@ -3203,6 +3221,116 @@ function Close-OverAgeLogbookSessionIfAny {
 # the workstation here is deliberate: it both signals departure to anyone
 # walking up to the machine and guarantees the *next* sign-in goes through
 # the unlock path, which starts a fresh session when none is on disk.
+# ---- Explicit session lifecycle state ---------------------------------------
+#
+# The lifecycle was real but implicit: spread across "does session.json
+# exist", "is timer_ready.flag there", "is workstation_locked.flag there",
+# "is a timer process alive" -- each checked ad hoc, in a different order, by
+# whichever caller needed it. That is workable until two callers disagree
+# about what the combination MEANS, which is how a session ends up displayed
+# as running while the thing running it is gone.
+#
+# This is deliberately a DERIVED state, not a stored one. Nothing here
+# introduces a new source of truth to keep in step with the old ones: every
+# state below is read from a fact that already existed and was already being
+# maintained by the code that owns it. Control flow elsewhere still keys off
+# those same facts directly and is unchanged -- this is one named place to
+# ASK the question, which is the smallest change that makes the lifecycle
+# explicit without rewiring the timer, the lock path, sync, or reporting.
+#
+#   IDLE      no session
+#   STARTING  session recorded, its widget has not reached the screen yet
+#   RUNNING   session recorded, widget up
+#   PAUSED    session recorded, workstation locked (what the lock screen
+#             itself calls this -- see the lockPausedBadge text key)
+#   ENDING    a close is in progress right now
+#   ERROR     a combination that should not persist: unreadable session
+#             file, a close that never finished, or a widget that died
+$Global:SessionEndingFlag = Join-Path $Global:StateDir 'session_ending.flag'
+
+# How long a close may legitimately be in progress before a still-present
+# marker stops meaning "ending" and starts meaning "this close never
+# finished". Close-ActiveLogbookSession logs the event, removes the file and
+# locks the workstation; seconds, not tens of seconds.
+$Global:SessionEndingGraceSeconds = 30
+
+function Get-LogbookSessionState {
+    <#
+      Returns @{ State = '<one of the above>'; Detail = '<why>' }.
+      Safe to call from any process at any time -- read-only, no side effects,
+      and it never throws (an unreadable state directory is itself an answer).
+    #>
+    $result = [ordered]@{ State = 'IDLE'; Detail = '' }
+    try {
+        $hasSession = Test-Path $Global:SessionFile
+        $endingFlag = Test-Path $Global:SessionEndingFlag
+
+        if (-not $hasSession) {
+            # A leftover ending marker with no session file means the close
+            # DID succeed and only the cleanup was interrupted. The session
+            # is over either way, so this reports IDLE rather than inventing
+            # a COMPLETED state that nothing could act on.
+            $result.State = 'IDLE'
+            $result.Detail = if ($endingFlag) { 'no active session (stale ending marker ignored)' } else { 'no active session' }
+            return $result
+        }
+
+        if ($endingFlag) {
+            $age = $null
+            try { $age = ((Get-Date) - (Get-Item $Global:SessionEndingFlag).LastWriteTime).TotalSeconds } catch { }
+            if ($null -ne $age -and $age -le $Global:SessionEndingGraceSeconds) {
+                $result.State = 'ENDING'
+                $result.Detail = "close in progress ($([int]$age)s)"
+            } else {
+                # The documented failure in Close-ActiveLogbookSession: the
+                # event is logged but session.json cannot be removed (ACL /
+                # ownership, typically a file created by an elevated run).
+                # Before this, that looked exactly like a healthy running
+                # session -- which is precisely why "SELESAI did nothing" was
+                # so hard to see.
+                $result.State = 'ERROR'
+                $result.Detail = 'a close was started but the session file is still present -- see logbook_error.log (likely ACL/ownership; run repair_logbook_permissions.ps1)'
+            }
+            return $result
+        }
+
+        try {
+            $null = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
+        } catch {
+            $result.State = 'ERROR'
+            $result.Detail = "session file present but unreadable: $($_.Exception.Message)"
+            return $result
+        }
+
+        if (Test-Path $Global:LockedFlagPath) {
+            $result.State = 'PAUSED'
+            $result.Detail = 'workstation locked'
+            return $result
+        }
+
+        if (-not (Test-Path (Join-Path $Global:StateDir 'timer_ready.flag'))) {
+            $result.State = 'STARTING'
+            $result.Detail = 'session recorded, timer widget not on screen yet'
+            return $result
+        }
+
+        $timers = @(Get-ProcessByCommandPattern 'logbook_timer\.ps1')
+        if ($timers.Count -eq 0) {
+            $result.State = 'ERROR'
+            $result.Detail = 'session is open but its timer widget is not running (the monitor restarts it on its next tick)'
+            return $result
+        }
+
+        $result.State = 'RUNNING'
+        $result.Detail = 'session active'
+        return $result
+    } catch {
+        $result.State = 'ERROR'
+        $result.Detail = "could not determine session state: $($_.Exception.Message)"
+        return $result
+    }
+}
+
 function Close-LogbookSessionAndLock {
     Close-ActiveLogbookSession -Reason 'END' | Out-Null
     # Guarantee the next sign-in form appears rather than relying solely on the
@@ -3230,6 +3358,72 @@ function Get-LogbookHeartbeatSeconds {
         return $parsed
     }
     return 5
+}
+
+# How often the monitor retries a failed sync of local session events to the
+# server, when nothing else has triggered one. Deliberately a SEPARATE, much
+# coarser cadence than the heartbeat: sync_unsynced_logs() spawns a Python
+# process and makes an HTTP call, so running it every heartbeat tick (5s by
+# default) would be needless load on both this machine and the server for a
+# device that just went offline for a while.
+#
+# WHY THIS EXISTS AT ALL: every event insert already tries an inline,
+# best-effort sync (log_physical.py's own post-insert call), and any two
+# events happening close together will naturally pick up whatever the
+# previous one could not send. But a device that goes idle right after a
+# failed sync -- machine locked, nobody logging in or out -- would otherwise
+# never retry again until the NEXT session event, which could be hours away.
+# Before this, --sync-to-server existed only as a manual CLI flag with no
+# caller anywhere in the codebase; this is the smallest change that makes
+# "failed synchronization must be retryable" true unattended, without a new
+# service, timer, or scheduled task -- it rides the monitor loop that is
+# already running continuously on every device.
+function Get-LogbookSyncRetrySeconds {
+    $val = Get-LogbookConfigEnv 'LOGIX_SYNC_RETRY_SECONDS'
+    $parsed = 0
+    if ($val -and [int]::TryParse($val, [ref]$parsed) -and $parsed -ge 30) {
+        return $parsed
+    }
+    return 120
+}
+
+# Best-effort periodic retry, called from the monitor's heartbeat loop. Cheap
+# to call every tick: it does nothing (no process spawn at all) unless BOTH a
+# server is actually configured AND the retry interval has actually elapsed.
+# Restart-safe by construction -- $script:nextSyncRetryAt lives only in this
+# process's memory, so a monitor restart just means the next tick recomputes
+# "due now", not "wait out whatever was left of the old interval". That is
+# the correct behaviour: pending events are what matters, and they live in
+# SQLite, not in this timer.
+#
+# Launched DETACHED (Start-Process, no -Wait), never run inline. --sync-to-
+# server retries up to 3 times with exponential backoff and a 10s per-attempt
+# timeout -- tens of seconds in the worst case -- and this loop is also what
+# answers a remote lock/message/power command within Get-LogbookHeartbeatSeconds
+# (2-5s by design, per that function's own comment). Blocking it on a sync
+# attempt would make the ONE thing this loop promises to be snappy about
+# exactly as slow as the network it is retrying against.
+$script:nextSyncRetryAt = [datetime]::MinValue
+function Invoke-LogbookPeriodicSyncRetry {
+    if (-not (Get-LogbookConfigEnv 'LOGIX_SERVER_URL')) { return }  # device-only: nothing to do, ever
+    if ((Get-Date) -lt $script:nextSyncRetryAt) { return }
+    $script:nextSyncRetryAt = (Get-Date).AddSeconds((Get-LogbookSyncRetrySeconds))
+    try {
+        $python = Find-LogixPython
+        if (-not $python) { return }
+        $syncScript = Join-Path (Get-LogixCoreDir) 'log_physical.py'
+        if (-not (Test-Path $syncScript)) { return }
+        # Quoted by hand, not via the -ArgumentList array form: Start-Process
+        # does not quote array elements containing spaces even then (see
+        # ps51-startprocess-quoting-conhost) -- immaterial for this fixed
+        # flag today, but matches how every other Start-Process call in this
+        # codebase is written so the next person copying this one does not
+        # inherit a bug the very next time an argument needs a space.
+        Start-Process -FilePath $python -ArgumentList @(('"{0}"' -f $syncScript), '--sync-to-server') `
+            -WindowStyle Hidden | Out-Null
+    } catch {
+        Write-LogbookError "Periodic sync retry failed to launch: $($_.Exception.Message)"
+    }
 }
 
 # Idle auto-end threshold, in seconds. RETURNS 0 WHEN THE POLICY IS OFF -- every
