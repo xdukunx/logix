@@ -266,15 +266,40 @@ foreach ($t in @('LogixClickThrough', 'LogixIdle')) {
     Assert ($commonSrc -match "Use-LogbookNativeType -Name '$t'") "$t is compiled on first use"
 }
 
-# Measure it rather than trust the grep: a fresh process, dot-source only.
-$sw = [Diagnostics.Stopwatch]::StartNew()
-& powershell -NoProfile -ExecutionPolicy Bypass -Command `
-    ". '$(Join-Path $PSScriptRoot 'logbook_common.ps1')'" | Out-Null
-$dotSourceMs = [int]$sw.ElapsedMilliseconds
-Write-Host "  cold process + dot-source: ${dotSourceMs}ms"
-# Generous: ~250ms of that is powershell.exe itself. One stray Add-Type puts it
-# over 700ms, which is what this is here to catch.
-Assert ($dotSourceMs -lt 900) "dot-sourcing logbook_common.ps1 stays cheap (${dotSourceMs}ms, budget 900ms)"
+# Measure it rather than trust the grep -- but measure the MARGINAL cost of
+# the dot-source, not the wall time of the whole process.
+#
+# This used to time a single `powershell -Command ". common.ps1"` against a
+# 900ms budget, most of which was powershell.exe's own startup. That makes
+# the test a measurement of the MACHINE, not of this file: process creation
+# here has been observed at ~250ms when the box is idle and ~670ms when it
+# is not (Defender, memory pressure, an agent already running), which alone
+# moves the number by more than the regression being guarded against. The
+# test then fails for reasons no code change could fix, which is how a guard
+# turns into noise people learn to ignore.
+#
+# Subtracting a bare `powershell -Command exit` isolates exactly what this
+# is here to catch: a stray Add-Type at file scope charging every dot-source
+# ~250-500ms of csc.exe. Best-of-3 on both halves, because a latency floor
+# is the honest statistic for "how expensive is this at best" -- a single
+# sample only ever measures the worst scheduling luck of that one run.
+function Measure-BestOf3 {
+    param([string[]]$PsArgs)
+    $best = [int]::MaxValue
+    foreach ($i in 1..3) {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        & powershell @PsArgs | Out-Null
+        $sw.Stop()
+        if ($sw.ElapsedMilliseconds -lt $best) { $best = [int]$sw.ElapsedMilliseconds }
+    }
+    return $best
+}
+$baselineMs = Measure-BestOf3 @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'exit')
+$loadedMs = Measure-BestOf3 @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+                              ". '$(Join-Path $PSScriptRoot 'logbook_common.ps1')'")
+$dotSourceMs = $loadedMs - $baselineMs
+Write-Host "  bare powershell: ${baselineMs}ms | + dot-source: ${loadedMs}ms | marginal: ${dotSourceMs}ms"
+Assert ($dotSourceMs -lt 400) "dot-sourcing logbook_common.ps1 stays cheap (${dotSourceMs}ms marginal, budget 400ms)"
 
 # The popup must not block on the network at login when a usable cache exists.
 $popupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_popup.ps1')
@@ -413,18 +438,28 @@ Assert ($commonSrc -match '(?s)function Request-LogbookBarAction.*?Move-Item -Li
 # it guards against (dot-sourcing 140KB of PowerShell first) costs ~250ms, far
 # more than the noise. A tighter bound here would fail on load and teach people
 # to ignore the suite.
+#
+# Marginal, for the same reason as the dot-source measurement above: the
+# absolute number is dominated by powershell.exe starting at all (~250ms on
+# an idle box, ~670ms on a busy one), and the regression this guards is the
+# callback going back to dot-sourcing 140KB of logbook_common.ps1 first,
+# which costs ~250ms of its OWN on top of that. Subtracting a bare process
+# start measures the callback, not the machine.
 $yasbSelf = Join-Path $PSScriptRoot 'logix_yasb.ps1'
-$best = [int]::MaxValue
-foreach ($i in 1..3) {
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    & powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $yasbSelf -Action open | Out-Null
-    $sw.Stop()
-    if ($sw.ElapsedMilliseconds -lt $best) { $best = [int]$sw.ElapsedMilliseconds }
-}
+$clickBaselineMs = Measure-BestOf3 @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-Command', 'exit')
+$clickTotalMs = Measure-BestOf3 @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $yasbSelf, '-Action', 'open')
+$clickMs = $clickTotalMs - $clickBaselineMs
 Remove-Item (Join-Path $Global:StateDir 'bar_action') -Force -ErrorAction SilentlyContinue
-Write-Host "  click -> request written: ${best}ms (best of 3)"
-Assert ($best -lt 500) `
-    "a bar click makes its request promptly (${best}ms; it was 586ms with the dot-source)"
+Write-Host "  bare powershell: ${clickBaselineMs}ms | + callback: ${clickTotalMs}ms | marginal: ${clickMs}ms"
+# Calibrated against the dot-source cost measured IN THIS SAME RUN rather
+# than a hardcoded millisecond count, because the thing being detected is a
+# step of exactly that size: if the callback ever goes back to dot-sourcing
+# logbook_common.ps1, its marginal cost gains ~$dotSourceMs and lands well
+# past this bound. A fixed number would instead encode how fast the machine
+# that happened to write the test was.
+$clickBudget = $dotSourceMs + 120
+Assert ($clickMs -lt $clickBudget) `
+    "a bar click does not pay the dot-source cost (${clickMs}ms marginal, budget ${clickBudget}ms = measured dot-source ${dotSourceMs}ms + 120ms headroom)"
 
 Write-Host "status bar output has no BOM (YASB's json.loads chokes on one)"
 # Out-File -Encoding UTF8 in Windows PowerShell 5.1 always writes a BOM.
@@ -544,6 +579,17 @@ $completeFn = [regex]::Match($timerSrc, '(?s)function Complete-LogbookSelesai \{
 Assert ($completeFn -match 'DispatcherTimer') `
     "the end routine is deferred, so WPF can paint the confirmation before Close-LogbookSessionAndLock blocks"
 Assert ($commonSrc -match "timerEndDone") "the confirmed state has its own configurable string"
+Assert ($timerSrc -match '\$script:SELESAI_DONE_MS\s*=\s*(\d+)') "the confirmation frame's duration is a named constant"
+$doneMs = [int]$Matches[1]
+# Long enough to register as a confirmation rather than a flicker, short
+# enough that nobody waits on it -- the workstation locks immediately after.
+Assert ($doneMs -ge 300 -and $doneMs -le 1500) "the confirmation is visible but not a delay (${doneMs}ms)"
+# The lock must happen INSIDE the deferred tick, not before it -- calling it
+# earlier would lock the screen before the frame confirming it ever painted,
+# which is the whole reason the deferral exists.
+$doneTick = [regex]::Match($timerSrc, '(?s)\$done\.Add_Tick\(\{.*?\}\.GetNewClosure\(\)\)').Value
+Assert ($doneTick -match 'Close-LogbookSessionAndLock') "the session close and lock run inside the deferred tick"
+Assert ($doneTick -match '\$window\.Close\(\)') "and the widget only closes after that"
 # The old arm/confirm vocabulary must be gone, not merely unused -- a stale
 # constant here is how a half-migrated control ends up with two state machines.
 Assert ($timerSrc -notmatch 'DISARM_SECONDS|ARMED_CAPTION_FMT|selesaiArmed|selesaiArmTick') "no leftovers from the old arm/confirm state machine"
@@ -750,6 +796,182 @@ foreach ($n in @('StatusDot','StatusText','ServerBox','CodeBox','CodeRow','Conne
 }
 $disc = $pairXaml.SelectNodes("//*[@Name='DisconnectBtn']")[0]
 Assert ($disc.Visibility -eq 'Collapsed') "an unpaired device is not offered a Disconnect button"
+
+Write-Host "periodic sync retry: an unattended device actually retries a failed sync"
+# Before this, --sync-to-server existed ONLY as a manual CLI flag -- nothing
+# in the whole codebase ever called it. A device that went idle right after
+# a failed inline sync (machine locked, nobody logging in or out) would
+# never retry again until the next real session event, which could be hours
+# away. See Invoke-LogbookPeriodicSyncRetry's own comment in
+# logbook_common.ps1.
+Assert ($monitorSrc -match 'Invoke-LogbookPeriodicSyncRetry') `
+    "the monitor's heartbeat loop actually calls the periodic retry"
+$monitorTickIdx = $monitorSrc.IndexOf('while ($true) {')
+$retryCallIdx = $monitorSrc.IndexOf('Invoke-LogbookPeriodicSyncRetry')
+Assert ($monitorTickIdx -ge 0 -and $retryCallIdx -gt $monitorTickIdx) `
+    "the call is inside the heartbeat loop, not just defined and forgotten"
+Assert ($commonSrc -match 'function Get-LogbookSyncRetrySeconds') "the retry interval is its own named setting"
+Assert ($commonSrc -match "Start-Process -FilePath \`$python") `
+    "the retry launches detached (Start-Process), never runs the sync attempt inline on the heartbeat thread"
+$periodicFn = [regex]::Match($commonSrc, '(?s)function Invoke-LogbookPeriodicSyncRetry \{.*?\n\}').Value
+Assert ($periodicFn -ne '') "Invoke-LogbookPeriodicSyncRetry is defined"
+Assert ($periodicFn -match "-not \(Get-LogbookConfigEnv 'LOGIX_SERVER_URL'\)") `
+    "an unpaired (device-only) machine takes the cheap early return -- never spawns anything"
+Assert ($periodicFn -notmatch '-Wait') `
+    "Start-Process must not pass -Wait, or 'detached' is a lie and this blocks the loop after all"
+
+# Isolated the same way the pairing tests above are: LOGIX_HOME points this
+# whole check at a scratch core dir, so it can neither read nor affect
+# whatever is actually configured on the machine running the suite.
+$retryDir = Join-Path $env:TEMP ('lxretry_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$savedHome2 = $env:LOGIX_HOME
+$savedUrl2 = $env:LOGIX_SERVER_URL
+try {
+    New-Item -ItemType Directory -Force -Path $retryDir | Out-Null
+    $env:LOGIX_HOME = $retryDir
+    $env:LOGIX_SERVER_URL = ''
+    $script:nextSyncRetryAt = [datetime]::MinValue
+
+    Invoke-LogbookPeriodicSyncRetry
+    Assert ($script:nextSyncRetryAt -eq [datetime]::MinValue) `
+        "device-only (no server configured): the schedule is untouched, proving nothing was spawned"
+
+    # A server IS configured, and the core dir actually has log_physical.py
+    # (copied from the real windows/../logix core so Test-Path passes) --
+    # this really does launch a detached python process. It is pointed at a
+    # closed local port, so it fails fast and exits on its own; this test
+    # does not wait on it, matching the fire-and-forget contract being
+    # tested. The Python-side behaviour of that process (retries, backoff,
+    # idempotency) is exhaustively covered by tests/test_sync_integration.py
+    # -- this layer only proves PowerShell actually launches it, once, and
+    # correctly reschedules so it does not launch again immediately.
+    $coreSrc = Join-Path $PSScriptRoot '..\logix'
+    Copy-Item (Join-Path $coreSrc 'log_physical.py') $retryDir -Force
+    Copy-Item (Join-Path $coreSrc 'paths.py') $retryDir -Force
+    $env:LOGIX_SERVER_URL = 'http://127.0.0.1:1'  # port 1: never listens, fails fast
+    $env:LOGIX_DB = Join-Path $retryDir 'device.db'
+
+    $before = Get-Date
+    Invoke-LogbookPeriodicSyncRetry
+    Assert ($script:nextSyncRetryAt -gt $before) `
+        "server configured and due: the next attempt is scheduled into the future"
+    Assert ($script:nextSyncRetryAt -le $before.AddSeconds((Get-LogbookSyncRetrySeconds) + 2)) `
+        "...by roughly the configured interval, not something wildly different"
+
+    $before2 = $script:nextSyncRetryAt
+    Invoke-LogbookPeriodicSyncRetry
+    Assert ($script:nextSyncRetryAt -eq $before2) `
+        "calling it again before the interval elapses is a no-op -- does not reschedule, does not relaunch"
+} finally {
+    $env:LOGIX_HOME = $savedHome2
+    $env:LOGIX_SERVER_URL = $savedUrl2
+    Remove-Item Env:\LOGIX_DB -ErrorAction SilentlyContinue
+    Remove-Item $retryDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "session lifecycle: one explicit state, derived from facts that already existed"
+# The lifecycle was real but implicit -- spread across "does session.json
+# exist", "is timer_ready.flag there", "is workstation_locked.flag there",
+# "is a timer alive", each checked ad hoc by whichever caller needed it.
+# Get-LogbookSessionState is one named place to ask. Every state below is
+# driven by REAL files here, not by mocking the function's internals.
+$stateDir = Join-Path $env:TEMP ('lxstate_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$savedStateDir = $Global:StateDir
+$savedSession = $Global:SessionFile
+$savedEnding = $Global:SessionEndingFlag
+$savedLocked = $Global:LockedFlagPath
+try {
+    New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+    $Global:StateDir = $stateDir
+    $Global:SessionFile = Join-Path $stateDir 'session.json'
+    $Global:SessionEndingFlag = Join-Path $stateDir 'session_ending.flag'
+    $Global:LockedFlagPath = Join-Path $stateDir 'workstation_locked.flag'
+    $readyFlag = Join-Path $stateDir 'timer_ready.flag'
+    $sessionJson = '{"session_id":"s1","nama":"Uji","start_time":"2026-01-01T10:00:00"}'
+
+    Assert ((Get-LogbookSessionState).State -eq 'IDLE') "no session file at all -> IDLE"
+
+    # A stale ending marker with no session file means the close DID work and
+    # only its cleanup was interrupted. Still IDLE -- the session is over.
+    Set-Content -LiteralPath $Global:SessionEndingFlag -Value 'x' -Encoding ASCII
+    Assert ((Get-LogbookSessionState).State -eq 'IDLE') "stale ending marker, no session -> still IDLE"
+    Remove-Item $Global:SessionEndingFlag -Force
+
+    Set-Content -LiteralPath $Global:SessionFile -Value $sessionJson -Encoding UTF8
+    Assert ((Get-LogbookSessionState).State -eq 'STARTING') "session recorded but the widget has not reached the screen -> STARTING"
+
+    Set-Content -LiteralPath $readyFlag -Value '' -Encoding ASCII
+
+    # Whether a timer process exists is the one input here that is NOT a file
+    # under $stateDir, so it cannot be isolated by pointing the globals at a
+    # scratch directory -- on a developer machine the REAL agent is usually
+    # running, and the first version of this check duly reported RUNNING and
+    # failed. Shadow the lookup so both branches are exercised deterministically
+    # on any machine, then restore it.
+    $origProcFn = (Get-Item function:Get-ProcessByCommandPattern).ScriptBlock
+    try {
+        Set-Item function:Get-ProcessByCommandPattern { param([string]$Pattern) return @([pscustomobject]@{ ProcessId = 4242 }) }
+        Assert ((Get-LogbookSessionState).State -eq 'RUNNING') "session recorded, widget up -> RUNNING"
+
+        Set-Item function:Get-ProcessByCommandPattern { param([string]$Pattern) return @() }
+        $s = Get-LogbookSessionState
+        Assert ($s.State -eq 'ERROR') "session open but its widget is gone -> ERROR (not a healthy RUNNING)"
+        Assert ($s.Detail -match 'timer widget is not running') "and says so"
+    } finally {
+        Set-Item function:Get-ProcessByCommandPattern $origProcFn
+    }
+
+    Set-Content -LiteralPath $Global:LockedFlagPath -Value '' -Encoding ASCII
+    Assert ((Get-LogbookSessionState).State -eq 'PAUSED') "workstation locked with a session open -> PAUSED (what the lock screen itself calls it)"
+    Remove-Item $Global:LockedFlagPath -Force
+
+    # A close in progress right now.
+    Set-Content -LiteralPath $Global:SessionEndingFlag -Value (Get-Date).ToString('o') -Encoding ASCII
+    Assert ((Get-LogbookSessionState).State -eq 'ENDING') "a close underway -> ENDING"
+
+    # The same marker, old, with the session file STILL present: this is the
+    # documented ACL/ownership failure in Close-ActiveLogbookSession, where
+    # the event is logged but session.json cannot be removed. Before this it
+    # looked exactly like a healthy running session, which is why "SELESAI
+    # did nothing" was so hard to see.
+    (Get-Item $Global:SessionEndingFlag).LastWriteTime = (Get-Date).AddSeconds(-($Global:SessionEndingGraceSeconds + 60))
+    $s = Get-LogbookSessionState
+    Assert ($s.State -eq 'ERROR') "a close that never finished -> ERROR, not RUNNING"
+    Assert ($s.Detail -match 'still present') "and names the actual problem"
+    Remove-Item $Global:SessionEndingFlag -Force
+
+    # An unreadable session file is a real state too (truncated write, disk
+    # problem) and must not throw its way out of a status check.
+    Set-Content -LiteralPath $Global:SessionFile -Value '{ this is not json' -Encoding UTF8
+    $s = Get-LogbookSessionState
+    Assert ($s.State -eq 'ERROR') "unreadable session file -> ERROR"
+    Assert ($s.Detail -match 'unreadable') "and says why"
+
+    # Never throws, whatever it finds -- a status probe that can raise is a
+    # status probe every caller has to wrap.
+    Remove-Item $Global:SessionFile -Force
+    $Global:StateDir = Join-Path $stateDir 'does-not-exist'
+    $Global:SessionFile = Join-Path $Global:StateDir 'session.json'
+    $threw = $false
+    try { [void](Get-LogbookSessionState) } catch { $threw = $true }
+    Assert (-not $threw) "a missing state directory is an answer, not an exception"
+} finally {
+    $Global:StateDir = $savedStateDir
+    $Global:SessionFile = $savedSession
+    $Global:SessionEndingFlag = $savedEnding
+    $Global:LockedFlagPath = $savedLocked
+    Remove-Item $stateDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# The marker has to actually be written by the close path, or ENDING is a
+# state nothing can ever observe.
+$closeFn = [regex]::Match($commonSrc, '(?s)function Close-ActiveLogbookSession \{.*?\n\}').Value
+Assert ($closeFn -match 'SessionEndingFlag') "the close path marks ENDING"
+Assert ($closeFn -match '(?s)Stop-LogbookTimers\s*\r?\n.*?Remove-Item \$Global:SessionEndingFlag') `
+    "and clears it on the success path only -- the failure returns deliberately leave it, which is what makes a stuck close visible"
+
+Write-Host "sync status: the CLI surface a future Device UI will read"
+Assert ($commonSrc -notmatch 'sync_status\(') "sync status stays Python-side (log_physical.py --sync-status) -- no PowerShell reimplementation to drift out of sync with it"
 
 # The summary lives at the END of the file, which sounds too obvious to write
 # down until you notice it did not: it sat at what was once the last line, and

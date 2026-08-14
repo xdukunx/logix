@@ -179,6 +179,44 @@ Assert ($selesaiTopShown -eq $selesaiTopHidden) `
     "and SELESAI does not move, so a press cannot slide the button out from under the cursor"
 $armed.Visibility = 'Hidden'
 Relayout
+
+# The confirmed state ("Sesi selesai") swaps the button's label text while the
+# card is still on screen and the pointer is still on the button. If that swap
+# resized anything, it would be the SAME class of bug as the hold hint that
+# used to grow the card and cancel the very gesture it was confirming -- and
+# it would land at the one moment the user is being told it worked.
+$selLabel2 = $widget.FindName('SelesaiLabel')
+$sweepLabel = $widget.FindName('SelesaiSweepLabel')
+$beforeBtnW = $selesai.ActualWidth
+$beforeBtnH = $selesai.ActualHeight
+$beforeCardH2 = $card.ActualHeight
+$doneText = Get-LogbookText $cfg 'timerEndDone' 'Sesi selesai'
+$selLabel2.Text = $doneText
+$sweepLabel.Text = $doneText
+Relayout
+Assert ($selesai.ActualWidth -eq $beforeBtnW -and $selesai.ActualHeight -eq $beforeBtnH) `
+    "the confirmed state keeps the button's size ($beforeBtnW x $beforeBtnH)"
+Assert ($card.ActualHeight -eq $beforeCardH2) `
+    "and the card's height, so 'Sesi selesai' cannot shift anything under the cursor"
+
+# Both label layers must carry the same text, or the swept copy would still
+# read "Tahan untuk selesai" underneath a button that says it is done.
+Assert ($selLabel2.Text -eq $sweepLabel.Text) "both label layers show the confirmed text"
+
+# The fill and its clipping sweep are driven from ONE number in the
+# controller; at completion both must span the whole track or the confirmed
+# state renders as a partially-filled button.
+$track = $widget.FindName('SelesaiTrack')
+$selFill.Width = $track.ActualWidth
+$widget.FindName('SelesaiSweep').Width = $track.ActualWidth
+Relayout
+Assert ($selFill.Width -eq $widget.FindName('SelesaiSweep').Width) `
+    "fill and sweep stay in lockstep at completion"
+Assert ($selesai.ActualWidth -eq $beforeBtnW) "and a fully-filled button still does not change size"
+$selFill.Width = 0
+$widget.FindName('SelesaiSweep').Width = 0
+$selLabel2.Text = (Get-LogbookText $cfg 'timerEndHold' 'Tahan untuk selesai')
+Relayout
 $card.Visibility = 'Collapsed'
 
 Write-Host "timer widget: the pill and the card are never both on screen"
@@ -225,13 +263,30 @@ foreach ($case in @(
     @{ n = 'right panel'; s = (FakeScreen 1920 0 1920 1080 $false '\\.\DISPLAY2' 1) },
     # A layout with a GAP: the two panels are not adjacent, so the midpoint of
     # the virtual desktop is a coordinate no monitor can display.
-    @{ n = 'gapped right'; s = (FakeScreen 2400 0 1600 900 $false '\\.\DISPLAY5' 1) }
+    @{ n = 'gapped right'; s = (FakeScreen 2400 0 1600 900 $false '\\.\DISPLAY5' 1) },
+    # NEGATIVE coordinates. Windows gives the PRIMARY display the origin, so a
+    # monitor arranged to its left or above it has a negative Left/Top -- and
+    # that is an ordinary arrangement, not an exotic one. Every offset in
+    # Set-LogbookCardOnScreen is computed relative to the virtual screen's own
+    # origin for exactly this reason; a version that assumed 0,0 would put the
+    # card on the wrong display here, or off-screen entirely.
+    @{ n = 'left of primary (negative X)'; s = (FakeScreen -1920 0 1920 1080 $false '\\.\DISPLAY3' 0) },
+    @{ n = 'above primary (negative Y)';   s = (FakeScreen 0 -1080 1920 1080 $false '\\.\DISPLAY4' 0) },
+    @{ n = 'up and to the left (both negative)'; s = (FakeScreen -2560 -1440 2560 1440 $false '\\.\DISPLAY6' 0) },
+    # Mixed resolutions, which is what a real lab actually looks like once a
+    # spare monitor gets attached to a workstation.
+    @{ n = 'small secondary'; s = (FakeScreen 1920 0 1280 720 $false '\\.\DISPLAY7' 1) }
 )) {
     Set-LogbookCardOnScreen -Window $mwin -Card $mcard -Target $case.s
     $left = $mcard.Margin.Left + $virt.Left
+    $top  = $mcard.Margin.Top + $virt.Top
     $b = $case.s.Bounds
     Assert ($left -ge $b.Left -and ($left + 320) -le ($b.Left + $b.Width)) `
-        "$($case.n): the card lands wholly inside its display ($left..$($left + 320) within $($b.Left)..$($b.Left + $b.Width))"
+        "$($case.n): the card lands wholly inside its display horizontally ($left..$($left + 320) within $($b.Left)..$($b.Left + $b.Width))"
+    # Vertical containment matters just as much on a negative-Y layout, and
+    # was previously only asserted for the too-short-display clamp below.
+    Assert ($top -ge $b.Top -and $top -le ($b.Top + $b.Height)) `
+        "$($case.n): and vertically ($top within $($b.Top)..$($b.Top + $b.Height))"
 }
 Assert ($mcard.HorizontalAlignment -eq 'Left' -and $mcard.VerticalAlignment -eq 'Top') `
     "alignment leaves Center, or the margin that does the positioning is ignored"
