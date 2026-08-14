@@ -678,6 +678,7 @@ function Get-LogbookDefaultConfig {
             # other surfaces (the preview client) present it as a plain button.
             timerEndHold     = 'Tahan untuk selesai'
             timerEndArmed    = 'Terus tahan...'
+            timerEndConfirm  = 'Yakin selesai?'
             timerEndDone     = 'Sesi selesai'
             timerNama        = 'Nama'
             timerTujuan      = 'Tujuan'
@@ -728,6 +729,7 @@ function Get-LogbookDefaultConfig {
                 timerEnd       = 'END'
                 timerEndHold   = 'Hold to end session'
                 timerEndArmed  = 'Keep holding...'
+                timerEndConfirm = 'Sure?'
                 timerEndDone   = 'Session ended'
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
                 monitorPicker  = 'Show on'
@@ -2899,50 +2901,47 @@ $res
                      Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
         </StackPanel>
 
-        <!-- SELESAI: press-and-hold to confirm, not a tap. SelesaiFill is an
-             empty-width Border the controller grows left-to-right over the
-             hold. The fill is deliberately SQUARE-cornered and relies on the
-             controller's rounded Clip to shape it: giving the fill its own
-             CornerRadius instead made a part-grown fill render as a floating
-             lozenge that had visibly detached from the left edge, rather than
-             as the pill filling up. ClipToBounds cannot do this job on its
-             own, because a Border clips to its rectangle, corner radius and
-             all; the controller installs a real rounded clip instead.
+        <!-- SELESAI: press-and-hold to confirm, not a tap.
+             Progress is drawn as a STROKE TRACING THE PILL'S PERIMETER, not
+             as a bar filling it left to right. Two reasons, and the second is
+             the one that decided it:
 
-             THE LABEL IS DRAWN TWICE, and that is the point of the control.
-             SelesaiLabel is the resting copy; SelesaiSweepLabel is an
-             identical copy in the critical colour, sitting inside a clipping
-             Border (SelesaiSweep) that the controller grows to exactly the
-             fill's width. So the hold does not repaint the text, it UNCOVERS
-             it: the words change colour one at a time as the fill passes
-             under them, which is what reads as a progress meter without a
-             progress bar's chrome. The alternative already tried here (one
-             label swapping colour wholesale partway through) has to pick a
-             threshold, and at that threshold the entire label blinks.
+             1. This file's own guard rail says a status colour appears as a
+                dot or an EDGE and never as a tinted background. An outline is
+                exactly an edge; the wash this replaces was the one place the
+                rule was being bent.
+             2. A fill runs underneath the words. However carefully the label
+                is handled (this control previously drew it twice, so the text
+                changed colour as the fill passed under it), the label is
+                still competing with a moving background at the moment the
+                user most needs to read it. An outline never touches the text.
 
-             SelesaiSweepInner is a fixed-width Grid, not an auto-width one.
-             The copy has to stay centred against the WHOLE button while its
-             container is only a slice of it, so the controller sets this to
-             the track's measured width; letting it size to the slice would
-             slide the text leftward as the fill grew. -->
+             SelesaiRing's Data is built by the controller from the MEASURED
+             size, like the clip below it, because the card swaps between its
+             240 and 260px variants. The trace itself is a StrokeDashArray
+             animation: one dash as long as the swept fraction of the
+             perimeter, then a gap longer than the rest of it.
+
+             SelesaiFill survives for the CONFIRMED state only. That single
+             moment is where full-strength critical is the right colour,
+             because it is a moment and not a surface. It stays
+             square-cornered and relies
+             on the controller's rounded clip; giving it its own CornerRadius
+             made a part-grown fill read as a floating lozenge detached from
+             the left edge. -->
         <Border Name="SelesaiBtn" Height="36" CornerRadius="20" ClipToBounds="True"
                 Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
                 BorderThickness="1" Cursor="Hand">
           <Grid Name="SelesaiTrack">
-            <Border Name="SelesaiFill" Background="{StaticResource LxCriticalWash}"
+            <Border Name="SelesaiFill" Background="{StaticResource LxCriticalEdge}"
                     HorizontalAlignment="Left" Width="0"/>
+            <Path Name="SelesaiRing" Stroke="{StaticResource LxCriticalSoft}" StrokeThickness="2"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0"
+                  IsHitTestVisible="False"/>
             <TextBlock Name="SelesaiLabel" Text="$tSelesai" HorizontalAlignment="Center"
                        VerticalAlignment="Center" TextWrapping="NoWrap"
                        FontFamily="Segoe UI Semibold" FontSize="12.5"
                        Foreground="{StaticResource LxText}"/>
-            <Border Name="SelesaiSweep" HorizontalAlignment="Left" Width="0" ClipToBounds="True">
-              <Grid Name="SelesaiSweepInner" HorizontalAlignment="Left">
-                <TextBlock Name="SelesaiSweepLabel" Text="$tSelesai" HorizontalAlignment="Center"
-                           VerticalAlignment="Center" TextWrapping="NoWrap"
-                           FontFamily="Segoe UI Semibold" FontSize="12.5"
-                           Foreground="{StaticResource LxCriticalSoft}"/>
-              </Grid>
-            </Border>
           </Grid>
         </Border>
         <!-- Hidden, NOT Collapsed, and its text is baked in rather than set on

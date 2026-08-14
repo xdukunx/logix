@@ -186,35 +186,59 @@ Relayout
 # used to grow the card and cancel the very gesture it was confirming -- and
 # it would land at the one moment the user is being told it worked.
 $selLabel2 = $widget.FindName('SelesaiLabel')
-$sweepLabel = $widget.FindName('SelesaiSweepLabel')
+$ring = $widget.FindName('SelesaiRing')
+$track = $widget.FindName('SelesaiTrack')
 $beforeBtnW = $selesai.ActualWidth
 $beforeBtnH = $selesai.ActualHeight
 $beforeCardH2 = $card.ActualHeight
-$doneText = Get-LogbookText $cfg 'timerEndDone' 'Sesi selesai'
-$selLabel2.Text = $doneText
-$sweepLabel.Text = $doneText
-Relayout
-Assert ($selesai.ActualWidth -eq $beforeBtnW -and $selesai.ActualHeight -eq $beforeBtnH) `
-    "the confirmed state keeps the button's size ($beforeBtnW x $beforeBtnH)"
-Assert ($card.ActualHeight -eq $beforeCardH2) `
-    "and the card's height, so 'Sesi selesai' cannot shift anything under the cursor"
 
-# Both label layers must carry the same text, or the swept copy would still
-# read "Tahan untuk selesai" underneath a button that says it is done.
-Assert ($selLabel2.Text -eq $sweepLabel.Text) "both label layers show the confirmed text"
+# The label changes twice during this gesture (resting -> question -> result)
+# while the card is on screen and the pointer is on the button. If any of
+# those swaps resized anything it would be the same class of bug as the hold
+# hint that used to grow the card and cancel the gesture it was confirming.
+foreach ($state in @(
+    @{ n = 'holding'; t = (Get-LogbookText $cfg 'timerEndConfirm' 'Yakin selesai?') },
+    @{ n = 'done';    t = (Get-LogbookText $cfg 'timerEndDone' 'Sesi selesai') }
+)) {
+    $selLabel2.Text = $state.t
+    Relayout
+    Assert ($selesai.ActualWidth -eq $beforeBtnW -and $selesai.ActualHeight -eq $beforeBtnH) `
+        "the $($state.n) label keeps the button's size ($beforeBtnW x $beforeBtnH)"
+    Assert ($card.ActualHeight -eq $beforeCardH2) `
+        "and the card's height, so '$($state.t)' cannot shift anything under the cursor"
+}
 
-# The fill and its clipping sweep are driven from ONE number in the
-# controller; at completion both must span the whole track or the confirmed
-# state renders as a partially-filled button.
-$track = $widget.FindName('SelesaiTrack')
-$selFill.Width = $track.ActualWidth
-$widget.FindName('SelesaiSweep').Width = $track.ActualWidth
+# The ring is an overlay on the button, so it must not participate in layout
+# at all -- a Path that measured would change the button the moment it drew.
+Assert ($null -ne $ring) "the button carries the progress ring"
+Assert ($ring.Opacity -eq 0) "which is invisible until a hold starts"
+Assert (-not $ring.IsHitTestVisible) "and never intercepts the press it reports on"
+
+# Drive the ring the way the controller does and confirm the geometry is a
+# stadium (rounded ends), not a rectangle: a ring measured as a rectangle
+# finishes its trace early and leaves a visible gap at the end of the hold.
+$T = 2.0
+$rw = $track.ActualWidth - $T
+$rh = $track.ActualHeight - $T
+$r = $rh / 2.0
+$geo = New-Object System.Windows.Media.RectangleGeometry
+$geo.Rect = New-Object System.Windows.Rect ($T/2), ($T/2), $rw, $rh
+$geo.RadiusX = $r; $geo.RadiusY = $r
+$ring.Data = $geo
+$stadium = (2.0 * ($rw - 2.0 * $r)) + (2.0 * [Math]::PI * $r)
+$rectangular = 2.0 * ($rw + $rh)
+Assert ($stadium -lt $rectangular) `
+    "a stadium perimeter is shorter than the rectangle around it ($([int]$stadium) vs $([int]$rectangular)px)"
+
+$coll = New-Object System.Windows.Media.DoubleCollection
+$coll.Add(($stadium / $T) * 0.5); $coll.Add($stadium / $T)
+$ring.StrokeDashArray = $coll
+$ring.Opacity = 1
 Relayout
-Assert ($selFill.Width -eq $widget.FindName('SelesaiSweep').Width) `
-    "fill and sweep stay in lockstep at completion"
-Assert ($selesai.ActualWidth -eq $beforeBtnW) "and a fully-filled button still does not change size"
-$selFill.Width = 0
-$widget.FindName('SelesaiSweep').Width = 0
+Assert ($selesai.ActualWidth -eq $beforeBtnW -and $card.ActualHeight -eq $beforeCardH2) `
+    "a mid-trace ring changes no geometry at all"
+
+$ring.Opacity = 0
 $selLabel2.Text = (Get-LogbookText $cfg 'timerEndHold' 'Tahan untuk selesai')
 Relayout
 $card.Visibility = 'Collapsed'

@@ -545,18 +545,52 @@ Assert ($fillTag -notmatch 'CornerRadius') "the fill itself is square-cornered (
 # "ngapain tiba2 ada merah, ga senada": the fill was the raw critical signal,
 # which is the one thing this file's own guard rail says a status colour may
 # never be used as (dot or edge only, never a tinted background).
-Assert ($fillTag -match 'LxCriticalWash') "the fill is the derived wash, in the card's own key"
 Assert ($fillTag -notmatch 'StaticResource LxCritical\}') "the fill is never the raw alert red"
-# The label is drawn twice and the top copy is uncovered by the fill, so the
-# colour boundary in the text IS the fill's edge. One label recoloured at a
-# threshold makes the whole word blink at that threshold instead.
-Assert ($commonSrc -match 'Name="SelesaiSweep"') "a clipping layer exists for the swept copy of the label"
-Assert ($commonSrc -match 'Name="SelesaiSweepLabel"[^>]*(?s).*?LxCriticalSoft') "the swept copy carries the soft critical colour"
-Assert ($timerSrc -match '\$selesaiSweep\.Width\s*=\s*\$w' -and $timerSrc -match '\$selesaiFill\.Width\s*=\s*\$w') `
-    "one number drives both layers, so the text boundary and the fill edge are the same pixel"
-Assert ($timerSrc -match '\$selesaiSweepInner\.Width\s*=\s*\$selesaiTrack\.ActualWidth') `
-    "the swept copy stays centred on the whole button, not on the slice showing it"
+
+# Progress is a stroke tracing the pill's PERIMETER, not a bar filling it.
+# Two reasons this shape was chosen over the fill it replaces: an outline is
+# literally the "dot or edge" this project's guard rail allows a status colour
+# to be, and an outline never runs underneath the words at the moment the user
+# most needs to read them.
+Assert ($commonSrc -match 'Name="SelesaiRing"') "the button carries a ring for the hold to trace"
+$ringTag = [regex]::Match($commonSrc, '<Path Name="SelesaiRing"(?s).*?/>').Value
+Assert ($ringTag -match 'LxCriticalSoft') "the ring is the soft critical colour"
+Assert ($ringTag -match 'Opacity="0"') "and starts invisible, so an untouched button shows no progress at all"
+Assert ($ringTag -match 'IsHitTestVisible="False"') "the ring never eats the press it is reporting on"
+Assert ($commonSrc -notmatch 'Name="SelesaiSweep"') "the old swept-label layer is gone, not merely unused"
+
+# The trace is a dash as long as the swept fraction of the perimeter, then a
+# gap longer than everything left, so it can never wrap round and meet itself.
+Assert ($timerSrc -match 'function Set-LogbookRingProgress') "one function owns the trace"
+$ringFn = [regex]::Match($timerSrc, '(?s)function Set-LogbookRingProgress.*?
+\}').Value
+Assert ($ringFn -match 'StrokeDashArray') "drawn with a dash array, not by rebuilding geometry every frame"
+Assert ($ringFn -match 'StrokeDashOffset') "and offset so the trace starts at the top, where a dial starts"
+Assert ($timerSrc -match 'Set-LogbookRingProgress \$frac') "the hold tick drives it"
+# Perimeter of a stadium, not of a rectangle: the ends are semicircles, and a
+# ring measured as a plain rectangle finishes early and leaves a visible gap.
+Assert ($timerSrc -match '2\.0 \* \[Math\]::PI \* \$r') "the perimeter accounts for the rounded ends"
 Assert ($timerSrc -notmatch "ConvertFromString\(\`$\(if \(\`$frac") "no threshold recolour left over from the flood version"
+
+# The label asks the question the hold answers, and both input paths must set
+# it -- a keyboard hold that showed different words would be a second design.
+Assert ($commonSrc -match 'timerEndConfirm') "the holding state has its own configurable string"
+Assert ($timerSrc -match 'function Enter-LogbookSelesaiHoldVisual') "one place defines what a started hold looks like"
+$enterFn = [regex]::Match($timerSrc, '(?s)function Enter-LogbookSelesaiHoldVisual \{.*?
+\}').Value
+Assert ($enterFn -match 'timerEndConfirm') "it swaps the label to the confirm question"
+$mouseDown = [regex]::Match($timerSrc, '(?s)Add_PreviewMouseLeftButtonDown\(\{.*?
+\}\)').Value
+$keyDown = [regex]::Match($timerSrc, '(?s)\$selesaiBtn\.Add_KeyDown\(\{.*?
+\}\)').Value
+Assert ($mouseDown -match 'Enter-LogbookSelesaiHoldVisual') "the pointer path uses it"
+Assert ($keyDown -match 'Enter-LogbookSelesaiHoldVisual') "and so does the keyboard path"
+# Letting go must restore the resting words, or a cancelled hold leaves the
+# button permanently asking a question nobody is answering.
+$resetFn = [regex]::Match($timerSrc, '(?s)function Reset-LogbookSelesai \{.*?
+\}').Value
+Assert ($resetFn -match 'timerEndHold') "cancelling restores the resting label"
+Assert ($resetFn -match 'OpacityProperty') "and fades the ring rather than snapping it off mid-stroke"
 Assert ($timerSrc -match 'BorderBrush = \$brushConv\.ConvertFromString\(\$theme\.criticalEdge\)') `
     "the press lands on the outline on frame one, before the fill is wide enough to see"
 
@@ -723,10 +757,18 @@ Write-Host "server pairing: a device can join a server, and leave one, after ins
 $pairDir = Join-Path $env:TEMP ('lxpair_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $savedHome = $env:LOGIX_HOME
 $savedUrl = $env:LOGIX_SERVER_URL
+# The LOG has to be redirected too, not just the data files. LOGIX_HOME moves
+# the core dir (device.json, config.env), but Write-LogbookInfo writes to
+# $Global:ErrorLog under $Global:StateDir, which it does not touch -- so an
+# earlier version of this test left "Server pairing removed on this device"
+# in the REAL agent log of a machine whose pairing was never touched. Nobody
+# reading that log later has any way to know it came from a test.
+$savedLog = $Global:ErrorLog
 try {
     New-Item -ItemType Directory -Force -Path $pairDir | Out-Null
     $env:LOGIX_HOME = $pairDir
     $env:LOGIX_SERVER_URL = ''
+    $Global:ErrorLog = Join-Path $pairDir 'test.log'
 
     Assert ((Get-LogixCoreDir) -eq $pairDir) "the test really is pointed at a scratch core dir"
 
@@ -787,6 +829,7 @@ try {
 } finally {
     $env:LOGIX_HOME = $savedHome
     $env:LOGIX_SERVER_URL = $savedUrl
+    $Global:ErrorLog = $savedLog
     Remove-Item $pairDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 

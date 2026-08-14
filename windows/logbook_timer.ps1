@@ -180,9 +180,7 @@ $selesaiBtn  = $window.FindName('SelesaiBtn')
 $selesaiTrack = $window.FindName('SelesaiTrack')
 $selesaiFill = $window.FindName('SelesaiFill')
 $selesaiLabel = $window.FindName('SelesaiLabel')
-$selesaiSweep = $window.FindName('SelesaiSweep')
-$selesaiSweepLabel = $window.FindName('SelesaiSweepLabel')
-$selesaiSweepInner = $window.FindName('SelesaiSweepInner')
+$selesaiRing = $window.FindName('SelesaiRing')
 $armedCap    = $window.FindName('ArmedCaption')
 $quickOk     = $window.FindName('QuickOkBtn')
 $quickWait   = $window.FindName('QuickWaitBtn')
@@ -501,15 +499,54 @@ $selesaiBtn.Add_SizeChanged({
     $selesaiBtn.Clip = $geo
 })
 
-# The swept copy of the label is centred against the FULL track while living
-# inside a container only as wide as the fill, so its own width has to be
-# pinned to the track's. Hooked on the track rather than on the button because
-# the button's SizeChanged can run before its child has been arranged, and this
-# needs a measured child width, not a guess at one minus the border.
+# The ring is rebuilt from the MEASURED track, not from the button, because
+# the button's SizeChanged can run before its child has been arranged -- and
+# the stroke has to sit ON the pill's edge, which is the track's rectangle
+# inset by half the stroke width so the line is not clipped in half by the
+# button's own rounded clip.
+$script:selesaiRingLength = 0.0
+$script:SELESAI_RING_THICKNESS = 2.0
 $selesaiTrack.Add_SizeChanged({
-    if ($selesaiTrack.ActualWidth -le 0) { return }
-    $selesaiSweepInner.Width = $selesaiTrack.ActualWidth
+    $w = $selesaiTrack.ActualWidth
+    $h = $selesaiTrack.ActualHeight
+    if ($w -le 0 -or $h -le 0) { return }
+    $inset = $script:SELESAI_RING_THICKNESS / 2.0
+    $rw = $w - $script:SELESAI_RING_THICKNESS
+    $rh = $h - $script:SELESAI_RING_THICKNESS
+    if ($rw -le 0 -or $rh -le 0) { return }
+    $r = $rh / 2.0    # stadium: the radius IS half the height
+    $geo = New-Object System.Windows.Media.RectangleGeometry
+    $geo.Rect = New-Object System.Windows.Rect $inset, $inset, $rw, $rh
+    $geo.RadiusX = $r
+    $geo.RadiusY = $r
+    $selesaiRing.Data = $geo
+    # Perimeter of a stadium: the two straight runs plus one full circle made
+    # of the two semicircular ends. Needed in stroke-thickness units, which is
+    # what StrokeDashArray counts in.
+    $script:selesaiRingLength = (2.0 * ($rw - 2.0 * $r)) + (2.0 * [Math]::PI * $r)
 })
+
+# Draws the first $Frac of the perimeter and nothing else. One dash as long as
+# the swept fraction, then a gap longer than everything remaining, so there is
+# never a second dash wrapping around to meet the first.
+function Set-LogbookRingProgress([double]$Frac) {
+    if ($script:selesaiRingLength -le 0) { return }
+    $t = $script:SELESAI_RING_THICKNESS
+    $units = $script:selesaiRingLength / $t
+    $dash = [Math]::Max(0.0001, $units * [Math]::Max(0.0, [Math]::Min(1.0, $Frac)))
+    $coll = New-Object System.Windows.Media.DoubleCollection
+    $coll.Add($dash)
+    $coll.Add($units)          # gap: the whole perimeter, so nothing repeats
+    $selesaiRing.StrokeDashArray = $coll
+    # Start the trace at the TOP CENTRE and run clockwise. WPF begins a
+    # rounded-rect figure at the start of the top edge, so backing off by half
+    # the top run puts the origin where the eye expects a dial to start.
+    $rh = $selesaiTrack.ActualHeight - $t
+    $r = $rh / 2.0
+    $topRun = ($selesaiTrack.ActualWidth - $t) - (2.0 * $r)
+    $selesaiRing.StrokeDashOffset = -(($topRun / 2.0) / $t)
+    $selesaiRing.Opacity = 1
+}
 
 function Reset-LogbookSelesai {
     $script:selesaiHolding = $false
@@ -517,7 +554,19 @@ function Reset-LogbookSelesai {
     $script:selesaiHoldTimer.Stop()
     if ($selesaiBtn.IsMouseCaptured) { $selesaiBtn.ReleaseMouseCapture() }
     $selesaiFill.Width = 0
-    $selesaiSweep.Width = 0
+    # Letting go fades the ring out rather than snapping it off: a trace that
+    # vanishes mid-stroke reads as a glitch, one that dims reads as "cancelled".
+    # Deliberately not animating the LENGTH back down -- rewinding would look
+    # like the gesture is still running, backwards.
+    if ($script:reduceMotion) {
+        $selesaiRing.Opacity = 0
+    } else {
+        $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(
+            $selesaiRing.Opacity, 0.0, [TimeSpan]::FromMilliseconds(160))
+        $fade.EasingFunction = $script:EASE
+        $selesaiRing.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
+    }
+    $selesaiLabel.Text = Get-LogbookText $cfg 'timerEndHold' 'Tahan untuk selesai'
     $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.border)
     Update-LogbookWidgetView
 }
@@ -526,12 +575,9 @@ $script:selesaiHoldTimer.Add_Tick({
     if (-not $script:selesaiHolding) { $script:selesaiHoldTimer.Stop(); return }
     $elapsedMs = ((Get-Date) - $script:selesaiHoldStarted).TotalMilliseconds
     $frac = [Math]::Min(1.0, $elapsedMs / $script:SELESAI_HOLD_MS)
-    # One number drives both layers, so the colour boundary in the text and the
-    # edge of the wash are the same pixel: the fill is not a bar moving BEHIND
-    # the label, it is the thing revealing it.
-    $w = $frac * $selesaiTrack.ActualWidth
-    $selesaiFill.Width = $w
-    $selesaiSweep.Width = $w
+    # The ring is the whole progress indication -- nothing moves under the
+    # label, so the words stay readable for the entire gesture.
+    Set-LogbookRingProgress $frac
     if ($frac -ge 1.0) {
         $script:selesaiHoldTimer.Stop()
         $script:selesaiHolding = $false
@@ -552,10 +598,17 @@ function Complete-LogbookSelesai {
     if ($script:selesaiCompleting) { return }   # keyboard + mouse must not both fire it
     $script:selesaiCompleting = $true
     try {
+        # The ring completes into a filled pill: the outline has just gone all
+        # the way round, so the shape it enclosed becoming solid is the natural
+        # resolution of that gesture rather than a new effect.
+        Set-LogbookRingProgress 1.0
         $selesaiFill.Width = $selesaiTrack.ActualWidth
-        $selesaiSweep.Width = $selesaiTrack.ActualWidth
         $selesaiLabel.Text = Get-LogbookText $cfg 'timerEndDone' 'Sesi selesai'
-        $selesaiSweepLabel.Text = $selesaiLabel.Text
+        # Primary text, not the soft critical: this label now sits ON the
+        # filled pill rather than on the card's surface, and a tinted red on a
+        # maroon fill is the one combination in this palette with no contrast
+        # left to spend. The reference does the same thing for the same reason.
+        $selesaiLabel.Foreground = $brushConv.ConvertFromString($theme.text)
         $armedCap.Visibility = 'Hidden'
         # The confirmed state is the ONE place the full-strength signal colour
         # is right: it is a moment, not a surface, and it is the last frame of
@@ -581,6 +634,24 @@ function Complete-LogbookSelesai {
     $done.Start()
 }
 
+# Everything the button does the instant a hold begins, in one place -- the
+# pointer path and the keyboard path must not drift into showing different
+# states for the same gesture.
+function Enter-LogbookSelesaiHoldVisual {
+    # The label asks the question the hold is answering. Taken from the
+    # reference this control follows: a confirm that changes its own words on
+    # press tells the user what they are committing to at the exact moment
+    # they are committing to it, instead of relying on a caption underneath
+    # that they are not looking at.
+    $selesaiLabel.Text = Get-LogbookText $cfg 'timerEndConfirm' 'Yakin selesai?'
+    # The outline is the design's sanctioned home for a status colour (the dot
+    # and the 3px strip are the others). It lands on the FIRST frame, before
+    # the ring has traced far enough to see, which is the frame that decides
+    # whether the press felt registered.
+    $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.criticalEdge)
+    Set-LogbookRingProgress 0.0
+}
+
 $selesaiBtn.Add_PreviewMouseLeftButtonDown({
     $script:selesaiHolding = $true
     $script:selesaiHoldStarted = Get-Date
@@ -590,12 +661,7 @@ $selesaiBtn.Add_PreviewMouseLeftButtonDown({
     # had already let go -- the worst possible failure for this control.
     try {
         [void]$selesaiBtn.CaptureMouse()
-        # The outline is the design's sanctioned home for a status colour (the
-        # dot and the 3px strip are the others), so it carries the state change
-        # the flooded background used to. It also lands on the FIRST frame,
-        # before the fill has grown wide enough to see, which is the frame that
-        # decides whether the press felt registered.
-        $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.criticalEdge)
+        Enter-LogbookSelesaiHoldVisual
         Update-LogbookWidgetView
         $script:selesaiHoldTimer.Start()
     } catch {
@@ -632,7 +698,7 @@ $selesaiBtn.Add_KeyDown({
     if ($e.IsRepeat -or $script:selesaiHolding -or $script:selesaiCompleting) { return }
     $script:selesaiHolding = $true
     $script:selesaiHoldStarted = Get-Date
-    $selesaiBtn.BorderBrush = $brushConv.ConvertFromString($theme.criticalEdge)
+    Enter-LogbookSelesaiHoldVisual
     Update-LogbookWidgetView
     $script:selesaiHoldTimer.Start()
 })
