@@ -460,9 +460,53 @@ def _sync_state_path(con: sqlite3.Connection) -> Path:
     return paths.data_home() / "sync_state.json"
 
 
-def _record_sync_attempt(con: sqlite3.Connection, ok: bool, detail: str = "") -> None:
+# Failure classes. Deliberately five, and no more: each one exists because a
+# UI has to say something DIFFERENT about it, and each maps to a branch that
+# already existed in sync_unsynced_logs' error handling. Adding categories the
+# code cannot actually tell apart would just move the guesswork into the
+# classifier.
+#
+#   network   nothing answered -- DNS, refused connection, timeout, no route.
+#             The server may be perfectly healthy and simply unreachable from
+#             here, which is the normal state of a laptop that left the lab.
+#   auth      the server answered and refused our credentials (401/403). A
+#             retry with the same key is pointless; this needs re-enrolment.
+#   rejected  the server answered 4xx for some other reason -- malformed
+#             payload, unsupported version. Resending identical bytes cannot
+#             help, which is exactly why this branch does not retry.
+#   server    the server answered 5xx, or with a status nobody expected. Its
+#             fault, plausibly transient, and the branch that retries.
+#   unknown   something else. Kept so the classifier is total.
+#
+# There is deliberately NO "policy" class. Policy is not an attempt outcome --
+# sync_unsynced_logs returns before it ever opens a socket, and sync_status
+# already derives 'blocked' live from paths.privacy_mode(). Recording a policy
+# "failure" in the sidecar would write a last_error for something that is not
+# an error and did not fail.
+SYNC_ERROR_CLASSES = ("network", "auth", "rejected", "server", "unknown")
+
+
+def _classify_http_error(code: int) -> str:
+    if code in (401, 403):
+        return "auth"
+    if 400 <= code < 500:
+        return "rejected"
+    return "server"
+
+
+def _record_sync_attempt(
+    con: sqlite3.Connection,
+    ok: bool,
+    detail: str = "",
+    error_class: str = None,
+) -> None:
     """Best-effort. A failure to WRITE the status file must never be treated
-    as a sync failure -- this is observability, not the sync itself."""
+    as a sync failure -- this is observability, not the sync itself.
+
+    error_class is one of SYNC_ERROR_CLASSES and is what a UI should branch
+    on. detail keeps the original free-form text, unchanged, because that is
+    what a human reads when diagnosing -- the class is for rendering, the text
+    is for debugging, and neither replaces the other."""
     try:
         path = _sync_state_path(con)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -477,8 +521,12 @@ def _record_sync_attempt(con: sqlite3.Connection, ok: bool, detail: str = "") ->
         if ok:
             state["last_success"] = now
             state["last_error"] = None
+            state["last_error_class"] = None
         else:
             state["last_error"] = detail
+            if error_class not in SYNC_ERROR_CLASSES:
+                error_class = "unknown"
+            state["last_error_class"] = error_class
         # Temp file + rename: the same atomic-write idiom already used for
         # report_server.py's report_url file, so a status reader can never
         # observe a half-written line.
@@ -503,6 +551,17 @@ def sync_status(con: sqlite3.Connection) -> dict:
                    been attempted yet (fresh install, or state file missing)
       connected -- the most recent real attempt succeeded
       offline   -- the most recent real attempt failed
+
+    connection_state's VALUES are unchanged on purpose: existing callers and
+    tests depend on them. What is new is last_error_class, which is what lets
+    a UI split the single 'offline' state into the two things a user needs
+    told apart (see docs/OFFLINE_CLIENT_UX_CONTRACT.md 2b):
+
+      offline + 'network'  -> SERVER_UNAVAILABLE  "server can't be reached"
+      offline + any other  -> SYNC_ERROR          "the server said no"
+
+    'blocked' still comes from privacy_mode alone, computed live -- policy is
+    not an attempt outcome and is never read out of the sidecar.
     """
     pending = len(unsynced_log_rows(con))
     url = paths.server_url()
@@ -535,6 +594,13 @@ def sync_status(con: sqlite3.Connection) -> dict:
         "last_attempt": state.get("last_attempt"),
         "last_success": state.get("last_success"),
         "last_error": state.get("last_error"),
+        # None whenever there is no outstanding failure. A state file written
+        # by an older build has no such key, so an unclassified failure reads
+        # back as 'unknown' rather than as a missing field the UI has to
+        # special-case.
+        "last_error_class": (
+            state.get("last_error_class") or "unknown"
+        ) if state.get("last_error") else None,
     }
 
 
@@ -624,6 +690,12 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
 
     backoff = 1
     last_error = "unknown failure"
+    # Classified where the exception is caught, not by re-reading last_error
+    # afterwards. The catch site knows whether urllib raised HTTPError (the
+    # server answered) or something else (nothing answered); a string parsed
+    # later cannot recover that distinction, and English error text is exactly
+    # what the UI must stop depending on.
+    last_error_class = "unknown"
     for attempt in range(1, max(1, max_attempts) + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -635,6 +707,9 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
                     _record_sync_attempt(con, ok=True)
                     return len(row_ids)
                 last_error = f"unexpected HTTP status {response.status}"
+                # It answered, so this is not a reachability problem, whatever
+                # else it is.
+                last_error_class = "server"
             break  # unexpected non-200/201 without an exception -- not retryable
         except urllib.error.HTTPError as e:
             # A 5xx is the SERVER's fault -- restarting, momentarily
@@ -649,6 +724,7 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
             # payload), and resending identical bytes will not change that
             # -- it fails fast, unretried, same as before.
             last_error = f"HTTP {e.code}: {e}"
+            last_error_class = _classify_http_error(e.code)
             if e.code >= 500 and attempt < max_attempts:
                 print(f"Sync to server failed (HTTP {e.code}, retrying): {e}", file=sys.stderr)
                 time.sleep(backoff)
@@ -658,12 +734,22 @@ def sync_unsynced_logs(con: sqlite3.Connection, timeout: int = 10, max_attempts:
             break
         except Exception as e:
             last_error = str(e)
+            # HTTPError is a subclass of URLError and is caught above, so
+            # anything arriving here got no HTTP response at all: DNS failure,
+            # refused connection, timeout, no route. URLError/OSError/timeout
+            # are the reachability family; anything else is genuinely unknown
+            # and must not be mislabelled as a network problem, because the UI
+            # would then tell the user to check their connection over a bug.
+            if isinstance(e, (urllib.error.URLError, OSError, TimeoutError)):
+                last_error_class = "network"
+            else:
+                last_error_class = "unknown"
             print(f"Sync to server failed (attempt {attempt}/{max_attempts}): {e}", file=sys.stderr)
             if attempt < max_attempts:
                 time.sleep(backoff)
                 backoff *= 2
 
-    _record_sync_attempt(con, ok=False, detail=last_error)
+    _record_sync_attempt(con, ok=False, detail=last_error, error_class=last_error_class)
     return 0
 
 
