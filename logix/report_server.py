@@ -132,6 +132,26 @@ def load_sessions(db_path: Path, range_name: str):
     con = report.connect(db_path)
     try:
         report.ensure_physical_schema(con)
+        # Same self-heal logbook_report.build() performs before every export:
+        # if the client has an active session whose START row never landed in
+        # SQLite, rebuild it from session.json. Without this the table on
+        # screen and the .xlsx exported from the button beside it could
+        # disagree about whether the session the user is CURRENTLY in exists
+        # -- and the START row is written by a detached process now, so
+        # "not there yet" is a normal, momentary state rather than a fault.
+        #
+        # Scoped to the DEFAULT database only, exactly as logbook_report.build()
+        # scopes its own call. session.json describes THIS workstation's live
+        # session; repairing it into whatever database happened to be passed
+        # via --db would inject the running session into an unrelated file.
+        # Caught immediately by the tests, which serve a tmp_path database.
+        try:
+            if db_path.resolve() == DEFAULT_DB.expanduser().resolve():
+                report.repair_active_session_from_windows_state(con)
+        except Exception:
+            # A repair that fails must never take the report down with it;
+            # the rest of the history is still perfectly readable.
+            pass
         rows = report.fetch_physical(con, start_s, end_s)
         sessions = report.build_sessions(rows)
     finally:

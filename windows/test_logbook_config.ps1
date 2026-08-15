@@ -1037,6 +1037,54 @@ Assert ($closeFn -match '(?s)Stop-LogbookTimers\s*\r?\n.*?Remove-Item \$Global:S
 Write-Host "sync status: the CLI surface a future Device UI will read"
 Assert ($commonSrc -notmatch 'sync_status\(') "sync status stays Python-side (log_physical.py --sync-status) -- no PowerShell reimplementation to drift out of sync with it"
 
+Write-Host "START latency: the click handler does not block on a Python process"
+# Measured cause, not a guess: the synchronous bridge cost ~251ms, of which the
+# actual SQLite work was 6.6ms -- 82ms was starting a Python interpreter and
+# 135ms importing the module. All of it ran on the WPF UI thread inside the
+# Click handler, so the window could not repaint at the moment the user pressed
+# the button. Cold end-to-end, the click blocked for ~450ms before this and
+# ~100ms after.
+$popupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_popup.ps1')
+Assert ($popupSrc -match "Invoke-WSLLogbook -Event 'START'[^
+]*-Async") `
+    "START dispatches its log write asynchronously"
+Assert ($commonSrc -match 'function Remove-StaleLogbookPayloads') `
+    "the async path sweeps the payload files it can no longer delete inline"
+$bridgeFn = [regex]::Match($commonSrc, '(?s)function Invoke-WSLLogbook \{.*?
+\}').Value
+Assert ($bridgeFn -match 'if \(-not \$Async\) \{ Remove-Item \$payloadPath') `
+    "and the synchronous path still deletes its own payload immediately"
+# A close must NOT be async: it has to know the row was really written before
+# the workstation locks behind it.
+Assert ($commonSrc -match "(?s)function Close-ActiveLogbookSession.*?Invoke-WSLLogbook -Event \`$Reason(?![^
+]*-Async)") `
+    "ending a session still waits for its write (only START is fire-and-forget)"
+
+Write-Host "START latency: the first-call costs are paid before the user can click"
+# PowerShell loads cmdlets and .NET types lazily, so the FIRST ConvertTo-Json
+# in a process costs ~160ms, the first Start-Process ~135ms, and so on. The
+# popup is always a cold process, so without this every one of those landed
+# inside the click handler.
+Assert ($commonSrc -match 'function Initialize-LogbookStartPathWarmup') "there is a warm-up for the START path"
+$warmFn = [regex]::Match($commonSrc, '(?s)function Initialize-LogbookStartPathWarmup \{.*?
+\}').Value
+foreach ($piece in @('Find-LogixPython', 'Test-LogbookUseWSL', 'ConvertTo-Json', 'Start-Process')) {
+    Assert ($warmFn -match [regex]::Escape($piece)) "the warm-up covers $piece"
+}
+Assert ($popupSrc -match 'Initialize-LogbookStartPathWarmup') "the popup runs it"
+# It has to run while the form is being BUILT, not from the click handler --
+# otherwise it would simply move the same cost to the same place.
+$warmIdx = $popupSrc.IndexOf('Initialize-LogbookStartPathWarmup')
+$clickIdx = $popupSrc.IndexOf('$btn.Add_Click(')
+Assert ($warmIdx -gt 0 -and $clickIdx -gt 0 -and $warmIdx -lt $clickIdx) `
+    "and runs it before the click handler is even wired up"
+# A warm-up that throws must never be able to stop a sign-in.
+Assert ($warmFn -match 'catch') "a failed warm-up degrades to slow, never to broken"
+
+# Both lookups it warms have to actually STAY warm, or warming them is theatre.
+Assert ($commonSrc -match '\$script:logixPythonResolved') "the interpreter lookup is cached for the process"
+Assert ($commonSrc -match '\$script:logixUseWslCached') "so is the WSL-vs-native decision"
+
 # The summary lives at the END of the file, which sounds too obvious to write
 # down until you notice it did not: it sat at what was once the last line, and
 # every section added after it -- roughly half this suite, including the checks

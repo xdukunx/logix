@@ -495,7 +495,16 @@ function Start-LogbookPopup {
 # install/install.py already deploys log_physical.py + paths.py natively to
 # LOGIX_HOME on every OS, so native is the safe default; WSL is opt-in via
 # LOGIX_USE_WSL=1 in config.env (set by install_logbook_tasks.ps1 -UseWSL).
+# Cached like Find-LogixPython, and for the same reason: measured at ~112ms on
+# a cold process, and the sign-in popup is always cold.
+$script:logixUseWslCached = $null
 function Test-LogbookUseWSL {
+    if ($null -ne $script:logixUseWslCached) { return $script:logixUseWslCached }
+    $script:logixUseWslCached = Test-LogbookUseWSLUncached
+    return $script:logixUseWslCached
+}
+
+function Test-LogbookUseWSLUncached {
     $val = Get-LogbookConfigEnv 'LOGIX_USE_WSL'
     return ($val -eq '1' -or $val -eq 'true')
 }
@@ -506,11 +515,24 @@ function Get-LogixCoreDir {
     return (Join-Path $env:ProgramData 'Logix')
 }
 
+# Cached for the life of the process. Get-Command has to build PowerShell's
+# command cache and walk PATH, which measured ~100-250ms on a COLD process --
+# and the sign-in popup is always a cold process, so that cost landed squarely
+# on the START click. Resolving it once (and, in the popup, warming it before
+# the user can click) takes it off the critical path entirely.
+$script:logixPythonPath = $null
+$script:logixPythonResolved = $false
 function Find-LogixPython {
+    if ($script:logixPythonResolved) { return $script:logixPythonPath }
     foreach ($cmd in @('python', 'py')) {
         $found = Get-Command $cmd -ErrorAction SilentlyContinue
-        if ($found) { return $found.Source }
+        if ($found) {
+            $script:logixPythonPath = $found.Source
+            $script:logixPythonResolved = $true
+            return $script:logixPythonPath
+        }
     }
+    $script:logixPythonResolved = $true
     return $null
 }
 
@@ -532,8 +554,23 @@ function Invoke-WSLBridge {
     return $true
 }
 
+# The async bridge cannot delete its own payload file the way the synchronous
+# path does -- the child may not have read it yet when the parent returns. So
+# each dispatch sweeps the leftovers of previous ones instead: bounded, needs
+# no new process or timer, and self-heals if a spawn ever dies before reading.
+# 10 minutes is far longer than any bridge call and short enough that a folder
+# of payloads never accumulates.
+function Remove-StaleLogbookPayloads {
+    try {
+        $cutoff = (Get-Date).AddMinutes(-10)
+        Get-ChildItem -Path $Global:StateDir -Filter 'payload-*.json' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoff } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch { }
+}
+
 function Invoke-NativeBridge {
-    param([string]$PayloadPath, [string]$Event, [string]$SessionId)
+    param([string]$PayloadPath, [string]$Event, [string]$SessionId, [switch]$Async)
     $python = Find-LogixPython
     if (-not $python) {
         Write-LogbookError "Native bridge: no python/py found on PATH for event $Event"
@@ -549,6 +586,41 @@ function Invoke-NativeBridge {
     # informational one, like log_physical.py's local_only privacy notice --
     # gets promoted from a non-terminating to a terminating error and throws,
     # masquerading as a bridge failure. $LASTEXITCODE is the real signal.
+    if ($Async) {
+        # DETACHED, and deliberately not waited on. Measured on this machine,
+        # the whole bridge call costs ~251ms, of which the actual database
+        # work is 6.6ms: 82ms is starting a Python interpreter and 135ms is
+        # importing the module. Run inline from a WPF Click handler -- which
+        # is where START ran it -- that entire quarter second is spent with
+        # the UI thread blocked, so the window cannot repaint or accept input
+        # at the exact moment the user just pressed the button. That is the
+        # lag, and no amount of tuning the 6.6ms of SQLite touches it.
+        #
+        # Safe to fire and forget specifically because a missing START row is
+        # already a recoverable state this project handles on purpose:
+        # session.json is written first and is the client's own source of
+        # truth, and repair_active_session_from_windows_state() (called
+        # automatically by logbook_report.build(), and exposed as
+        # --repair-active) reconstructs the row from it. The failure mode of
+        # a lost bridge call is therefore "the row is rebuilt later", not
+        # "the session is lost".
+        #
+        # Start-Process does NOT quote arguments containing spaces, not even
+        # in the array form, and both of these paths routinely contain them
+        # (C:\Program Files\..., C:\ProgramData\...). Quote by hand.
+        try {
+            Remove-StaleLogbookPayloads
+            Start-Process -FilePath $python `
+                -ArgumentList @(('"{0}"' -f $script), '--json-file', ('"{0}"' -f $PayloadPath)) `
+                -WindowStyle Hidden | Out-Null
+            Write-LogbookInfo "Native bridge dispatched async event=$Event sid=$SessionId"
+            return $true
+        } catch {
+            Write-LogbookError "Native bridge async dispatch failed for event ${Event}: $($_.Exception.Message)"
+            return $false
+        }
+    }
+
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -579,7 +651,11 @@ function Invoke-WSLLogbook {
         # anything other than the default.
         [ValidateSet('self_declared', 'unverified', 'directory')]
         [string]$IdentitySource = 'self_declared',
-        [string]$PersonRole = ''
+        [string]$PersonRole = '',
+        # START uses this. See Invoke-NativeBridge's async branch for why it
+        # is safe there and why it is NOT the default: a close/END must know
+        # whether the row was really written before the workstation locks.
+        [switch]$Async
     )
     Ensure-LogbookDirs
     $winUser = "$env:USERDOMAIN\$env:USERNAME"
@@ -605,14 +681,20 @@ function Invoke-WSLLogbook {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
         Write-LogbookInfo "Bridge payload event=$Event sid=$SessionId nama=$Nama nim=$Nim tujuan=$Tujuan"
         if (Test-LogbookUseWSL) {
+            # The WSL bridge has no async path: it shells through wsl.exe,
+            # where a detached launch buys far less and fails in ways that are
+            # much harder to see. Native is the default on Windows anyway.
             return Invoke-WSLBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId
         }
-        return Invoke-NativeBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId
+        return Invoke-NativeBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId -Async:$Async
     } catch {
         Write-LogbookError "Bridge log error for event ${Event}: $($_.Exception.Message)"
         return $false
     } finally {
-        Remove-Item $payloadPath -Force -ErrorAction SilentlyContinue
+        # The async child may not have opened the payload yet, so deleting it
+        # here would race it away. Remove-StaleLogbookPayloads (called on the
+        # next dispatch) is what cleans those up instead.
+        if (-not $Async) { Remove-Item $payloadPath -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -1437,6 +1519,46 @@ function Get-LogbookMixedHex([string]$From, [string]$To, [double]$Amount) {
     $t = [Math]::Max(0.0, [Math]::Min(1.0, $Amount))
     $c = 0..2 | ForEach-Object { [int][Math]::Round($a[$_] + ($b[$_] - $a[$_]) * $t) }
     return ('#{0:X2}{1:X2}{2:X2}' -f $c[0], $c[1], $c[2])
+}
+
+
+# ---- START-path warm-up ------------------------------------------------------
+#
+# PowerShell loads cmdlet implementations and .NET types lazily, so the FIRST
+# call to each is far more expensive than every call after it. Measured on this
+# machine, cold vs warm:
+#
+#   ConvertTo-Json              160ms -> 6ms
+#   Start-Process               135ms -> 23ms
+#   Test-LogbookUseWSL          112ms -> cached
+#   Remove-StaleLogbookPayloads  74ms -> cheap
+#   Out-File                     57ms -> ~5ms
+#
+# The sign-in popup is ALWAYS a cold process, and every one of those first
+# calls happens inside the START click handler -- on the WPF UI thread. Their
+# sum, not any single slow operation, is the lag the user feels after pressing
+# the button. None of it is work that has to wait for the click: it can all be
+# paid while the form is being built and the user has not typed their name yet.
+#
+# Deliberately cheap and side-effect free. The one debatable line is the
+# throwaway process: Start-Process cannot be warmed without starting something,
+# and `cmd /c exit` is the smallest thing there is. It costs one short-lived
+# process per sign-in, in exchange for ~110ms off the click, and it is honest
+# about being exactly that.
+function Initialize-LogbookStartPathWarmup {
+    try {
+        [void](Find-LogixPython)
+        [void](Test-LogbookUseWSL)
+        [void](Ensure-LogbookDirs)
+        [void](@{ warm = $true; at = (Get-Date).ToString('o') } | ConvertTo-Json -Depth 3)
+        [void](Get-ChildItem -Path $Global:StateDir -Filter 'payload-*.json' -File -ErrorAction SilentlyContinue)
+        Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c', 'exit' `
+            -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+        # A warm-up that fails must never stop a sign-in. Everything it touches
+        # gets done again on the real path anyway; it would just be slower.
+        Write-LogbookError "START warm-up skipped: $($_.Exception.Message)"
+    }
 }
 
 # ---- Server pairing (Device <-> Server), from the client ---------------------

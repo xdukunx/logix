@@ -373,6 +373,14 @@ function Invoke-LogbookHandoffToTimer($win, [int]$MaxWaitMs = 1800) {
 $script:cachedBg = $null
 $script:cachedMascot = $null
 
+# Warm the whole START path NOW, while the form is still being built and the
+# user cannot have clicked anything yet. See Initialize-LogbookStartPathWarmup
+# for the measurements: it is not one slow operation, it is a stack of
+# first-call costs (ConvertTo-Json, Start-Process, Out-File, the config read)
+# that PowerShell only pays once per process -- and the sign-in popup is always
+# a fresh process, so it paid all of them inside the click handler.
+Initialize-LogbookStartPathWarmup
+
 $sessionInfo = Get-LogbookSessionType
 $detectedSessionType = [string]$sessionInfo[0]
 $detectedAnyDesk = [int]$sessionInfo[1]
@@ -418,8 +426,22 @@ function Invoke-LogbookStartSession {
     # nothing below this line affects it.
     Start-LogbookTimer -SessionId $sid | Out-Null
 
-    $logged = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan
-    if (-not $logged) { Write-LogbookError "START logging failed but continuing safely. sid=$sid" }
+    # -Async: this runs on the WPF UI thread inside the button's Click
+    # handler, and the synchronous bridge costs ~251ms here -- 82ms to start a
+    # Python interpreter, 135ms to import the module, and 6.6ms of actual
+    # SQLite work (measured on this machine against a copy of the real
+    # database). Blocking the UI thread for a quarter second at the exact
+    # moment the user pressed START is the lag; the database was never the
+    # problem.
+    #
+    # Safe here and NOT elsewhere: session.json is already written above and
+    # is the client's own source of truth, and a START row that never lands
+    # is reconstructed from it by repair_active_session_from_windows_state()
+    # -- which logbook_report.build() already calls on every report. A close
+    # (END) keeps the synchronous bridge on purpose, because that path has to
+    # know whether the row was really written before it locks the machine.
+    $dispatched = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan -Async
+    if (-not $dispatched) { Write-LogbookError "START logging failed to dispatch but continuing safely. sid=$sid" }
     return $true
 }
 
