@@ -609,7 +609,13 @@ Assert ($timerSrc -match '\$e\.IsRepeat') "key repeats do not restart the hold"
 # action they then cannot check, because the machine is locked.
 Assert ($timerSrc -match 'function Complete-LogbookSelesai') "completion has its own state, not just a teardown"
 Assert ($timerSrc -match '\$script:selesaiCompleting') "completing twice is not possible (mouse and keyboard both reach it)"
-$completeFn = [regex]::Match($timerSrc, '(?s)function Complete-LogbookSelesai \{.*?\n\}\n').Value
+# The CRLF trap: .gitattributes normalises .ps1 to CRLF on checkout, so a
+# pattern that requires a bare newline after the closing brace matches
+# nothing at all -- the block comes back empty and every assertion on it
+# fails for a reason that has nothing to do with the code under test.
+# Caught by running this suite on a fresh checkout rather than on a working
+# tree whose files happened to have LF endings.
+$completeFn = [regex]::Match($timerSrc, '(?s)function Complete-LogbookSelesai \{.*?\r?\n\}\r?\n').Value
 Assert ($completeFn -match 'DispatcherTimer') `
     "the end routine is deferred, so WPF can paint the confirmation before Close-LogbookSessionAndLock blocks"
 Assert ($commonSrc -match "timerEndDone") "the confirmed state has its own configurable string"
