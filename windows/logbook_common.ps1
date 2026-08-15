@@ -146,14 +146,39 @@ function Start-HiddenPowerShell {
 
 function Stop-LogbookTimers {
     try {
+        $pidFile = Join-Path $Global:StateDir 'timer.pid'
+        $readyFlag = Join-Path $Global:StateDir 'timer_ready.flag'
+
+        # FAST NEGATIVE, and this is the single biggest win on the START path.
+        # Finding a timer to kill means asking WMI for process command lines,
+        # measured at 239ms in a fresh process here -- and 83% of everything
+        # Start-LogbookTimer blocked on. (Spawning the widget itself is only
+        # ~45ms, ~15ms warm; the profiling that produced those numbers is why
+        # this is a file check and not a persistent-process rewrite.)
+        #
+        # Both markers are written when a timer starts and removed when one is
+        # stopped, so their joint absence means no timer of ours has been
+        # started since the last stop -- there is nothing to look for and no
+        # reason to pay WMI to confirm it. This is the state a fresh sign-in
+        # is always in, which is exactly when START is pressed.
+        #
+        # Cheaper alternatives were measured and rejected: filtering WMI by
+        # image name is still 125ms, and pushing the whole match into WQL with
+        # LIKE is 131ms -- the cost is the WMI query itself, not the number of
+        # rows it returns.
+        if (-not (Test-Path $pidFile) -and -not (Test-Path $readyFlag)) { return }
+
         $procs = Get-ProcessByCommandPattern 'logbook_timer\.ps1'
         foreach ($p in $procs) {
             if ([int]$p.ProcessId -ne [int]$PID) {
                 Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue
             }
         }
-        $pidFile = Join-Path $Global:StateDir 'timer.pid'
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        # Cleared here as well as in Start-LogbookTimer. It is a readiness
+        # marker for a timer that no longer exists, and leaving it behind
+        # would defeat the fast negative above on the very next START.
+        Remove-Item $readyFlag -Force -ErrorAction SilentlyContinue
     } catch { Write-LogbookError "Stop timers failed: $($_.Exception.Message)" }
 }
 
