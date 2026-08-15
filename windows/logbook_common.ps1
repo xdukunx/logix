@@ -643,7 +643,10 @@ function Invoke-NativeBridge {
         # in the array form, and both of these paths routinely contain them
         # (C:\Program Files\..., C:\ProgramData\...). Quote by hand.
         try {
-            Remove-StaleLogbookPayloads
+            # NOT sweeping here. Measured on the click path at 18-24ms, and it
+            # is housekeeping for PREVIOUS dispatches -- nothing about this
+            # one needs it done first. Initialize-LogbookStartPathWarmup does
+            # the real sweep while the form is being built.
             Start-Process -FilePath $python `
                 -ArgumentList @(('"{0}"' -f $script), '--json-file', ('"{0}"' -f $PayloadPath)) `
                 -WindowStyle Hidden | Out-Null
@@ -1585,7 +1588,10 @@ function Initialize-LogbookStartPathWarmup {
         [void](Test-LogbookUseWSL)
         [void](Ensure-LogbookDirs)
         [void](@{ warm = $true; at = (Get-Date).ToString('o') } | ConvertTo-Json -Depth 3)
-        [void](Get-ChildItem -Path $Global:StateDir -Filter 'payload-*.json' -File -ErrorAction SilentlyContinue)
+        # The REAL sweep, not a throwaway enumeration to warm the cmdlet:
+        # this is where the previous dispatch's leftovers are cleaned up, and
+        # doing it here keeps those 18-24ms off the START click entirely.
+        Remove-StaleLogbookPayloads
         Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c', 'exit' `
             -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
     } catch {
