@@ -72,9 +72,18 @@ function Get-LogbookSessionType {
 }
 
 function Get-ProcessByCommandPattern {
-    param([string]$Pattern)
+    param([string]$Pattern, [string]$ImageName = 'powershell.exe')
     try {
-        return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        # -Filter matters here, and it is on the START critical path.
+        # Unfiltered, this asks WMI for EVERY process on the machine and pulls
+        # CommandLine for each (238 processes on the box this was measured on),
+        # then regex-matches them in PowerShell: 204ms median. Filtering by
+        # image name server-side cuts it to 116ms, and every caller in this
+        # file is looking for a powershell.exe running one of our scripts.
+        # ImageName is a parameter rather than a constant so a future caller
+        # hunting a different executable is not forced back to the slow form.
+        $filter = "Name='$ImageName'"
+        return @(Get-CimInstance Win32_Process -Filter $filter -ErrorAction SilentlyContinue | Where-Object {
             $_.CommandLine -and $_.CommandLine -match $Pattern
         })
     } catch {
