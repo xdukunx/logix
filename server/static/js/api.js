@@ -63,7 +63,6 @@ export const showToast = (message, isError = false) => {
 export const renderLoading = (container, message = "Memuat data...") => {
     container.innerHTML = `
         <div class="loading-placeholder">
-            <i class="fa-solid fa-circle-notch fa-spin"></i>
             <p>${escapeHtml(message)}</p>
         </div>`;
 };
@@ -71,7 +70,6 @@ export const renderLoading = (container, message = "Memuat data...") => {
 export const renderError = (container, message = "Gagal memuat data dari server.") => {
     container.innerHTML = `
         <div class="empty-state">
-            <i class="fa-solid fa-triangle-exclamation" style="color: var(--danger-color)"></i>
             <p class="empty-title">Terjadi Kesalahan</p>
             <p class="empty-helper">${escapeHtml(message)}</p>
         </div>`;
@@ -80,7 +78,6 @@ export const renderError = (container, message = "Gagal memuat data dari server.
 export const renderEmpty = (container, { icon = "fa-inbox", title = "Tidak ada data", helper = "" } = {}) => {
     container.innerHTML = `
         <div class="empty-state">
-            <i class="fa-solid ${icon}"></i>
             <p class="empty-title">${escapeHtml(title)}</p>
             ${helper ? `<p class="empty-helper">${escapeHtml(helper)}</p>` : ""}
         </div>`;
@@ -97,7 +94,7 @@ const ensureOfflineBanner = () => {
     offlineBannerEl = document.createElement("div");
     offlineBannerEl.id = "offline-banner";
     offlineBannerEl.className = "offline-banner hidden";
-    offlineBannerEl.innerHTML = `<i class="fa-solid fa-plug-circle-xmark"></i> Koneksi terputus — data mungkin tidak terbaru.`;
+    offlineBannerEl.innerHTML = `Koneksi terputus — data mungkin tidak terbaru.`;
     document.body.prepend(offlineBannerEl);
     return offlineBannerEl;
 };

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: #EDEFF2; color: #14181F; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: Consolas, ui-monospace, "SF Mono", monospace; font-variant-numeric: tabular-nums; }
+  a { color: #2563EB; } a:hover { color: #1D4ED8; }
+</style>
+</helmet>
+
+<div style="max-width: 1420px; min-width: 1192px; margin: 0 auto; padding: 48px 56px 88px;">
+
+  <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 40px;">
+    <div class="mono" style="width: 26px; height: 26px; border-radius: 8px; background: #2563EB; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 12px;">&gt;_</div>
+    <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.18em; color: #14181F;">LOGIX</span>
+    <span style="margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6A7382;">D-02 · Timer Hybrid A+B</span>
+  </div>
+  <h1 style="font-size: 28px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 10px;">Pill &amp; Strip</h1>
+  <p style="font-size: 14px; color: #6A7382; margin: 0 0 52px; max-width: 720px; line-height: 1.6;">Satu instrumen, dua postur. Referensi: iOS Live Activity / Dynamic Island — fully rounded, ambient, satu info hero per state. WPF: Border, Path, StackPanel, TextBlock · Segoe UI + Consolas, tanpa webfont. Double-click berpindah pill ⇄ strip, diingat antar sesi. reduce_motion: semua animasi mati, state snap.</p>
+
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">8 state — dikomposit di atas desktop lab (job DFT berjalan)</div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+    <!-- 1 · PILL COLLAPSED -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 64px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432; overflow: hidden;">
+          <div style="height: 28px; background: #12161f; border-bottom: 1px solid #1c2432; display: flex; align-items: center; padding: 0 11px;"><span class="mono" style="font-size: 11px; color: #56607a;">gpu-a100 — ssh — dhana</span></div>
+          <div class="mono" style="padding: 12px 14px; font-size: 11.5px; line-height: 1.7; color: #7f8ba3;"><span style="color: #5fa9f6;">dhana@gpu-a100</span>:~$ python run_dft.py --batch cat-07<br>[ 12:41 ] loading basis set def2-TZVP...<br>[ 12:43 ] SCF cycle 7 · <span style="color: #63d68b;">converged</span><br><span style="color: #5fa9f6;">dhana@gpu-a100</span>:~$ <span style="color: #e8edf5;">_</span></div>
+        </div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 150px; height: 32px; background: rgba(11,16,23,.70); border: 1px solid #223451; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45);">
+          <span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span>
+          <span class="mono" style="font-size: 13px; color: #EEF3FB;">02:14</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">01</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Pill collapsed (default).</span> 150×32px, radius penuh, opacity .70, drag-snap sepanjang tepi atas. Dot status 8px + elapsed Consolas 13 tabular. Tidak lebih.</div></div>
+    </div>
+
+    <!-- 2 · HOVER EXPAND -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 64px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432;"></div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 240px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 18px 48px rgba(0,0,0,.5); padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span>
+            <span class="mono" style="font-size: 18px; color: #EEF3FB;">02:14:36</span>
+            <span class="mono" style="margin-left: auto; font-size: 11px; color: #93A1B8;">WS-07</span>
+          </div>
+          <div style="display: grid; row-gap: 6px; border-top: 1px solid #223451; padding-top: 10px; margin-bottom: 12px;">
+            <div style="display: flex; font-size: 12px;"><span style="color: #93A1B8; width: 76px;">Nama</span><span style="color: #EEF3FB;">Dhana P.</span></div>
+            <div style="display: flex; font-size: 12px;"><span style="color: #93A1B8; width: 76px;">Tujuan</span><span style="color: #EEF3FB;">Komputasi DFT</span></div>
+            <div style="display: flex; font-size: 12px;"><span style="color: #93A1B8; width: 76px;">Perangkat</span><span class="mono" style="color: #EEF3FB;">GPU-A100 · SSH</span></div>
+          </div>
+          <div style="border: 1px solid #223451; border-radius: 999px; text-align: center; padding: 9px 0; font-size: 12.5px; font-weight: 600; letter-spacing: .08em; color: #EEF3FB;">SELESAI</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">02</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Hover → expand card 240px.</span> Nama · tujuan · perangkat (+ pesan admin jika ada) · SELESAI. Auto-collapse 5 dtk setelah cursor pergi.</div></div>
+    </div>
+
+    <!-- 3 · ARMED -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 64px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432;"></div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 240px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 18px 48px rgba(0,0,0,.5); padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span>
+            <span class="mono" style="font-size: 18px; color: #EEF3FB;">02:14:41</span>
+            <span class="mono" style="margin-left: auto; font-size: 11px; color: #93A1B8;">WS-07</span>
+          </div>
+          <div style="background: #EF4444; border-radius: 999px; text-align: center; padding: 10px 0; font-size: 12.5px; font-weight: 600; color: #fff;">Tekan lagi untuk selesai</div>
+          <div style="text-align: center; font-size: 11px; color: #93A1B8; margin-top: 8px;">batal otomatis dalam 3 dtk</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">03</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">SELESAI armed (two-step).</span> Klik pertama mempersenjatai, klik kedua mengakhiri sesi. Disarm otomatis 3 dtk — tanpa dialog tambahan.</div></div>
+    </div>
+
+    <!-- 4 · BADGE -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 64px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432;"></div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 164px; height: 32px; background: rgba(11,16,23,.85); border: 1px solid #223451; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45);">
+          <span style="width: 8px; height: 8px; border-radius: 99px; background: #2563EB;"></span>
+          <span class="mono" style="font-size: 13px; color: #EEF3FB;">02:14</span>
+          <span class="mono" style="min-width: 16px; height: 16px; border-radius: 99px; background: #2563EB; color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">1</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">04</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Pesan masuk (pill).</span> Dot jadi biru + badge angka. <span style="color: #14181F; font-weight: 600;">Tidak auto-expand</span> — pesan dibaca saat pengguna hover, bukan saat admin mengirim.</div></div>
+    </div>
+
+    <!-- 5 · STRIP -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0d1119;">
+        <div style="position: absolute; inset: 0; padding: 32px 28px;">
+          <div class="mono" style="font-size: 11.5px; line-height: 1.7; color: #7f8ba3;"><span style="color: #5fa9f6;">dhana@gpu-a100</span>:~$ python run_dft.py --batch cat-07 <span style="color: #56607a;">(fullscreen)</span><br>[ 13:02 ] geometry step 14/40 · E = -1042.7731 Ha<br>[ 13:05 ] geometry step 15/40 · E = -1042.7748 Ha<br>[ 13:08 ] geometry step 16/40 · E = -1042.7756 Ha<br><span style="color: #5fa9f6;">dhana@gpu-a100</span>:~$ <span style="color: #e8edf5;">_</span></div>
+        </div>
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: #22C55E;"></div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">05</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Strip (focus mode).</span> 3px full-width tepi atas, warna = status. Double-click pill ⇄ strip. Auto-strip opsional saat app fullscreen terdeteksi.</div></div>
+    </div>
+
+    <!-- 6 · SLIVER PEEK -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0d1119;">
+        <div style="position: absolute; inset: 0; padding: 84px 28px;">
+          <div class="mono" style="font-size: 11.5px; line-height: 1.7; color: #7f8ba3;">[ 13:10 ] geometry step 17/40 · E = -1042.7760 Ha<br>[ 13:13 ] geometry step 18/40 · E = -1042.7763 Ha</div>
+        </div>
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: #22C55E;"></div>
+        <div style="position: absolute; top: 9px; left: 50%; transform: translateX(-50%); height: 24px; background: #0B1017; border: 1px solid #223451; border-radius: 999px; display: flex; align-items: center; gap: 8px; padding: 0 14px; box-shadow: 0 8px 24px rgba(0,0,0,.45);">
+          <span style="width: 6px; height: 6px; border-radius: 99px; background: #22C55E;"></span>
+          <span class="mono" style="font-size: 12px; color: #EEF3FB;">02:14 · WS-07</span>
+        </div>
+        <div style="position: absolute; top: 44px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #93a1b8; background: rgba(11,16,23,.7); border-radius: 999px; padding: 3px 10px;">dwell 300ms di tepi atas</div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">06</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Sliver peek 24px.</span> Dwell 300ms di tepi atas → sliver turun: elapsed + stasiun. Klik sliver → expand card penuh. Fitts's law: tepi layar = target selebar tak-hingga.</div></div>
+    </div>
+
+    <!-- 7 · STRIP PESAN -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0d1119;">
+        <div style="position: absolute; inset: 0; padding: 56px 28px;">
+          <div class="mono" style="font-size: 11.5px; line-height: 1.7; color: #7f8ba3;">[ 13:16 ] geometry step 19/40 · E = -1042.7765 Ha<br>[ 13:19 ] geometry step 20/40 · E = -1042.7766 Ha</div>
+        </div>
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: #2563EB;"></div>
+        <div style="position: absolute; top: 9px; left: 50%; transform: translateX(-50%); height: 24px; background: #0B1017; border: 1px solid #223451; border-radius: 999px; display: flex; align-items: center; gap: 8px; padding: 0 14px; box-shadow: 0 8px 24px rgba(0,0,0,.45);">
+          <span class="mono" style="min-width: 15px; height: 15px; border-radius: 99px; background: #2563EB; color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">1</span>
+          <span style="font-size: 12px; color: #EEF3FB;">Pesan dari admin</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">07</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Pesan masuk (strip).</span> Strip jadi biru + sliver auto-peek 4 dtk lalu naik kembali — satu-satunya motion yang diizinkan pada event.</div></div>
+    </div>
+
+    <!-- 8 · COUNTDOWN -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 300px; border-radius: 12px; overflow: hidden; background: #0d1119;">
+        <div style="position: absolute; inset: 0; padding: 32px 28px; filter: blur(1px); opacity: .5;">
+          <div class="mono" style="font-size: 11.5px; line-height: 1.7; color: #7f8ba3;">[ 13:22 ] geometry step 21/40 · E = -1042.7767 Ha<br>[ 13:25 ] geometry step 22/40 · E = -1042.7767 Ha</div>
+        </div>
+        <div style="position: absolute; inset: 0; background: rgba(5,8,13,.72); display: flex; align-items: center; justify-content: center;">
+          <div style="background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.6); padding: 24px 26px; text-align: center; width: 360px;">
+            <div style="display: inline-flex; align-items: center; gap: 7px; margin-bottom: 6px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #EF4444;"></span><span style="font-size: 13px; font-weight: 600; color: #EEF3FB;">Sesi berakhir dalam</span></div>
+            <div class="mono" style="font-size: 44px; color: #EF4444; line-height: 1.15;">04:58</div>
+            <div style="font-size: 12px; color: #93A1B8; margin: 6px 0 16px;">Idle 2 jam terdeteksi. Gerakkan mouse atau perpanjang untuk melanjutkan.</div>
+            <div style="display: flex; gap: 8px; justify-content: center;">
+              <span style="background: #2563EB; color: #fff; font-size: 12.5px; font-weight: 600; padding: 9px 16px; border-radius: 999px; white-space: nowrap;">Perpanjang sesi</span>
+              <span style="border: 1px solid #223451; color: #EEF3FB; font-size: 12.5px; font-weight: 600; padding: 8px 16px; border-radius: 999px; white-space: nowrap;">Selesai sekarang</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">08</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Countdown darurat.</span> Escape dari kedua postur ke centered overlay, backdrop dim — unmissable. Berlaku untuk idle auto-end dan pengumuman darurat.</div></div>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin: 56px 0 16px;">Pesan admin — alur balas (dari pill)</div>
+  <p style="font-size: 14px; color: #6A7382; margin: 0 0 20px; max-width: 720px; line-height: 1.6;">Badge pesan tidak pernah menginterupsi. Saat pengguna hover, pesan tampil di expand card dengan dua quick reply + balas teks. Balasan masuk ke admin sebagai notifikasi di card stasiun.</p>
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+
+    <!-- M1 · pesan + quick replies -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 320px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 84px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432;"></div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 260px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 18px 48px rgba(0,0,0,.5); padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #2563EB;"></span>
+            <span class="mono" style="font-size: 18px; color: #EEF3FB;">02:14:36</span>
+            <span class="mono" style="margin-left: auto; font-size: 11px; color: #93A1B8;">WS-07</span>
+          </div>
+          <div style="border-top: 1px solid #223451; padding-top: 10px; margin-bottom: 12px;">
+            <div class="mono" style="font-size: 10.5px; color: #93A1B8; margin-bottom: 4px;">ADMIN · 14:29</div>
+            <div style="font-size: 12.5px; line-height: 1.5; color: #EEF3FB;">Lab tutup 17:00. Simpan pekerjaan sebelum pulang ya.</div>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <span style="border: 1px solid #223451; border-radius: 999px; padding: 6px 13px; font-size: 11.5px; font-weight: 600; color: #EEF3FB;">OK</span>
+            <span style="border: 1px solid #223451; border-radius: 999px; padding: 6px 13px; font-size: 11.5px; font-weight: 600; color: #EEF3FB;">Butuh 10 mnt</span>
+            <span style="border: 1px solid #223451; border-radius: 999px; padding: 6px 13px; font-size: 11.5px; font-weight: 600; color: #93A1B8;">Balas…</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">M1</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Hover → pesan + quick reply.</span> Dua jawaban satu-ketuk + Balas… untuk teks bebas. Badge hilang saat pesan terbaca.</div></div>
+    </div>
+
+    <!-- M2 · balas teks -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 320px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 84px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432;"></div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 260px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 18px 48px rgba(0,0,0,.5); padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #2563EB;"></span>
+            <span class="mono" style="font-size: 18px; color: #EEF3FB;">02:14:52</span>
+            <span class="mono" style="margin-left: auto; font-size: 11px; color: #93A1B8;">WS-07</span>
+          </div>
+          <div style="border-top: 1px solid #223451; padding-top: 10px; margin-bottom: 12px;">
+            <div class="mono" style="font-size: 10.5px; color: #93A1B8; margin-bottom: 4px;">ADMIN · 14:29</div>
+            <div style="font-size: 12.5px; line-height: 1.5; color: #EEF3FB;">Lab tutup 17:00. Simpan pekerjaan sebelum pulang ya.</div>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span style="flex: 1; border: 1px solid #2563EB; border-radius: 999px; padding: 7px 13px; font-size: 12px; color: #EEF3FB;">render selesai 16:40, aman<span style="color: #4b8cf5;">|</span></span>
+            <span style="width: 30px; height: 30px; border-radius: 999px; background: #2563EB; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><path d="M13 6 L19 12 L13 18"></path></svg></span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">M2</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Balas teks.</span> Satu baris, Enter mengirim. Card tidak auto-collapse selama field fokus.</div></div>
+    </div>
+
+    <!-- M3 · terkirim -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 320px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 24px; top: 84px; width: 420px; height: 236px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432;"></div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 260px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 18px 48px rgba(0,0,0,.5); padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span>
+            <span class="mono" style="font-size: 18px; color: #EEF3FB;">02:15:04</span>
+            <span class="mono" style="margin-left: auto; font-size: 11px; color: #93A1B8;">WS-07</span>
+          </div>
+          <div style="border-top: 1px solid #223451; padding-top: 10px; display: flex; align-items: center; gap: 8px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 L9.5 18 L20 6.5"></path></svg>
+            <span style="font-size: 12px; color: #93A1B8;">Terkirim ke admin · <span class="mono">14:32</span></span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">M3</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Terkirim.</span> Dot kembali hijau, konfirmasi ringkas, auto-collapse 5 dtk. Balasan tampil di card stasiun admin (Monitoring).</div></div>
+    </div>
+  </div>
+
+  <div style="margin-top: 52px; font-size: 12px; color: #9AA1AC; display: flex; gap: 18px;">
+    <span>Warna status: hijau aktif · biru notice · amber warning · merah critical. reduce_motion mematikan semua animasi.</span>
+    <span style="margin-left: auto;">LogiX v3 · D-02</span>
+  </div>
+</div>
+
+</x-dc>
+</body>
+</html>

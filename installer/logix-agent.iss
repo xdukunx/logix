@@ -102,6 +102,8 @@ en.CfgKey=Server API key (the ingest key from your server):
 id.CfgKey=Kunci API server (ingest key dari server kamu):
 en.CfgDevice=Device name (leave blank to use this PC's name):
 id.CfgDevice=Nama perangkat (kosongkan untuk memakai nama PC ini):
+en.CfgInvite=Enrollment code (from the dashboard; recommended):
+id.CfgInvite=Kode pendaftaran (dari dashboard; disarankan):
 en.CfgNeedUrl=Please enter the Logix server URL (e.g. https://logix.example.org).
 id.CfgNeedUrl=Masukkan URL server Logix (mis. https://logix.example.org).
 en.CfgNeedKey=Please enter the server API key (the ingest key from your Logix server).
@@ -123,6 +125,25 @@ Source: "{#BrandDir}\logix.ico"; DestDir: "{app}"; Flags: ignoreversion skipifso
 ; Native Python logging core -> C:\ProgramData\Logix (Get-LogixCoreDir default)
 Source: "{#SrcRoot}\logix\log_physical.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
 Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+; Reporting core. Without these two a Logix Device can record sessions and
+; then not show them, which is most of the way to not being a product: the
+; report shortcut below resolves report_server.py out of this directory, and
+; report_server.py drives logbook_report.py for both the table and the export.
+Source: "{#SrcRoot}\logix\logbook_report.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+Source: "{#SrcRoot}\logix\report_server.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+
+[Icons]
+; The two things a device owner does outside a session. Both were reachable
+; only from a command line before, which for the person actually using a lab
+; workstation means not reachable at all.
+Name: "{group}\Laporan Logix"; \
+    Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+    Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\logix_reports.ps1"""; \
+    IconFilename: "{app}\logix.ico"; Comment: "Lihat dan ekspor riwayat sesi komputer ini"
+Name: "{group}\Koneksi Server Logix"; \
+    Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+    Parameters: "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\logix_server.ps1"""; \
+    IconFilename: "{app}\logix.ico"; Comment: "Hubungkan atau putuskan perangkat ini dari Logix Server"
 
 [Run]
 ; Register the monitor task (non-elevated principal), install AnyDesk, write
@@ -132,7 +153,7 @@ Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ig
 ; launch; the headless wrapper never creates a window (see
 ; Start-HiddenPowerShell in logbook_common.ps1).
 Filename: "{sys}\conhost.exe"; \
-  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
+  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -InviteCode ""{code:GetInviteCode}"" -ServerCertPath ""{code:GetServerCert}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
   StatusMsg: "Registering Logix agent, installing AnyDesk, starting monitor..."; \
   Flags: runhidden waituntilterminated
 
@@ -149,6 +170,24 @@ Filename: "reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\Curre
 var
   ConfigPage: TInputQueryWizardPage;
 
+// Command-line overrides, so a lab can be imaged unattended instead of an
+// operator typing the same server URL into a wizard on every workstation:
+//
+//   LogixAgentSetup.exe /VERYSILENT /SUPPRESSMSGBOXES ^
+//     /SERVERURL="https://logix.lab.example" /SERVERKEY="..." /DEVICENAME="WS-07 - GPU-A100"
+//
+// A value given on the command line always wins; anything omitted falls back
+// to the wizard page, so the interactive install is unchanged.
+function ParamOr(const Name, Fallback: string): string;
+var
+  v: string;
+begin
+  v := Trim(ExpandConstant('{param:' + Name + '|}'));
+  if v = '' then
+    v := Fallback;
+  Result := v;
+end;
+
 procedure InitializeWizard;
 begin
   // Strings come from [CustomMessages] via {cm:...} so the page follows the
@@ -160,6 +199,7 @@ begin
   ConfigPage.Add(ExpandConstant('{cm:CfgUrl}'), False);
   ConfigPage.Add(ExpandConstant('{cm:CfgKey}'), False);
   ConfigPage.Add(ExpandConstant('{cm:CfgDevice}'), False);
+  ConfigPage.Add(ExpandConstant('{cm:CfgInvite}'), False);
   ConfigPage.Values[0] := 'http://localhost:8000';
 end;
 
@@ -170,13 +210,21 @@ begin
   Result := True;
   if CurPageID = ConfigPage.ID then
   begin
+    // Nothing to validate when the values came from the command line -- and in
+    // a silent install there is no operator to answer a message box, which
+    // would otherwise abort setup with no page ever shown.
+    if (ParamOr('ServerUrl', '') <> '') and
+       ((ParamOr('ServerKey', '') <> '') or (ParamOr('InviteCode', '') <> '')) then
+      Exit;
     if Trim(ConfigPage.Values[0]) = '' then
     begin
       MsgBox(ExpandConstant('{cm:CfgNeedUrl}'), mbError, MB_OK);
       Result := False;
     end
-    else if Trim(ConfigPage.Values[1]) = '' then
+    else if (Trim(ConfigPage.Values[1]) = '') and (Trim(ConfigPage.Values[3]) = '') then
     begin
+      // Either credential is enough: an enrollment code (preferred -- the
+      // device ends up with a key of its own) or the shared ingest key.
       MsgBox(ExpandConstant('{cm:CfgNeedKey}'), mbError, MB_OK);
       Result := False;
     end;
@@ -185,17 +233,31 @@ end;
 
 function GetServerUrl(Param: string): string;
 begin
-  Result := Trim(ConfigPage.Values[0]);
+  Result := ParamOr('ServerUrl', Trim(ConfigPage.Values[0]));
 end;
 
 function GetServerKey(Param: string): string;
 begin
-  Result := Trim(ConfigPage.Values[1]);
+  Result := ParamOr('ServerKey', Trim(ConfigPage.Values[1]));
 end;
 
 function GetDeviceName(Param: string): string;
 begin
-  Result := Trim(ConfigPage.Values[2]);
+  Result := ParamOr('DeviceName', Trim(ConfigPage.Values[2]));
+end;
+
+// One-time enrollment code. With it the device performs a real handshake and
+// receives its own key; without it, it falls back to the shared bootstrap key.
+function GetInviteCode(Param: string): string;
+begin
+  Result := ParamOr('InviteCode', Trim(ConfigPage.Values[3]));
+end;
+
+// Path to the server's certificate, for a lab server that issues its own.
+// Nothing to import when the server has a public certificate.
+function GetServerCert(Param: string): string;
+begin
+  Result := ParamOr('ServerCert', '');
 end;
 
 // Warn (don't block) if no Python is on PATH -- the sign-in/timer/lock/remote

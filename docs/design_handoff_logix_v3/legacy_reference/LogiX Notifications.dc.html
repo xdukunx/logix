@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", Tahoma, sans-serif; background: #ddd6c8; color: #e8edf5; -webkit-font-smoothing: antialiased; }
+  .serif { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif; }
+  @keyframes lx-idle { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
+  @keyframes lx-urgent { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0), 0 18px 40px rgba(0,0,0,.55); } 50% { box-shadow: 0 0 0 4px rgba(239,68,68,.35), 0 18px 40px rgba(0,0,0,.55); } }
+  @keyframes lx-eye { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+</style>
+</helmet>
+
+<div style="max-width: 1420px; margin: 0 auto; background:#f7f4ee; box-shadow:0 40px 120px -50px rgba(58,46,30,.6); border-left:1px solid #e7e0d2; border-right:1px solid #e7e0d2; padding:52px 56px 80px;">
+  <div style="margin-bottom:40px;padding-bottom:32px;border-bottom:2px solid #2b2621;">
+    <div style="display:flex;align-items:center;gap:11px;margin-bottom:20px;"><div style="width:28px;height:28px;border-radius:6px;background:#2563eb;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-family:ui-monospace,Consolas,monospace;font-size:13px;">&gt;_</div><span style="font-size:14px;font-weight:700;letter-spacing:0.22em;color:#2b2621;">LOGIX</span><span style="margin-left:auto;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:#a8a08e;">Client · Notifications</span></div><div class="serif" style="font-size:15px;font-style:italic;color:#b5622f;margin-bottom:12px;">Stakes rise, so does the weight.</div>
+    <h1 class="serif" style="font-size:46px;font-weight:600;line-height:1.02;letter-spacing:-0.02em;margin:0 0 14px;color:#23201b;">Three variants, three&nbsp;temperatures.</h1>
+    <p style="font-size: 14px; color: #6b6456; margin: 0; max-width: 820px;">Friendly → dignified notice → urgent. Same dark client language, but each variant escalates in color, size, and behavior so the user instantly reads how much it matters. WPF-buildable (Border, StackPanel, glyphs, simple animations), Segoe UI + Consolas.</p>
+  </div>
+
+  <!-- ============ SIDE BY SIDE ESCALATION ============ -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: start; margin-bottom: 20px;">
+
+    <!-- VARIANT 1: DIRECTION MESSAGE -->
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"><span style="width: 22px; height: 22px; border-radius: 999px; background: #17325c; color: #7fb0ff; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">1</span><span style="font-size: 13px; font-weight: 700; color: #7fb0ff;">Direction · replyable</span></div>
+      <div style="background: #0b0f19; border: 1px solid #24406e; border-radius: 14px; padding: 16px; box-shadow: 0 14px 34px rgba(0,0,0,.45);">
+        <div style="display: flex; align-items: flex-start; gap: 12px;">
+          <span style="width: 38px; height: 38px; border-radius: 999px; background: #12233f; border: 1px solid #24406e; color: #4b8cf5; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg></span>
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 14px; font-weight: 700;">Pesan dari Admin</span><span style="margin-left: auto; font-size: 11px; color: #6b7a94;">14:32</span></div>
+            <div style="font-size: 13px; color: #cdd6e6; line-height: 1.5; margin-top: 5px;">Mohon simpan pekerjaan Anda — lab akan tutup pukul 17.00. Terima kasih.</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 14px;">
+          <div style="flex: 1; background: #2563eb; border-radius: 7px; padding: 9px 0; text-align: center; font-size: 13px; font-weight: 600; color: #fff; display: flex; align-items: center; justify-content: center; gap: 6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>Balas</div>
+          <div style="width: 84px; border: 1px solid #2b3a55; border-radius: 7px; padding: 9px 0; text-align: center; font-size: 13px; font-weight: 600; color: #9aa7bd;">Tutup</div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #6b7a94; margin-top: 10px; line-height: 1.5;">Accent-blue, warm copy, low weight. A note between people — it can wait a moment.</div>
+    </div>
+
+    <!-- VARIANT 2: PRIVACY NOTICE -->
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"><span style="width: 22px; height: 22px; border-radius: 999px; background: #164e3b; color: #5eead4; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">2</span><span style="font-size: 13px; font-weight: 700; color: #5eead4;">Privacy notice · acknowledge</span></div>
+      <div style="background: #0b1512; border: 1px solid #1f6b57; border-radius: 14px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,.45);">
+        <div style="height: 3px; background: linear-gradient(90deg,#14b8a6,#5eead4);"></div>
+        <div style="padding: 18px 16px 16px;">
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 42px; height: 42px; border-radius: 11px; background: #0e2a24; border: 1px solid #1f6b57; color: #5eead4; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </span>
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 14px; font-weight: 700; color: #99f6e4;">Pemberitahuan Privasi</span></div>
+              <div style="font-size: 11px; color: #6f9e93; margin-top: 2px;">Baru saja · 14:33:12</div>
+            </div>
+          </div>
+          <div style="font-size: 13px; color: #cfeee7; line-height: 1.55; margin-top: 12px;">Admin baru saja mengambil tangkapan layar perangkat ini untuk keperluan pemantauan.</div>
+          <div style="font-size: 12px; color: #6f9e93; line-height: 1.5; margin-top: 8px;">Anda selalu diberi tahu — tidak pernah diam-diam.</div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 16px;">
+            <div style="flex: 1; background: #14b8a6; border-radius: 7px; padding: 9px 0; text-align: center; font-size: 13px; font-weight: 700; color: #052e26;">Mengerti</div>
+            <div style="font-size: 12px; color: #5eead4; border-bottom: 1px dotted #2f7d6c; padding-bottom: 1px;">Riwayat pemberitahuan</div>
+          </div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #6b7a94; margin-top: 10px; line-height: 1.5;">Its own calm teal — never alarm-red. Dignified, sticky (no silent auto-dismiss), links to the capture log. This is the privacy promise made visible.</div>
+    </div>
+
+    <!-- VARIANT 3: EMERGENCY -->
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"><span style="width: 22px; height: 22px; border-radius: 999px; background: #5b1717; color: #fca5a5; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;">3</span><span style="font-size: 13px; font-weight: 700; color: #fca5a5;">Emergency · urgent</span></div>
+      <div style="background: #1a0d10; border: 2px solid #ef4444; border-radius: 14px; overflow: hidden; animation: lx-urgent 1.4s ease-in-out infinite;">
+        <div style="background: rgba(239,68,68,.16); padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(239,68,68,.4);">
+          <span style="width: 30px; height: 30px; border-radius: 8px; background: #ef4444; color: #fff; display: flex; align-items: center; justify-content: center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg></span>
+          <span style="font-size: 14px; font-weight: 800; color: #fca5a5; letter-spacing: .02em;">Peringatan Sistem</span>
+        </div>
+        <div style="padding: 18px 16px 16px; text-align: center;">
+          <div style="font-family: Consolas, monospace; font-size: 60px; font-weight: 700; line-height: 1; color: #fecaca; letter-spacing: .04em;">30</div>
+          <div style="font-size: 11px; color: #e2a3a3; letter-spacing: .1em; text-transform: uppercase; margin-top: 4px;">detik</div>
+          <div style="font-size: 13px; color: #f3c9c9; line-height: 1.5; margin-top: 12px;">Perangkat ini akan dimatikan oleh admin. <strong style="color:#fff;">Simpan pekerjaan Anda sekarang.</strong></div>
+          <div style="background: #ef4444; border-radius: 8px; padding: 11px 0; text-align: center; font-size: 13px; font-weight: 700; color: #fff; margin-top: 16px;">Saya sudah menyimpan</div>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #6b7a94; margin-top: 10px; line-height: 1.5;">Big live numerals, red, pulsing ring for peripheral vision. Recommended: escapes the widget → centered overlay (below).</div>
+    </div>
+  </div>
+
+  <!-- ============ VARIANT 1 REPLY COMPOSER ============ -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #b5622f; margin: 40px 0 14px;">Variant 1 — reply composer states</div>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 20px;">
+    <!-- composer -->
+    <div style="background: #0b0f19; border: 1px solid #1c2637; border-radius: 12px; padding: 18px;">
+      <div style="font-size: 11px; font-weight: 700; color: #7fb0ff; margin-bottom: 12px;">COMPOSING</div>
+      <div style="background: #0b0f19; border: 1px solid #24406e; border-radius: 12px; padding: 14px;">
+        <div style="font-size: 12px; color: #8b98af; margin-bottom: 8px;">Balas ke Admin</div>
+        <div style="background: #070c17; border: 1px solid #2b3a55; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #e8edf5; min-height: 58px; line-height: 1.5;">Baik, 10 menit lagi selesai.<span style="color:#4b8cf5;">|</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
+          <span style="font-size: 11px; color: #6b7a94; font-family: Consolas, monospace;">24/240</span>
+          <div style="margin-left: auto; display: flex; gap: 8px;">
+            <div style="border: 1px solid #2b3a55; border-radius: 7px; padding: 8px 14px; font-size: 12px; font-weight: 600; color: #9aa7bd;">Batal</div>
+            <div style="background: #2563eb; border-radius: 7px; padding: 8px 16px; font-size: 12px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4 20-7z"></path></svg>Kirim</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- sending -->
+    <div style="background: #0b0f19; border: 1px solid #1c2637; border-radius: 12px; padding: 18px;">
+      <div style="font-size: 11px; font-weight: 700; color: #8b98af; margin-bottom: 12px;">SENDING</div>
+      <div style="background: #0b0f19; border: 1px solid #24406e; border-radius: 12px; padding: 14px;">
+        <div style="font-size: 12px; color: #8b98af; margin-bottom: 8px;">Balas ke Admin</div>
+        <div style="background: #070c17; border: 1px solid #1c2637; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #8b98af; min-height: 58px; line-height: 1.5;">Baik, 10 menit lagi selesai.</div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 10px;"><div style="background: #17233c; border-radius: 7px; padding: 8px 16px; font-size: 12px; font-weight: 700; color: #7fb0ff; display: flex; align-items: center; gap: 7px;"><span style="width: 12px; height: 12px; border: 2px solid #24406e; border-top-color: #4b8cf5; border-radius: 999px; display: inline-block; animation: lx-idle 1s linear infinite;"></span>Mengirim…</div></div>
+      </div>
+    </div>
+    <!-- sent confirm -->
+    <div style="background: #0b0f19; border: 1px solid #1c2637; border-radius: 12px; padding: 18px;">
+      <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 12px;">TERKIRIM</div>
+      <div style="background: #0b0f19; border: 1px solid #1f6b57; border-radius: 12px; padding: 20px 14px; text-align: center;">
+        <div style="width: 40px; height: 40px; border-radius: 999px; background: rgba(34,197,94,.16); color: #4ade80; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 10px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg></div>
+        <div style="font-size: 14px; font-weight: 700; color: #86efac;">Balasan terkirim</div>
+        <div style="font-size: 12px; color: #6f9e93; margin-top: 3px;">Admin akan melihatnya di dashboard.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ EMERGENCY COUNTDOWN FRAMES ============ -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #b5622f; margin: 40px 0 6px;">Variant 3 — live countdown · 30 → 10 → 3</div>
+  <p style="font-size: 13px; color: #6b6456; margin: 0 0 16px; max-width: 780px;">A single <span style="font-family:Consolas,monospace;">DispatcherTimer</span> decrements the numeral each second. Color and pulse intensify as it drops: teal-of-calm is never used here — it stays red, but grows more insistent.</p>
+  <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 22px;">
+    <div style="background: #150c0e; border: 2px solid #b54141; border-radius: 12px; padding: 22px; text-align: center;">
+      <div style="font-size: 11px; font-weight: 700; color: #e2a3a3; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px;">30s · noticed</div>
+      <div style="font-family: Consolas, monospace; font-size: 66px; font-weight: 700; line-height: 1; color: #fca5a5;">30</div>
+      <div style="font-size: 12px; color: #e2a3a3; margin-top: 10px;">Simpan pekerjaan Anda.</div>
+    </div>
+    <div style="background: #1c0c0e; border: 2px solid #ef4444; border-radius: 12px; padding: 22px; text-align: center; box-shadow: 0 0 0 3px rgba(239,68,68,.2);">
+      <div style="font-size: 11px; font-weight: 700; color: #f4b0b0; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px;">10s · insistent</div>
+      <div style="font-family: Consolas, monospace; font-size: 66px; font-weight: 700; line-height: 1; color: #fecaca;">10</div>
+      <div style="font-size: 12px; color: #f4b0b0; margin-top: 10px;">Segera simpan.</div>
+    </div>
+    <div style="background: #250b0d; border: 3px solid #f87171; border-radius: 12px; padding: 22px; text-align: center; box-shadow: 0 0 0 5px rgba(239,68,68,.32);">
+      <div style="font-size: 11px; font-weight: 700; color: #fecaca; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 10px;">3s · imminent</div>
+      <div style="font-family: Consolas, monospace; font-size: 78px; font-weight: 800; line-height: 1; color: #fff;">3</div>
+      <div style="font-size: 12px; color: #fecaca; margin-top: 6px;">Mematikan…</div>
+    </div>
+  </div>
+
+  <!-- ============ OVERLAY RECOMMENDATION ============ -->
+  <div style="background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.35); border-radius: 12px; padding: 16px 18px; margin-bottom: 22px; display: flex; gap: 12px; align-items: flex-start;">
+    <span style="width: 26px; height: 26px; border-radius: 999px; background: #ef4444; color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="8" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span>
+    <div style="font-size: 13.5px; color: #f3c9c9; line-height: 1.6;"><strong style="color:#fff;">Recommendation: Variant 3 escapes the widget.</strong> A shutdown in 30s is too important to live in a corner someone may have dragged off-screen. It should present as a <strong>centered, dimmed-backdrop overlay</strong> (a separate always-on-top WPF window) so it's unmissable — while Variants 1 &amp; 2 stay attached to the timer widget. Shown below composited on the desktop.</div>
+  </div>
+
+  <!-- centered overlay composite -->
+  <div style="position: relative; border-radius: 14px; overflow: hidden; border: 1px solid #1c2637; margin-bottom: 44px; height: 420px; background:
+    radial-gradient(1000px 600px at 25% 15%, #1c3a63, transparent 55%),
+    linear-gradient(160deg, #0f2036, #0a1020 70%);">
+    <!-- dimmed backdrop -->
+    <div style="position: absolute; inset: 0; background: rgba(5,7,13,.66);"></div>
+    <!-- app hint behind -->
+    <div style="position: absolute; left: 40px; top: 34px; width: 300px; height: 180px; border-radius: 10px; background: #11151d; border: 1px solid #232b3a; opacity: .5;"></div>
+    <!-- centered alert -->
+    <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 460px; max-width: 88%; background: #1a0d10; border: 2px solid #ef4444; border-radius: 18px; overflow: hidden; box-shadow: 0 30px 80px rgba(0,0,0,.7); animation: lx-urgent 1.4s ease-in-out infinite;">
+      <div style="background: rgba(239,68,68,.16); padding: 16px 22px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(239,68,68,.4);">
+        <span style="width: 34px; height: 34px; border-radius: 9px; background: #ef4444; color: #fff; display: flex; align-items: center; justify-content: center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg></span>
+        <span style="font-size: 17px; font-weight: 800; color: #fca5a5;">Peringatan Sistem</span>
+        <span style="margin-left: auto; font-family: Consolas, monospace; font-size: 12px; color: #e2a3a3;">WS-07 · GPU-A100</span>
+      </div>
+      <div style="padding: 26px 24px; display: flex; align-items: center; gap: 24px;">
+        <div style="text-align: center; flex-shrink: 0;"><div style="font-family: Consolas, monospace; font-size: 82px; font-weight: 800; line-height: 1; color: #fff;">30</div><div style="font-size: 11px; color: #e2a3a3; letter-spacing: .12em; text-transform: uppercase; margin-top: 2px;">detik</div></div>
+        <div><div style="font-size: 17px; font-weight: 700; color: #fff; line-height: 1.4;">Perangkat ini akan dimatikan oleh admin.</div><div style="font-size: 14px; color: #f3c9c9; margin-top: 6px; line-height: 1.5;">Simpan pekerjaan Anda sekarang. Sesi Anda akan ditutup otomatis.</div></div>
+      </div>
+      <div style="padding: 0 24px 22px; display: flex; gap: 10px; justify-content: flex-end;">
+        <div style="border: 1px solid #7f2a2a; border-radius: 8px; padding: 11px 18px; font-size: 14px; font-weight: 600; color: #f4b0b0;">Minta tunda</div>
+        <div style="background: #ef4444; border-radius: 8px; padding: 11px 22px; font-size: 14px; font-weight: 700; color: #fff;">Saya sudah menyimpan</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RIWAYAT PEMBERITAHUAN ============ -->
+  <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: #b5622f; margin-bottom: 14px;">"Riwayat Pemberitahuan" — accountability log</div>
+  <div style="max-width: 480px; background: #0b0f19; border: 1px solid #1c2637; border-radius: 14px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,.4);">
+    <div style="padding: 16px 18px; border-bottom: 1px solid #1c2637; display: flex; align-items: center; gap: 10px;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#7fb0ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"></path><circle cx="12" cy="12" r="9"></circle></svg>
+      <div style="flex:1;"><div style="font-size: 15px; font-weight: 700;">Riwayat Pemberitahuan</div><div style="font-size: 12px; color: #6b7a94;">Semua pesan &amp; pemantauan tercatat di sini.</div></div>
+    </div>
+    <div style="max-height: 300px; overflow: auto;">
+      <!-- privacy -->
+      <div style="display: flex; align-items: flex-start; gap: 11px; padding: 13px 18px; border-bottom: 1px solid #131b2a;">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: #0e2a24; border: 1px solid #1f6b57; color: #5eead4; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg></span>
+        <div style="flex:1; min-width:0;"><div style="font-size: 13px; font-weight: 600; color: #99f6e4;">Tangkapan layar diambil</div><div style="font-size: 12px; color: #8b98af; line-height: 1.4;">untuk keperluan pemantauan</div></div>
+        <span style="font-size: 11px; color: #6b7a94; white-space: nowrap;">14:33</span>
+      </div>
+      <!-- message -->
+      <div style="display: flex; align-items: flex-start; gap: 11px; padding: 13px 18px; border-bottom: 1px solid #131b2a;">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: #12233f; border: 1px solid #24406e; color: #4b8cf5; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path></svg></span>
+        <div style="flex:1; min-width:0;"><div style="font-size: 13px; font-weight: 600; color: #cdd6e6;">Pesan dari Admin</div><div style="font-size: 12px; color: #8b98af; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Mohon simpan pekerjaan — lab tutup 17.00.</div></div>
+        <span style="font-size: 11px; color: #6b7a94; white-space: nowrap;">14:32</span>
+      </div>
+      <!-- reply sent -->
+      <div style="display: flex; align-items: flex-start; gap: 11px; padding: 13px 18px; border-bottom: 1px solid #131b2a;">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: #17233c; border: 1px solid #2b3a55; color: #9aa7bd; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg></span>
+        <div style="flex:1; min-width:0;"><div style="font-size: 13px; font-weight: 600; color: #cdd6e6;">Balasan Anda</div><div style="font-size: 12px; color: #8b98af; line-height: 1.4;">"Baik, 10 menit lagi selesai."</div></div>
+        <span style="font-size: 11px; color: #6b7a94; white-space: nowrap;">14:32</span>
+      </div>
+      <!-- privacy earlier -->
+      <div style="display: flex; align-items: flex-start; gap: 11px; padding: 13px 18px; border-bottom: 1px solid #131b2a;">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: #0e2a24; border: 1px solid #1f6b57; color: #5eead4; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path><circle cx="12" cy="12" r="3"></circle></svg></span>
+        <div style="flex:1; min-width:0;"><div style="font-size: 13px; font-weight: 600; color: #99f6e4;">Tangkapan layar diambil</div><div style="font-size: 12px; color: #8b98af; line-height: 1.4;">untuk keperluan pemantauan</div></div>
+        <span style="font-size: 11px; color: #6b7a94; white-space: nowrap;">11:07</span>
+      </div>
+      <!-- system -->
+      <div style="display: flex; align-items: flex-start; gap: 11px; padding: 13px 18px;">
+        <span style="width: 30px; height: 30px; border-radius: 8px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.4); color: #f87171; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg></span>
+        <div style="flex:1; min-width:0;"><div style="font-size: 13px; font-weight: 600; color: #f4b0b0;">Peringatan sistem</div><div style="font-size: 12px; color: #8b98af; line-height: 1.4;">Jadwal pemeliharaan dibatalkan</div></div>
+        <span style="font-size: 11px; color: #6b7a94; white-space: nowrap;">Kmr</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

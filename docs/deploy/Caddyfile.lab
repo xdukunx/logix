@@ -1,0 +1,74 @@
+# Logix -- HTTPS for a lab on its own network (no public domain).
+#
+# The other Caddyfile in this folder is for a server on the internet with a
+# real domain name, where Caddy fetches a free certificate from Let's Encrypt.
+# A lab server usually has neither: no domain, no inbound internet. This file
+# is for that case.
+#
+# `tls internal` tells Caddy to run its own small certificate authority on this
+# machine and issue the certificate itself. The encryption is exactly as strong
+# as a public certificate. The only difference is that other computers do not
+# know Caddy's authority yet, so each workstation has to be told once that it
+# is trustworthy -- see "TRUSTING IT" below.
+#
+# WHY THIS MATTERS
+#   The Logix server speaks plain HTTP and always will; it is meant to sit
+#   behind something like this. Without it, the admin password and every
+#   device key travel across the lab network in readable text -- anyone on the
+#   same wifi could pick them up. Caddy is the envelope around all of it.
+#
+# SETUP
+#   1. Replace logix.lab below with whatever name the workstations will use.
+#      A hostname you control on the LAN is ideal. If you have no DNS at all,
+#      use the server's IP address instead (e.g. 192.168.1.50) -- it works, it
+#      is just less friendly to type.
+#   2. Start the Logix server on loopback only:
+#        python ops/serve.py --host 127.0.0.1 --port 8791
+#      It must NOT be reachable directly; Caddy is the only way in.
+#   3. Start Caddy with this file:
+#        caddy run --config docs/deploy/Caddyfile.lab
+#   4. Point every agent at the HTTPS address, in C:\ProgramData\Logix\config.env:
+#        LOGIX_SERVER_URL=https://logix.lab
+#
+# TRUSTING IT
+#   On the server, once:      caddy trust
+#   On each workstation, once: copy Caddy's root certificate over and import it
+#   into "Trusted Root Certification Authorities" (Local Machine). Caddy prints
+#   where that file lives on first run; it is usually
+#     %AppData%\Caddy\pki\authorities\local\root.crt
+#   Until a machine trusts it, its agent will refuse the connection -- which is
+#   the correct behaviour, not a bug. That refusal is exactly what stops
+#   someone impersonating your server.
+
+logix.lab {
+	# Caddy issues and renews the certificate itself -- no internet needed.
+	tls internal
+
+	# Everything goes to the Logix server, which listens on loopback only.
+	# The dashboard and the /api routes share one origin, so one line covers
+	# the whole app.
+	reverse_proxy 127.0.0.1:8791
+
+	# Screenshots and Excel exports can be a few MB.
+	request_body {
+		max_size 20MB
+	}
+
+	encode gzip
+
+	# Tell browsers to keep using HTTPS for this host. Only meaningful once the
+	# certificate is trusted, which is why it is safe to set here.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+	}
+
+	# Request metadata only -- the database already holds the personal data,
+	# this log deliberately does not.
+	log {
+		output file logs/logix-access.log
+		format console
+	}
+}

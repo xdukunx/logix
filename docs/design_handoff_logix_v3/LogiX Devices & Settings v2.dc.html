@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: #EDEFF2; color: #14181F; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+  a { color: #2563EB; } a:hover { color: #1D4ED8; }
+</style>
+</helmet>
+
+<div style="max-width: 1420px; min-width: 1192px; margin: 0 auto; padding: 48px 56px 88px;">
+
+  <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 40px;">
+    <div class="mono" style="width: 26px; height: 26px; border-radius: 8px; background: #2563EB; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 12px;">&gt;_</div>
+    <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.18em; color: #14181F;">LOGIX</span>
+    <span style="margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6A7382;">D-05 · Devices &amp; Settings v2</span>
+  </div>
+  <h1 style="font-size: 28px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 10px;">Devices &amp; Settings</h1>
+  <p style="font-size: 14px; color: #6A7382; margin: 0 0 52px; max-width: 720px; line-height: 1.6;">Devices: tabel datar — sparkline sync 7-hari dihapus, kolom sinkronisasi cukup status terakhir + timestamp. Drawer detail dan alur invite-code sekali-pakai 15 menit dipertahankan. Settings: 5 seksi lama + kebijakan Idle auto-end per-kategori di seksi Perangkat.</p>
+
+  <!-- ============ DEVICES LIGHT ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">Devices — light, drawer detail terbuka</div>
+  <div data-screen-label="Devices Light" style="background: #F4F5F7; border: 1px solid #E2E5EA; border-radius: 16px; overflow: hidden; margin-bottom: 48px; display: flex; min-width: 1080px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04);">
+    <div style="flex: 1; padding: 28px 32px;">
+      <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 22px;">
+        <div>
+          <div style="font-size: 22px; font-weight: 650; letter-spacing: -0.01em;">Perangkat</div>
+          <div style="font-size: 13.5px; color: #6A7382; margin-top: 3px;"><span class="mono" style="color: #14181F;">12</span> terdaftar · <span class="mono" style="color: #14181F;">10</span> online</div>
+        </div>
+        <span style="margin-left: auto; background: #2563EB; color: #fff; font-size: 13px; font-weight: 600; padding: 9px 20px; border-radius: 999px;">Tambah perangkat</span>
+      </div>
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 120px 1fr 100px 170px 130px; padding: 12px 20px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #6A7382;"><span>ID</span><span>Spesifikasi</span><span>Kategori</span><span>Sinkronisasi</span><span>Versi client</span></div>
+        <div style="display: grid; grid-template-columns: 120px 1fr 100px 170px 130px; padding: 13px 20px; border-top: 1px solid #F0F2F5; font-size: 13.5px; align-items: center; background: #F4F5F7; box-shadow: inset 3px 0 0 #2563EB;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-07</span><span style="color: #6A7382;">GPU A100 80GB · 128GB RAM</span><span>GPU</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A;"></span><span class="mono" style="font-size: 12px;">8 dtk lalu</span></span><span class="mono" style="font-size: 12px;">2.1.0</span></div>
+        <div style="display: grid; grid-template-columns: 120px 1fr 100px 170px 130px; padding: 13px 20px; border-top: 1px solid #F0F2F5; font-size: 13.5px; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-08</span><span style="color: #6A7382;">GPU A100 80GB · 128GB RAM</span><span>GPU</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A;"></span><span class="mono" style="font-size: 12px;">12 dtk lalu</span></span><span class="mono" style="font-size: 12px;">2.1.0</span></div>
+        <div style="display: grid; grid-template-columns: 120px 1fr 100px 170px 130px; padding: 13px 20px; border-top: 1px solid #F0F2F5; font-size: 13.5px; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-01</span><span style="color: #6A7382;">64-core EPYC · 256GB RAM</span><span>CPU</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A;"></span><span class="mono" style="font-size: 12px;">15 dtk lalu</span></span><span class="mono" style="font-size: 12px;">2.1.0</span></div>
+        <div style="display: grid; grid-template-columns: 120px 1fr 100px 170px 130px; padding: 13px 20px; border-top: 1px solid #F0F2F5; font-size: 13.5px; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-05</span><span style="color: #6A7382;">RTX 4090 · 64GB RAM</span><span>GPU</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #D97706;"></span><span class="mono" style="font-size: 12px;">4 mnt lalu</span></span><span class="mono" style="font-size: 12px;">2.0.3 <span style="color: #D97706;">· update</span></span></div>
+        <div style="display: grid; grid-template-columns: 120px 1fr 100px 170px 130px; padding: 13px 20px; border-top: 1px solid #F0F2F5; font-size: 13.5px; color: #9CA3AF; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-11</span><span>32-core · 128GB RAM</span><span>CPU</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #9CA3AF;"></span><span class="mono" style="font-size: 12px;">Sen 09:12</span></span><span class="mono" style="font-size: 12px;">2.0.1</span></div>
+      </div>
+    </div>
+    <!-- drawer -->
+    <div style="width: 330px; flex-shrink: 0; background: #fff; border-left: 1px solid #E6E9EF; padding: 26px 24px;">
+      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A;"></span><span class="mono" style="font-size: 16px; font-weight: 600;">WS-07</span><span style="margin-left: auto; color: #6A7382; font-size: 15px;">✕</span></div>
+      <div style="font-size: 12.5px; color: #6A7382; margin-bottom: 20px;">GPU-A100 · Ruang B-204</div>
+      <div style="display: grid; row-gap: 10px; margin-bottom: 24px;">
+        <div style="display: flex; font-size: 12.5px;"><span style="color: #6A7382; width: 110px;">Sinkronisasi</span><span class="mono">8 dtk lalu · OK</span></div>
+        <div style="display: flex; font-size: 12.5px;"><span style="color: #6A7382; width: 110px;">Versi client</span><span class="mono">2.1.0</span></div>
+        <div style="display: flex; font-size: 12.5px;"><span style="color: #6A7382; width: 110px;">Sesi aktif</span><span>dhana · SSH · <span class="mono">2j 14m</span></span></div>
+        <div style="display: flex; font-size: 12.5px;"><span style="color: #6A7382; width: 110px;">Kategori</span><span>GPU</span></div>
+        <div style="display: flex; font-size: 12.5px;"><span style="color: #6A7382; width: 110px;">Idle auto-end</span><span>2 jam (kebijakan GPU)</span></div>
+      </div>
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #6A7382; margin-bottom: 10px;">Invite code — sekali pakai</div>
+      <div style="border: 1px dashed #D9DDE3; border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 10px;">
+        <div class="mono" style="font-size: 20px; letter-spacing: .18em;">HXK-492-QTB</div>
+        <div class="mono" style="font-size: 11px; color: #D97706; margin-top: 4px;">kedaluwarsa dalam 14:32</div>
+      </div>
+      <div style="font-size: 12px; line-height: 1.5; color: #6A7382; margin-bottom: 20px;">Masukkan kode ini di client WPF untuk mengikat ulang perangkat. Berlaku 15 menit, satu kali pakai.</div>
+      <div style="display: flex; gap: 8px;">
+        <span style="flex: 1; text-align: center; border: 1px solid #E6E9EF; border-radius: 999px; padding: 8px 0; font-size: 13px; font-weight: 600;">Buat kode baru</span>
+        <span style="flex: 1; text-align: center; border: 1px solid #E6E9EF; border-radius: 999px; padding: 8px 0; font-size: 13px; font-weight: 600; color: #DC2626;">Hapus</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SETTINGS LIGHT ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">Settings — light, seksi Perangkat dengan kebijakan Idle auto-end</div>
+  <div data-screen-label="Settings Light" style="background: #F4F5F7; border: 1px solid #E2E5EA; border-radius: 16px; overflow: hidden; margin-bottom: 48px; display: flex; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04);">
+    <div style="width: 230px; flex-shrink: 0; background: #fff; border-right: 1px solid #E6E9EF; padding: 26px 14px;">
+      <div style="font-size: 20px; font-weight: 600; margin: 0 0 18px; padding: 0 12px;">Pengaturan</div>
+      <div style="display: grid; gap: 4px;">
+        <div style="font-size: 13.5px; color: #6A7382; padding: 9px 14px;">Branding</div>
+        <div style="font-size: 13.5px; color: #6A7382; padding: 9px 14px;">Tipe Akses &amp; Tujuan</div>
+        <div style="font-size: 13.5px; font-weight: 600; color: #fff; padding: 9px 14px; border-radius: 10px; background: #14181F;">Perangkat</div>
+        <div style="font-size: 13.5px; color: #6A7382; padding: 9px 14px;">Laporan</div>
+        <div style="font-size: 13.5px; color: #6A7382; padding: 9px 14px;">Privasi</div>
+      </div>
+    </div>
+    <div style="flex: 1; padding: 28px 32px; max-width: 780px;">
+      <div style="font-size: 20px; font-weight: 600; margin-bottom: 4px;">Perangkat</div>
+      <div style="font-size: 13.5px; color: #6A7382; margin-bottom: 24px;">Kategori, penamaan, dan kebijakan sesi per-kategori.</div>
+
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px 24px; margin-bottom: 16px;">
+        <div style="font-size: 14.5px; font-weight: 600; margin-bottom: 2px;">Kategori perangkat</div>
+        <div style="font-size: 13px; color: #6A7382; margin-bottom: 14px;">GPU · CPU · Umum — dipakai untuk filter dan kebijakan.</div>
+        <div style="display: flex; gap: 8px;">
+          <span class="mono" style="font-size: 12.5px; border: 1px solid #E6E9EF; border-radius: 999px; padding: 6px 14px;">GPU · 4</span>
+          <span class="mono" style="font-size: 12.5px; border: 1px solid #E6E9EF; border-radius: 999px; padding: 6px 14px;">CPU · 6</span>
+          <span class="mono" style="font-size: 12.5px; border: 1px solid #E6E9EF; border-radius: 999px; padding: 6px 14px;">Umum · 2</span>
+          <span style="font-size: 12.5px; font-weight: 600; color: #6A7382; padding: 6px 8px;">+ Tambah</span>
+        </div>
+      </div>
+
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 0 0 1.5px #2563EB, 0 4px 16px rgba(16,24,40,.06); padding: 20px 24px; margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+          <span style="font-size: 14.5px; font-weight: 600;">Idle auto-end</span>
+          <span class="mono" style="font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: #2563EB; border: 1px solid #2563EB; border-radius: 999px; padding: 2px 9px;">BARU</span>
+        </div>
+        <div style="font-size: 13px; color: #6A7382; margin-bottom: 16px; line-height: 1.55;">Tutup sesi otomatis setelah tidak ada aktivitas. Pengguna menerima notifikasi 5 menit sebelum sesi ditutup — countdown darurat di client.</div>
+        <div style="display: grid;">
+          <div style="display: flex; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid #F0F2F5;">
+            <span style="width: 36px; height: 21px; border-radius: 999px; background: #2563EB; position: relative; flex-shrink: 0;"><span style="position: absolute; right: 2px; top: 2px; width: 17px; height: 17px; border-radius: 99px; background: #fff;"></span></span>
+            <span style="font-size: 13.5px; font-weight: 600; width: 64px;">GPU</span>
+            <span class="mono" style="font-size: 13px; border: 1px solid #E6E9EF; border-radius: 10px; padding: 5px 14px;">2 jam</span>
+            <span style="margin-left: auto; font-size: 12px; color: #6A7382;">notifikasi 5 mnt sebelum</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid #F0F2F5;">
+            <span style="width: 36px; height: 21px; border-radius: 999px; background: #2563EB; position: relative; flex-shrink: 0;"><span style="position: absolute; right: 2px; top: 2px; width: 17px; height: 17px; border-radius: 99px; background: #fff;"></span></span>
+            <span style="font-size: 13.5px; font-weight: 600; width: 64px;">CPU</span>
+            <span class="mono" style="font-size: 13px; border: 1px solid #E6E9EF; border-radius: 10px; padding: 5px 14px;">4 jam</span>
+            <span style="margin-left: auto; font-size: 12px; color: #6A7382;">notifikasi 5 mnt sebelum</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px; padding: 13px 0 4px; border-top: 1px solid #F0F2F5;">
+            <span style="width: 36px; height: 21px; border-radius: 999px; background: #E6E9EF; position: relative; flex-shrink: 0;"><span style="position: absolute; left: 2px; top: 2px; width: 17px; height: 17px; border-radius: 99px; background: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.15);"></span></span>
+            <span style="font-size: 13.5px; font-weight: 600; color: #6A7382; width: 64px;">Umum</span>
+            <span style="font-size: 13px; color: #9CA3AF;">nonaktif — sesi berjalan sampai SELESAI ditekan</span>
+          </div>
+        </div>
+        <div style="border-left: 3px solid #D97706; padding: 8px 14px; font-size: 12.5px; line-height: 1.5; background: #F4F5F7; border-radius: 0 10px 10px 0; margin-top: 14px;">Job komputasi panjang (training, DFT) tetap terhitung <span style="font-weight: 600;">aktif</span> — idle diukur dari input + beban proses, bukan input saja.</div>
+      </div>
+
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px 24px;">
+        <div style="font-size: 14.5px; font-weight: 600; margin-bottom: 2px;">Penamaan stasiun</div>
+        <div style="font-size: 13px; color: #6A7382;">Pola <span class="mono">WS-{nomor}</span> · label lokasi opsional per perangkat.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DARK ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">Dark — Devices (ringkas) &amp; kebijakan idle</div>
+  <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px;">
+    <div data-screen-label="Devices Dark" style="background: #0B0F16; border-radius: 16px; padding: 26px 28px;">
+      <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px;">
+        <span style="font-size: 20px; font-weight: 600; color: #EDF1F7;">Perangkat</span>
+        <span style="font-size: 13.5px; color: #8A94A6;"><span class="mono" style="color: #EDF1F7;">12</span> terdaftar · <span class="mono" style="color: #EDF1F7;">10</span> online</span>
+      </div>
+      <div style="background: #111722; border: 1px solid #1E2836; border-radius: 16px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: 90px 1fr 140px 80px; padding: 11px 18px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #8A94A6;"><span>ID</span><span>Spesifikasi</span><span>Sinkronisasi</span><span>Versi</span></div>
+        <div style="display: grid; grid-template-columns: 90px 1fr 140px 80px; padding: 12px 18px; border-top: 1px solid #1E2836; font-size: 13px; color: #EDF1F7; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-07</span><span style="color: #8A94A6;">GPU A100 80GB</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span><span class="mono" style="font-size: 12px;">8 dtk lalu</span></span><span class="mono" style="font-size: 12px;">2.1.0</span></div>
+        <div style="display: grid; grid-template-columns: 90px 1fr 140px 80px; padding: 12px 18px; border-top: 1px solid #1E2836; font-size: 13px; color: #EDF1F7; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-05</span><span style="color: #8A94A6;">RTX 4090</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #F59E0B;"></span><span class="mono" style="font-size: 12px;">4 mnt lalu</span></span><span class="mono" style="font-size: 12px;">2.0.3</span></div>
+        <div style="display: grid; grid-template-columns: 90px 1fr 140px 80px; padding: 12px 18px; border-top: 1px solid #1E2836; font-size: 13px; color: #6B7280; align-items: center;"><span class="mono" style="font-size: 12.5px; font-weight: 600;">WS-11</span><span>32-core</span><span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #6B7280;"></span><span class="mono" style="font-size: 12px;">Sen 09:12</span></span><span class="mono" style="font-size: 12px;">2.0.1</span></div>
+      </div>
+    </div>
+    <div data-screen-label="Settings Dark" style="background: #0B0F16; border-radius: 16px; padding: 26px 28px;">
+      <div style="font-size: 16px; font-weight: 600; color: #EDF1F7; margin-bottom: 14px;">Idle auto-end</div>
+      <div style="background: #111722; border: 1px solid #1E2836; border-radius: 16px; padding: 4px 16px;">
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 0;">
+          <span style="width: 36px; height: 21px; border-radius: 999px; background: #2563EB; position: relative; flex-shrink: 0;"><span style="position: absolute; right: 2px; top: 2px; width: 17px; height: 17px; border-radius: 99px; background: #fff;"></span></span>
+          <span style="font-size: 13px; font-weight: 600; color: #EDF1F7; width: 56px;">GPU</span>
+          <span class="mono" style="font-size: 12.5px; color: #EDF1F7; border: 1px solid #1E2836; border-radius: 10px; padding: 5px 12px;">2 jam</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #1E2836;">
+          <span style="width: 36px; height: 21px; border-radius: 999px; background: #2563EB; position: relative; flex-shrink: 0;"><span style="position: absolute; right: 2px; top: 2px; width: 17px; height: 17px; border-radius: 99px; background: #fff;"></span></span>
+          <span style="font-size: 13px; font-weight: 600; color: #EDF1F7; width: 56px;">CPU</span>
+          <span class="mono" style="font-size: 12.5px; color: #EDF1F7; border: 1px solid #1E2836; border-radius: 10px; padding: 5px 12px;">4 jam</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #1E2836;">
+          <span style="width: 36px; height: 21px; border-radius: 999px; background: #1E2836; position: relative; flex-shrink: 0;"><span style="position: absolute; left: 2px; top: 2px; width: 17px; height: 17px; border-radius: 99px; background: #8A94A6;"></span></span>
+          <span style="font-size: 13px; font-weight: 600; color: #8A94A6; width: 56px;">Umum</span>
+          <span style="font-size: 12px; color: #6B7280;">nonaktif</span>
+        </div>
+      </div>
+      <div style="font-size: 12px; line-height: 1.55; color: #8A94A6; margin-top: 14px;">Notifikasi 5 menit sebelum sesi ditutup otomatis — tampil sebagai countdown darurat di client (lihat D-02 state 8).</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 52px; font-size: 12px; color: #9AA1AC; display: flex; gap: 18px;">
+    <span>Dipertahankan: drawer detail · invite-code sekali-pakai 15 menit · 5 seksi Settings. Dihapus: sparkline sync 7-hari.</span>
+    <span style="margin-left: auto;">LogiX v3 · D-05</span>
+  </div>
+</div>
+
+</x-dc>
+</body>
+</html>

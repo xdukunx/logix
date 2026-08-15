@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: #EDEFF2; color: #14181F; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: Consolas, ui-monospace, "SF Mono", monospace; font-variant-numeric: tabular-nums; }
+  a { color: #2563EB; } a:hover { color: #1D4ED8; }
+</style>
+</helmet>
+
+<div style="max-width: 1420px; min-width: 1192px; margin: 0 auto; padding: 48px 56px 88px;">
+
+  <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 40px;">
+    <div class="mono" style="width: 26px; height: 26px; border-radius: 8px; background: #2563EB; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 12px;">&gt;_</div>
+    <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.18em; color: #14181F;">LOGIX</span>
+    <span style="margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6A7382;">Client · Sign-in Popup</span>
+  </div>
+  <h1 style="font-size: 28px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 10px;">Sign-in Popup</h1>
+  <p style="font-size: 14px; color: #6A7382; margin: 0 0 52px; max-width: 720px; line-height: 1.6;">Muncul saat pengguna duduk di stasiun (akses fisik) — sesi SSH/AnyDesk tercatat otomatis tanpa popup. WPF dark, radius besar mengikuti bahasa pill. Tiga field, satu tombol. Sesi mencatat waktu · durasi · tujuan — tanpa perekaman layar, dan itu ditulis di popup-nya.</p>
+
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">4 state — dikomposit di atas lock screen stasiun</div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+    <!-- S1 · DEFAULT -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 420px; border-radius: 12px; overflow: hidden; background: #0a0e15; display: flex; align-items: center; justify-content: center;">
+        <div class="mono" style="position: absolute; top: 22px; left: 26px; font-size: 12px; color: #56607a;">WS-07 · terkunci</div>
+        <div class="mono" style="position: absolute; top: 22px; right: 26px; font-size: 12px; color: #56607a;">14:28</div>
+        <div style="width: 320px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.55); padding: 26px 28px;">
+          <div style="display: flex; align-items: center; gap: 9px; margin-bottom: 20px;">
+            <div class="mono" style="width: 26px; height: 26px; border-radius: 8px; background: #2563EB; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 12px;">&gt;_</div>
+            <span class="mono" style="font-size: 13px; color: #EEF3FB;">WS-07 · GPU-A100</span>
+          </div>
+          <div style="font-size: 19px; font-weight: 600; color: #EEF3FB; margin-bottom: 18px;">Mulai sesi</div>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #93A1B8; margin-bottom: 6px;">NIM / Username</div>
+          <div class="mono" style="border: 1px solid #223451; border-radius: 12px; padding: 10px 14px; font-size: 13px; color: #93A1B8; margin-bottom: 14px;">mis. 5024231045</div>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #93A1B8; margin-bottom: 6px;">Tujuan</div>
+          <div style="border: 1px solid #223451; border-radius: 12px; padding: 10px 14px; font-size: 13px; color: #93A1B8; margin-bottom: 14px; display: flex; align-items: center;">Pilih tujuan <svg style="margin-left: auto;" width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="#93A1B8" stroke-width="1.5" stroke-linecap="round"></path></svg></div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 18px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span>
+            <span style="font-size: 12px; color: #93A1B8;">Tipe akses: <span style="color: #EEF3FB;">Fisik</span> — terdeteksi di stasiun</span>
+          </div>
+          <div style="background: #2563EB; border-radius: 999px; text-align: center; padding: 11px 0; font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 14px;">Mulai sesi</div>
+          <div style="font-size: 11px; line-height: 1.5; color: #93A1B8; text-align: center;">Sesi mencatat waktu, durasi &amp; tujuan.<br>Tanpa perekaman layar.</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">S1</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Default.</span> 320px, tiga field, satu tombol. Tipe akses terdeteksi otomatis — bukan pilihan. Catatan privasi selalu terlihat, bukan di balik link.</div></div>
+    </div>
+
+    <!-- S2 · DROPDOWN TUJUAN -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 420px; border-radius: 12px; overflow: hidden; background: #0a0e15; display: flex; align-items: center; justify-content: center;">
+        <div style="width: 320px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.55); padding: 26px 28px;">
+          <div style="font-size: 19px; font-weight: 600; color: #EEF3FB; margin-bottom: 18px;">Mulai sesi</div>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #93A1B8; margin-bottom: 6px;">NIM / Username</div>
+          <div class="mono" style="border: 1px solid #223451; border-radius: 12px; padding: 10px 14px; font-size: 13px; color: #EEF3FB; margin-bottom: 14px;">5024231045</div>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #93A1B8; margin-bottom: 6px;">Tujuan</div>
+          <div style="border: 1px solid #4b8cf5; border-radius: 12px; padding: 10px 14px; font-size: 13px; color: #EEF3FB; display: flex; align-items: center;">Pilih tujuan <svg style="margin-left: auto;" width="10" height="10" viewBox="0 0 10 10"><path d="M2 6.5 L5 3.5 L8 6.5" fill="none" stroke="#93A1B8" stroke-width="1.5" stroke-linecap="round"></path></svg></div>
+          <div style="border: 1px solid #223451; border-radius: 12px; background: #0B1017; padding: 6px; margin-top: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.5);">
+            <div style="font-size: 13px; color: #EEF3FB; padding: 8px 12px; border-radius: 8px; background: #0E1626;">Praktikum</div>
+            <div style="font-size: 13px; color: #EEF3FB; padding: 8px 12px;">Penelitian</div>
+            <div style="font-size: 13px; color: #EEF3FB; padding: 8px 12px;">Tugas akhir</div>
+            <div style="font-size: 13px; color: #EEF3FB; padding: 8px 12px;">Komputasi mandiri</div>
+            <div style="border-top: 1px solid #223451; margin: 4px 8px;"></div>
+            <div style="font-size: 13px; color: #93A1B8; padding: 8px 12px;">Lainnya — tulis sendiri…</div>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">S2</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Dropdown tujuan.</span> Daftar dikelola admin di Settings › Tipe Akses &amp; Tujuan. "Lainnya" membuka satu baris teks bebas — tujuan tampil di Riwayat.</div></div>
+    </div>
+
+    <!-- S3 · ERROR -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 420px; border-radius: 12px; overflow: hidden; background: #0a0e15; display: flex; align-items: center; justify-content: center;">
+        <div style="width: 320px; background: #0E1626; border: 1px solid #223451; border-radius: 22px; box-shadow: 0 24px 64px rgba(0,0,0,.55); padding: 26px 28px;">
+          <div style="font-size: 19px; font-weight: 600; color: #EEF3FB; margin-bottom: 18px;">Mulai sesi</div>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #93A1B8; margin-bottom: 6px;">NIM / Username</div>
+          <div class="mono" style="border: 1px solid #EF4444; border-radius: 12px; padding: 10px 14px; font-size: 13px; color: #EEF3FB;">5024239999</div>
+          <div style="display: flex; align-items: center; gap: 7px; margin: 8px 0 14px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #EF4444; flex-shrink: 0;"></span>
+            <span style="font-size: 12px; color: #EEF3FB;">NIM tidak terdaftar. Hubungi admin lab untuk didaftarkan.</span>
+          </div>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #93A1B8; margin-bottom: 6px;">Tujuan</div>
+          <div style="border: 1px solid #223451; border-radius: 12px; padding: 10px 14px; font-size: 13px; color: #EEF3FB; margin-bottom: 18px;">Penelitian</div>
+          <div style="background: #1a2842; border-radius: 999px; text-align: center; padding: 11px 0; font-size: 13px; font-weight: 600; color: #93A1B8; margin-bottom: 14px;">Mulai sesi</div>
+          <div style="font-size: 11px; line-height: 1.5; color: #93A1B8; text-align: center;">Sesi mencatat waktu, durasi &amp; tujuan.<br>Tanpa perekaman layar.</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">S3</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Error inline.</span> Dot merah + satu kalimat solusi di bawah field-nya. Tombol disabled. Tanpa dialog terpisah, tanpa shake.</div></div>
+    </div>
+
+    <!-- S4 · SUKSES → PILL -->
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 16px;">
+      <div style="position: relative; height: 420px; border-radius: 12px; overflow: hidden; background: #0a0e15;">
+        <div style="position: absolute; left: 26px; top: 76px; width: 430px; height: 344px; border-radius: 8px 8px 0 0; background: #0d1119; border: 1px solid #1c2432; overflow: hidden;">
+          <div style="height: 28px; background: #12161f; border-bottom: 1px solid #1c2432; display: flex; align-items: center; padding: 0 11px;"><span class="mono" style="font-size: 11px; color: #56607a;">desktop — dhana</span></div>
+        </div>
+        <div style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%); width: 150px; height: 32px; background: rgba(11,16,23,.70); border: 1px solid #223451; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45);">
+          <span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span>
+          <span class="mono" style="font-size: 13px; color: #EEF3FB;">00:00</span>
+        </div>
+        <div style="position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); background: #0E1626; border: 1px solid #223451; border-radius: 999px; padding: 9px 18px; display: flex; align-items: center; gap: 9px; box-shadow: 0 12px 32px rgba(0,0,0,.5);">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 L9.5 18 L20 6.5"></path></svg>
+          <span style="font-size: 12.5px; color: #EEF3FB;">Sesi dimulai — timer di tepi atas layar</span>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-top: 14px; align-items: baseline; padding: 0 4px;"><span class="mono" style="font-size: 12px; font-weight: 700; color: #2563EB;">S4</span><div style="font-size: 13px; color: #6A7382; line-height: 1.55;"><span style="color: #14181F; font-weight: 600;">Sukses → handoff ke pill.</span> Popup menutup, desktop terbuka, pill mulai <span class="mono">00:00</span>. Toast satu kali menunjuk lokasi timer, hilang 4 dtk.</div></div>
+    </div>
+  </div>
+
+  <div style="margin-top: 52px; font-size: 12px; color: #9AA1AC; display: flex; gap: 18px;">
+    <span>WPF: Border, StackPanel, TextBlock · Segoe UI + Consolas. Sesi SSH/AnyDesk tanpa popup — identitas dari kredensial remote.</span>
+    <span style="margin-left: auto;">LogiX v3 · Client</span>
+  </div>
+</div>
+
+</x-dc>
+</body>
+</html>

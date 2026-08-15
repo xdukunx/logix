@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: system-ui, "Segoe UI", sans-serif; background: #EDEFF2; color: #14181F; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+  a { color: #2563EB; } a:hover { color: #1D4ED8; }
+</style>
+</helmet>
+
+<div style="max-width: 1420px; min-width: 1192px; margin: 0 auto; padding: 48px 56px 88px;">
+
+  <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 40px;">
+    <div class="mono" style="width: 26px; height: 26px; border-radius: 8px; background: #2563EB; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 12px;">&gt;_</div>
+    <span style="font-size: 13px; font-weight: 700; letter-spacing: 0.18em; color: #14181F;">LOGIX</span>
+    <span style="margin-left: auto; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #6A7382;">D-01 · Style Tile v3 · Clean Calibration</span>
+  </div>
+  <h1 style="font-size: 28px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 10px;">Quiet Instrument</h1>
+  <p style="font-size: 14px; color: #6A7382; margin: 0 0 52px; max-width: 680px; line-height: 1.6;">Hirarki dari tipografi dan whitespace. Warna hanya untuk status — dot 8px atau edge 3px, tidak pernah fill. Card putih radius 16 dengan shadow sangat halus. Tombol dan chip berbentuk pill. Nav aktif = dark pill.</p>
+
+  <!-- ============ 1 · COLOR ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">01 — Warna</div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+    <div style="background: #F4F5F7; border: 1px solid #E6E9EF; border-radius: 16px; padding: 24px;">
+      <div style="font-size: 12px; font-weight: 600; color: #6A7382; margin-bottom: 16px;">Dashboard · light (default)</div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+        <div><div style="height: 48px; border-radius: 10px; background: #F4F5F7; border: 1px solid #E6E9EF;"></div><div class="mono" style="font-size: 11px; color: #6A7382; margin-top: 7px;">bg #F4F5F7</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #FFFFFF; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04);"></div><div class="mono" style="font-size: 11px; color: #6A7382; margin-top: 7px;">card #FFFFFF</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #2563EB;"></div><div class="mono" style="font-size: 11px; color: #6A7382; margin-top: 7px;">accent #2563EB</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #14181F;"></div><div class="mono" style="font-size: 11px; color: #6A7382; margin-top: 7px;">text #14181F</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #6A7382;"></div><div class="mono" style="font-size: 11px; color: #6A7382; margin-top: 7px;">muted #6A7382</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; border: 1px solid #E6E9EF;"><span style="width: 56%; border-top: 1px solid #E6E9EF;"></span></div><div class="mono" style="font-size: 11px; color: #6A7382; margin-top: 7px;">border #E6E9EF</div></div>
+      </div>
+      <div style="font-size: 12.5px; color: #6A7382; margin-top: 16px; line-height: 1.55;">Accent hanya untuk link, fokus, dan primary button. Whitespace &gt; garis pemisah.</div>
+    </div>
+    <div style="background: #0B0F16; border-radius: 16px; padding: 24px;">
+      <div style="font-size: 12px; font-weight: 600; color: #8A94A6; margin-bottom: 16px;">Client widget · dark (WPF)</div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+        <div><div style="height: 48px; border-radius: 10px; background: #0B1017; border: 1px solid #223451;"></div><div class="mono" style="font-size: 11px; color: #8A94A6; margin-top: 7px;">surface #0B1017</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #0E1626; border: 1px solid #223451;"></div><div class="mono" style="font-size: 11px; color: #8A94A6; margin-top: 7px;">elevated #0E1626</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #0B1017; display: flex; align-items: center; justify-content: center; border: 1px solid #223451;"><span style="width: 56%; border-top: 1px solid #223451;"></span></div><div class="mono" style="font-size: 11px; color: #8A94A6; margin-top: 7px;">hairline #223451</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #EEF3FB;"></div><div class="mono" style="font-size: 11px; color: #8A94A6; margin-top: 7px;">text #EEF3FB</div></div>
+        <div><div style="height: 48px; border-radius: 10px; background: #93A1B8;"></div><div class="mono" style="font-size: 11px; color: #8A94A6; margin-top: 7px;">muted #93A1B8</div></div>
+        <div><div style="height: 48px; border-radius: 999px; background: #0E1626; border: 1px solid #223451; display: flex; align-items: center; justify-content: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #22C55E;"></span><span class="mono" style="font-size: 12px; color: #EEF3FB;">02:14</span></div><div class="mono" style="font-size: 11px; color: #8A94A6; margin-top: 7px;">pill radius 999</div></div>
+      </div>
+      <div style="font-size: 12.5px; color: #8A94A6; margin-top: 16px; line-height: 1.55;">Segoe UI + Consolas saja. Referensi: iOS Live Activity — satu info hero per state.</div>
+    </div>
+  </div>
+
+  <!-- status -->
+  <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 24px; margin-bottom: 56px;">
+    <div style="display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px;">
+      <span style="font-size: 14px; font-weight: 600;">Status</span>
+      <span style="font-size: 12.5px; color: #6A7382;">dot 8px / edge 3px saja — tidak pernah fill atau tinted background</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">
+      <div style="border: 1px solid #E6E9EF; border-left: 3px solid #16A34A; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A;"></span><span style="font-size: 13px; font-weight: 600;">Aktif</span><span class="mono" style="margin-left: auto; font-size: 11px; color: #6A7382;">#16A34A</span></div>
+      <div style="border: 1px solid #E6E9EF; border-left: 3px solid #D97706; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #D97706;"></span><span style="font-size: 13px; font-weight: 600;">Terkunci</span><span class="mono" style="margin-left: auto; font-size: 11px; color: #6A7382;">#D97706</span></div>
+      <div style="border: 1px solid #E6E9EF; border-left: 3px solid #64748B; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #64748B;"></span><span style="font-size: 13px; font-weight: 600;">Idle</span><span class="mono" style="margin-left: auto; font-size: 11px; color: #6A7382;">#64748B</span></div>
+      <div style="border: 1px solid #E6E9EF; border-left: 3px solid #9CA3AF; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #9CA3AF;"></span><span style="font-size: 13px; font-weight: 600; color: #6A7382;">Offline</span><span class="mono" style="margin-left: auto; font-size: 11px; color: #6A7382;">#9CA3AF</span></div>
+      <div style="border: 1px solid #E6E9EF; border-left: 3px solid #DC2626; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 99px; background: #DC2626;"></span><span style="font-size: 13px; font-weight: 600;">Alert</span><span class="mono" style="margin-left: auto; font-size: 11px; color: #6A7382;">#DC2626</span></div>
+    </div>
+  </div>
+
+  <!-- ============ 2 · TYPE ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">02 — Tipografi · dua suara</div>
+  <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; margin-bottom: 56px;">
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 28px 32px;">
+      <div style="display: grid; grid-template-columns: 128px 1fr; row-gap: 24px; align-items: baseline;">
+        <div class="mono" style="font-size: 11px; color: #6A7382;">Display 28/650</div><div style="font-size: 28px; font-weight: 650; letter-spacing: -0.01em;">Monitoring stasiun</div>
+        <div class="mono" style="font-size: 11px; color: #6A7382;">H2 20/600</div><div style="font-size: 20px; font-weight: 600;">Log sesi bulan ini</div>
+        <div class="mono" style="font-size: 11px; color: #6A7382;">Body 14.5/1.6</div><div style="font-size: 14.5px; line-height: 1.6; max-width: 460px;">Sesi berakhir otomatis setelah 2 jam tanpa aktivitas. Pengguna selalu diberi tahu 5 menit sebelumnya.</div>
+        <div class="mono" style="font-size: 11px; color: #6A7382;">Caption 12</div><div style="font-size: 12px; color: #6A7382;">Diperbarui 8 dtk lalu · otomatis</div>
+      </div>
+    </div>
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 28px 32px;">
+      <div style="font-size: 12.5px; color: #6A7382; margin-bottom: 20px; line-height: 1.55;">Mono tabular untuk <span style="color: #14181F; font-weight: 600;">waktu · ID · durasi</span> — angka sejajar di kolom mana pun.</div>
+      <div class="mono" style="font-size: 24px; margin-bottom: 12px;">02:14:36</div>
+      <div class="mono" style="font-size: 14px; margin-bottom: 8px;">WS-07 · GPU-A100</div>
+      <div class="mono" style="font-size: 14px; margin-bottom: 20px;">2j 14m &nbsp;·&nbsp; 148 j &nbsp;·&nbsp; 96 sesi</div>
+      <div style="font-size: 12px; color: #6A7382; line-height: 1.55;">system-ui di dashboard · Consolas di client. Maks 2 weight per card.</div>
+    </div>
+  </div>
+
+  <!-- ============ 3 · KIT ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">03 — Kit komponen</div>
+  <div style="display: grid; grid-template-columns: 300px 1fr 280px; gap: 16px; margin-bottom: 56px; align-items: start;">
+
+    <div style="display: grid; gap: 16px;">
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Card stasiun — 1 dot · 1 baris · 1 menu</div>
+        <div style="border: 1px solid #E6E9EF; border-radius: 16px; padding: 16px 18px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A; flex-shrink: 0;"></span>
+            <span class="mono" style="font-size: 14px; font-weight: 600;">WS-07 · GPU-A100</span>
+            <span style="margin-left: auto; color: #6A7382; font-size: 16px; letter-spacing: 2px; line-height: 1;">⋯</span>
+          </div>
+          <div style="font-size: 13px; color: #6A7382; margin-top: 8px; padding-left: 18px;">dhana · SSH · <span class="mono">2j 14m</span></div>
+        </div>
+      </div>
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Nav — aktif = dark pill</div>
+        <div style="display: grid; gap: 4px; max-width: 180px;">
+          <div style="font-size: 13.5px; font-weight: 600; color: #fff; padding: 9px 14px; border-radius: 10px; background: #14181F;">Monitoring</div>
+          <div style="font-size: 13.5px; color: #6A7382; padding: 9px 14px;">Riwayat</div>
+          <div style="font-size: 13.5px; color: #6A7382; padding: 9px 14px;">Perangkat</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; gap: 16px;">
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Tabel log — hairline antar baris, durasi mono rata kanan</div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 80px; padding: 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #6A7382;"><span>Waktu</span><span>Perangkat</span><span>Pengguna</span><span style="text-align: right;">Durasi</span></div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 80px; padding: 12px 4px; border-top: 1px solid #E6E9EF; font-size: 13.5px; align-items: center;"><span class="mono" style="font-size: 12.5px;">09:41</span><span class="mono" style="font-size: 12.5px;">WS-07</span><span>dhana</span><span class="mono" style="font-size: 12.5px; text-align: right;">2j 14m</span></div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 80px; padding: 12px 4px; border-top: 1px solid #E6E9EF; font-size: 13.5px; align-items: center;"><span class="mono" style="font-size: 12.5px;">08:15</span><span class="mono" style="font-size: 12.5px;">WS-03</span><span>rizka</span><span class="mono" style="font-size: 12.5px; text-align: right;">45m</span></div>
+        <div style="display: grid; grid-template-columns: 96px 1fr 1fr 80px; padding: 12px 4px; border-top: 1px solid #E6E9EF; font-size: 13.5px; align-items: center;"><span class="mono" style="font-size: 12.5px;">07:58</span><span class="mono" style="font-size: 12.5px;">WS-11</span><span>agus</span><span class="mono" style="font-size: 12.5px; text-align: right;">1j 03m</span></div>
+      </div>
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Tombol &amp; chip — pill (radius 999)</div>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <span style="background: #2563EB; color: #fff; font-size: 13.5px; font-weight: 600; padding: 9px 20px; border-radius: 999px;">Kirim pesan</span>
+          <span style="background: #fff; font-size: 13.5px; font-weight: 600; padding: 8px 20px; border-radius: 999px; border: 1px solid #E6E9EF;">Batal</span>
+          <span style="color: #6A7382; font-size: 13.5px; font-weight: 600; padding: 9px 8px;">Lihat semua</span>
+          <span style="display: inline-flex; align-items: center; gap: 8px; border: 1px solid #E6E9EF; border-radius: 999px; padding: 7px 16px; font-size: 13px;">Bulan ini <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="#6A7382" stroke-width="1.5" stroke-linecap="round"></path></svg></span>
+        </div>
+      </div>
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Toast — hairline + edge status</div>
+        <div style="border: 1px solid #E6E9EF; border-left: 3px solid #16A34A; border-radius: 12px; padding: 11px 16px; display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 13.5px;">Pesan terkirim ke WS-07</span>
+          <span style="margin-left: auto; font-size: 12px; color: #6A7382;">Tutup</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; gap: 16px;">
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Menu ⋯</div>
+        <div style="border: 1px solid #E6E9EF; border-radius: 12px; width: 168px; padding: 6px; box-shadow: 0 12px 32px rgba(16,24,40,.10);">
+          <div style="font-size: 13.5px; padding: 8px 12px; border-radius: 8px; background: #F4F5F7;">Pesan</div>
+          <div style="font-size: 13.5px; padding: 8px 12px;">Kunci</div>
+          <div style="font-size: 13.5px; padding: 8px 12px;">Cuplikan layar</div>
+          <div style="border-top: 1px solid #E6E9EF; margin: 4px 8px;"></div>
+          <div style="font-size: 13.5px; color: #DC2626; padding: 8px 12px;">Daya</div>
+        </div>
+      </div>
+      <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+        <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Modal konfirmasi</div>
+        <div style="border: 1px solid #E6E9EF; border-radius: 16px; padding: 20px; box-shadow: 0 16px 48px rgba(16,24,40,.12);">
+          <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">Kunci WS-07?</div>
+          <div style="font-size: 13px; line-height: 1.55; color: #6A7382; margin-bottom: 16px;">Sesi dhana akan dijeda. Layar terkunci sampai admin membuka kembali.</div>
+          <div style="display: flex; gap: 8px; justify-content: flex-end;">
+            <span style="font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 999px; border: 1px solid #E6E9EF;">Batal</span>
+            <span style="background: #D97706; color: #fff; font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 999px;">Kunci</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4 · BEFORE/AFTER ============ -->
+  <div style="font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #6A7382; margin-bottom: 16px;">04 — Sebelum / sesudah</div>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+      <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Sebelum — badge tinted, meter, glow, card dalam card</div>
+      <div style="border: 1px solid #E6E9EF; border-radius: 12px; padding: 16px; opacity: .78;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap;">
+          <span style="width: 9px; height: 9px; border-radius: 99px; background: #16A34A; box-shadow: 0 0 0 4px rgba(22,163,74,.18);"></span>
+          <span style="font-size: 14px; font-weight: 800;">WS-07</span>
+          <span style="font-size: 11px; font-weight: 700; background: #dcfce7; color: #15803d; padding: 3px 9px; border-radius: 999px;">AKTIF</span>
+          <span style="font-size: 11px; font-weight: 700; background: #dbeafe; color: #1d4ed8; padding: 3px 9px; border-radius: 999px;">SSH</span>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 700; color: #16a34a;">▲ 12%</span>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;">
+          <div style="font-size: 12px; color: #64748b;">Pengguna</div>
+          <div style="font-size: 14px; font-weight: 700;">dhana · Komputasi DFT</div>
+        </div>
+        <div style="height: 8px; border-radius: 99px; background: #eef2f6; overflow: hidden;"><div style="width: 62%; height: 100%; background: #16a34a;"></div></div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 6px;">2j 14m dari kuota 4j</div>
+      </div>
+    </div>
+    <div style="background: #fff; border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.04); padding: 20px;">
+      <div style="font-size: 12px; color: #6A7382; margin-bottom: 12px;">Sesudah — dot, satu baris, menu. Selesai.</div>
+      <div style="border: 1px solid #E6E9EF; border-radius: 16px; padding: 16px 18px; height: calc(100% - 30px); display: flex; flex-direction: column; justify-content: center;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="width: 8px; height: 8px; border-radius: 99px; background: #16A34A; flex-shrink: 0;"></span>
+          <span class="mono" style="font-size: 14px; font-weight: 600;">WS-07 · GPU-A100</span>
+          <span style="margin-left: auto; color: #6A7382; font-size: 16px; letter-spacing: 2px; line-height: 1;">⋯</span>
+        </div>
+        <div style="font-size: 13px; color: #6A7382; margin-top: 8px; padding-left: 18px;">dhana · SSH · <span class="mono">2j 14m</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: 52px; font-size: 12px; color: #9AA1AC; display: flex; gap: 18px;">
+    <span>Dilarang: gradien dekoratif · glow/pulse statis · badge tinted · trend arrows · card dalam card · emoji · &gt;2 weight per card</span>
+    <span style="margin-left: auto;">LogiX v3 · D-01</span>
+  </div>
+</div>
+
+</x-dc>
+</body>
+</html>

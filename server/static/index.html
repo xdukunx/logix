@@ -8,12 +8,6 @@
     <!-- Minimal inline favicon -- no binary asset needed; server also
          answers /favicon.ico with a 204 for browsers that request it anyway. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%232563eb'/%3E%3Ctext x='50' y='70' font-size='58' font-family='Arial, sans-serif' fill='white' text-anchor='middle'%3EL%3C/text%3E%3C/svg%3E">
-    <!-- Google Fonts: Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- FontAwesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="light-theme">
@@ -21,7 +15,6 @@
     <div id="login-overlay" class="login-overlay">
         <div class="login-card">
             <div class="login-brand">
-                <i class="fa-solid fa-shield-halved"></i>
                 <h2>Logix Admin</h2>
                 <p>Masuk dengan email &amp; password admin.</p>
             </div>
@@ -33,7 +26,7 @@
                 <div id="login-error" style="display: none; color: #dc2626; font-size: 13px;"></div>
                 <button type="submit" id="login-submit" class="btn-action btn-primary btn-block"
                     style="justify-content: center; font-size: 14px; padding: 12px;">
-                    <i class="fa-solid fa-right-to-bracket"></i> Masuk
+                    Masuk
                 </button>
             </form>
         </div>
@@ -43,21 +36,20 @@
     <div class="admin-shell hidden" id="app-wrapper">
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <i class="fa-solid fa-server pulse-animation"></i>
                 <span class="brand-name">Logix Admin</span>
             </div>
             <nav class="sidebar-nav">
                 <button class="sidebar-nav-item active" data-tab="monitoring" id="nav-monitoring">
-                    <i class="fa-solid fa-display"></i><span>Monitoring</span>
+                    <span>Monitoring</span>
                 </button>
                 <button class="sidebar-nav-item" data-tab="analytics" id="nav-analytics">
-                    <i class="fa-solid fa-chart-line"></i><span>Analytics</span>
+                    <span>Riwayat</span>
                 </button>
                 <button class="sidebar-nav-item" data-tab="devices" id="nav-devices">
-                    <i class="fa-solid fa-network-wired"></i><span>Devices</span>
+                    <span>Perangkat</span>
                 </button>
                 <button class="sidebar-nav-item" data-tab="settings" id="nav-settings">
-                    <i class="fa-solid fa-sliders"></i><span>Settings</span>
+                    <span>Pengaturan</span>
                 </button>
             </nav>
             <div class="sidebar-footer">
@@ -65,7 +57,7 @@
                     <div class="status-indicator checking" id="server-status-dot"></div>
                     <span id="server-status-text">Memeriksa Koneksi...</span>
                 </div>
-                <button id="btn-logout" class="btn-action btn-sm btn-logout"><i class="fa-solid fa-right-from-bracket"></i> Keluar</button>
+                <button id="btn-logout" class="btn-action btn-sm btn-logout">Keluar</button>
             </div>
         </aside>
 
@@ -75,22 +67,20 @@
                 <div class="header-actions">
                     <div class="alerts-bell-wrapper">
                         <button id="btn-alerts-bell" class="btn-action btn-icon-bell" title="Peringatan">
-                            <i class="fa-solid fa-bell"></i>
                             <span class="alerts-badge hidden" id="alerts-badge">0</span>
                         </button>
                         <div class="alerts-panel hidden" id="alerts-panel">
                             <div class="alerts-panel-header">
-                                <h3><i class="fa-solid fa-bell"></i> Peringatan Sistem</h3>
+                                <h3>Peringatan Sistem</h3>
                             </div>
                             <div class="alerts-panel-body" id="alerts-panel-body">
                                 <div class="loading-placeholder">
-                                    <i class="fa-solid fa-circle-notch fa-spin"></i>
                                     <p>Memuat peringatan...</p>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <button id="btn-open-report-modal" class="btn-action btn-primary"><i class="fa-solid fa-download"></i> Download Report</button>
+                    <button id="btn-open-report-modal" class="btn-action btn-primary">Download Report</button>
                 </div>
             </header>
 
@@ -98,7 +88,7 @@
             <section class="tab-panel" id="tab-monitoring">
                 <div class="stats-row">
                     <div class="stat-card" id="stat-active-pcs">
-                        <div class="stat-icon"><i class="fa-solid fa-desktop"></i></div>
+                        <div class="stat-icon"></div>
                         <div class="stat-data">
                             <h3>Active Devices</h3>
                             <p class="stat-value" id="val-active-pcs">0</p>
@@ -109,23 +99,22 @@
 
                 <section class="grid-section message-card" id="message-broadcast-card">
                     <div class="section-header">
-                        <h2><i class="fa-solid fa-triangle-exclamation"></i> Emergency Alert</h2>
+                        <h2>Emergency Alert</h2>
                         <span class="badge" id="pc-count-badge">0 Aktif</span>
                     </div>
                     <textarea id="message-textarea" placeholder="Write an emergency alert for all active workstations..."></textarea>
                     <div class="message-card-footer">
                         <span class="message-helper" id="message-helper-text">Sent to every active device — no individual selection needed. For a single device, right-click its card instead.</span>
-                        <button id="btn-send-message" class="btn-action btn-danger"><i class="fa-solid fa-triangle-exclamation"></i> Send Emergency Alert to All</button>
+                        <button id="btn-send-message" class="btn-action btn-danger">Send Emergency Alert to All</button>
                     </div>
                 </section>
 
                 <section class="grid-section" id="workstations-monitor">
                     <div class="section-header">
-                        <h2><i class="fa-solid fa-display"></i> Status Workstation</h2>
+                        <h2>Status Workstation</h2>
                     </div>
                     <div class="workstations-grid" id="pcs-grid">
                         <div class="loading-placeholder">
-                            <i class="fa-solid fa-circle-notch fa-spin"></i>
                             <p>Memuat status PC...</p>
                         </div>
                     </div>
@@ -140,49 +129,17 @@
 
             <!-- ===================== Analytics ===================== -->
             <section class="tab-panel" id="tab-analytics" hidden>
-                <div class="stats-row">
-                    <div class="stat-card">
-                        <div class="stat-icon accent"><i class="fa-solid fa-list-check"></i></div>
-                        <div class="stat-data">
-                            <h3>Total Catatan Sesi</h3>
-                            <p class="stat-value" id="val-total-logs">0</p>
-                        </div>
-                    </div>
+                <div class="riwayat-summary">
+                    <span class="mono" id="val-total-hours">0 j</span> total &middot;
+                    <span class="mono" id="val-total-logs">0</span> sesi &middot;
+                    <span class="mono" id="val-total-users">0</span> pengguna <span class="riwayat-scope">&middot; semua waktu</span>
                 </div>
-
-                <section class="grid-section" id="analytics-container">
-                    <div class="section-header">
-                        <h2><i class="fa-solid fa-chart-line"></i> Analisis Penggunaan Stasiun Lab</h2>
-                    </div>
-                    <div class="analytics-grid">
-                        <div class="analytics-card">
-                            <h3>Top Workstation (Total Jam Kerja)</h3>
-                            <div id="chart-utilization" class="svg-chart-container">
-                                <p class="text-secondary">Tidak ada data untuk dirender</p>
-                            </div>
-                        </div>
-                        <div class="analytics-card">
-                            <h3>Distribusi Aktivitas per Jam</h3>
-                            <div id="chart-hourly" class="svg-chart-container">
-                                <p class="text-secondary">Tidak ada data untuk dirender</p>
-                            </div>
-                        </div>
-                        <div class="analytics-card">
-                            <h3>Tujuan Penggunaan</h3>
-                            <div id="chart-purposes" class="svg-chart-container">
-                                <p class="text-secondary">Tidak ada data untuk dirender</p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
                 <section class="grid-section" id="logs-container">
                     <div class="section-header logs-header">
-                        <h2><i class="fa-solid fa-history"></i> Catatan Riwayat Sesi</h2>
+                        <h2>Catatan Riwayat Sesi</h2>
                         <div class="search-box">
                             <input type="text" id="log-search-input" placeholder="Cari Nama / PC...">
-                            <i class="fa-solid fa-search"></i>
-                        </div>
+                            </div>
                     </div>
                     <div class="table-wrapper">
                         <table class="logs-table" id="table-logs">
@@ -206,15 +163,15 @@
                         </table>
                     </div>
                     <div class="table-pagination">
-                        <button id="btn-prev" class="btn-action" disabled><i class="fa-solid fa-chevron-left"></i></button>
+                        <button id="btn-prev" class="btn-action" disabled></button>
                         <span id="page-indicator">Halaman 1</span>
-                        <button id="btn-next" class="btn-action"><i class="fa-solid fa-chevron-right"></i></button>
+                        <button id="btn-next" class="btn-action"></button>
                     </div>
                 </section>
 
                 <section class="grid-section" id="audit-log-container">
                     <div class="section-header">
-                        <h2><i class="fa-solid fa-clipboard-list"></i> Audit Log Tindakan Admin</h2>
+                        <h2>Audit Log Tindakan Admin</h2>
                     </div>
                     <div class="table-wrapper">
                         <table class="logs-table" id="table-audit-log">
@@ -243,35 +200,35 @@
             <section class="tab-panel" id="tab-devices" hidden>
                 <div class="stats-row">
                     <div class="stat-card">
-                        <div class="stat-icon"><i class="fa-solid fa-server"></i></div>
+                        <div class="stat-icon"></div>
                         <div class="stat-data">
                             <h3>Total Devices</h3>
                             <p class="stat-value" id="val-devices-total">0</p>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: rgba(16,185,129,0.12); color: var(--success-color);"><i class="fa-solid fa-circle-check"></i></div>
+                        <div class="stat-icon" style="background: rgba(16,185,129,0.12); color: var(--success-color);"></div>
                         <div class="stat-data">
                             <h3>Online</h3>
                             <p class="stat-value" id="val-devices-online">0</p>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: rgba(245,158,11,0.12); color: var(--warning-color);"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                        <div class="stat-icon" style="background: rgba(245,158,11,0.12); color: var(--warning-color);"></div>
                         <div class="stat-data">
                             <h3>Stale</h3>
                             <p class="stat-value" id="val-devices-stale">0</p>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-icon" style="background: rgba(71,85,105,0.2); color: var(--muted-color);"><i class="fa-solid fa-plug-circle-xmark"></i></div>
+                        <div class="stat-icon" style="background: rgba(71,85,105,0.2); color: var(--muted-color);"></div>
                         <div class="stat-data">
                             <h3>Offline</h3>
                             <p class="stat-value" id="val-devices-offline">0</p>
                         </div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-icon accent"><i class="fa-solid fa-hourglass-half"></i></div>
+                        <div class="stat-icon accent"></div>
                         <div class="stat-data">
                             <h3>Pending Commands</h3>
                             <p class="stat-value" id="val-devices-backlog">0</p>
@@ -281,7 +238,7 @@
 
                 <section class="grid-section" id="devices-registry-container">
                     <div class="section-header">
-                        <h2><i class="fa-solid fa-network-wired"></i> Device Registry</h2>
+                        <h2>Device Registry</h2>
                     </div>
                     <div class="table-wrapper" id="devices-table-wrapper">
                         <table class="logs-table" id="table-devices">
@@ -308,14 +265,14 @@
             <!-- ===================== Settings ===================== -->
             <section class="tab-panel" id="tab-settings" hidden>
                 <div class="section-header">
-                    <h2><i class="fa-solid fa-sliders"></i> Configuration Center</h2>
-                    <button id="btn-save-settings" class="btn-action btn-primary"><i class="fa-solid fa-save"></i> Simpan Semua</button>
+                    <h2>Configuration Center</h2>
+                    <button id="btn-save-settings" class="btn-action btn-primary">Simpan Semua</button>
                 </div>
 
                 <div class="settings-grid">
                     <!-- Branding -->
                     <section class="grid-section">
-                        <div class="section-header"><h2><i class="fa-solid fa-palette"></i> Branding</h2></div>
+                        <div class="section-header"><h2>Branding</h2></div>
                         <div class="settings-card-body">
                             <div class="form-row">
                                 <div class="form-group">
@@ -353,7 +310,7 @@
 
                     <!-- Popup Builder -->
                     <section class="grid-section">
-                        <div class="section-header"><h2><i class="fa-solid fa-window-restore"></i> Popup Builder</h2></div>
+                        <div class="section-header"><h2>Popup Builder</h2></div>
                         <div class="settings-card-body">
                             <div class="form-group">
                                 <label for="cfg-access-types">Tipe Akses (pisahkan koma)</label>
@@ -362,7 +319,7 @@
                             <div class="form-group">
                                 <label>Tujuan Akses (Purpose Options)</label>
                                 <div class="editable-list" id="cfg-purposes-list"></div>
-                                <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-purpose"><i class="fa-solid fa-plus"></i> Tambah Tujuan</button>
+                                <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-purpose">Tambah Tujuan</button>
                             </div>
                             <div class="popup-preview" id="popup-preview">
                                 <div class="popup-preview-title" id="preview-title">Report Logbook</div>
@@ -376,12 +333,12 @@
 
                     <!-- Device Naming -->
                     <section class="grid-section">
-                        <div class="section-header"><h2><i class="fa-solid fa-tag"></i> Device Naming / Device Types</h2></div>
+                        <div class="section-header"><h2>Device Naming / Device Types</h2></div>
                         <div class="settings-card-body">
                             <div class="form-group">
                                 <label>Device Categories</label>
                                 <div class="editable-list" id="cfg-device-types-list"></div>
-                                <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-device-type"><i class="fa-solid fa-plus"></i> Tambah Kategori</button>
+                                <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-device-type">Tambah Kategori</button>
                             </div>
                             <div class="form-group">
                                 <label for="cfg-naming-pattern">Naming Pattern</label>
@@ -393,7 +350,7 @@
 
                     <!-- Report Settings -->
                     <section class="grid-section">
-                        <div class="section-header"><h2><i class="fa-solid fa-file-excel"></i> Report Settings</h2></div>
+                        <div class="section-header"><h2>Report Settings</h2></div>
                         <div class="settings-card-body">
                             <div class="form-group">
                                 <label for="cfg-report-default-scope">Default Report Scope</label>
@@ -413,7 +370,7 @@
 
                     <!-- Privacy / Notice -->
                     <section class="grid-section">
-                        <div class="section-header"><h2><i class="fa-solid fa-shield-halved"></i> Privacy / Notice Settings</h2></div>
+                        <div class="section-header"><h2>Privacy / Notice Settings</h2></div>
                         <div class="settings-card-body">
                             <div class="form-group">
                                 <label for="cfg-privacy-notice">Notice Text</label>
@@ -423,12 +380,12 @@
                                 <div class="privacy-column collected">
                                     <h4>Collected</h4>
                                     <div class="editable-list" id="cfg-privacy-collected-list"></div>
-                                    <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-collected"><i class="fa-solid fa-plus"></i></button>
+                                    <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-collected"></button>
                                 </div>
                                 <div class="privacy-column not-collected">
                                     <h4>Not Collected</h4>
                                     <div class="editable-list" id="cfg-privacy-not-collected-list"></div>
-                                    <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-not-collected"><i class="fa-solid fa-plus"></i></button>
+                                    <button type="button" class="btn-action btn-sm btn-add-item" id="btn-add-not-collected"></button>
                                 </div>
                             </div>
                         </div>
@@ -446,7 +403,7 @@
     <div id="report-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h2><i class="fa-solid fa-file-excel"></i> Download Report</h2>
+                <h2>Download Report</h2>
                 <span class="close-modal" id="close-report-modal">&times;</span>
             </div>
             <div class="modal-body">
@@ -476,7 +433,7 @@
                 </div>
                 <p class="form-error hidden" id="report-modal-error"></p>
                 <button id="btn-report-download-confirm" class="btn-action btn-primary btn-block" style="margin-top: 20px; width: 100%; justify-content: center;">
-                    <i class="fa-solid fa-download"></i> Download
+                    Download
                 </button>
             </div>
         </div>
@@ -486,12 +443,11 @@
     <div id="device-detail-modal" class="modal hidden">
         <div class="modal-content modal-lg">
             <div class="modal-header">
-                <h2><i class="fa-solid fa-network-wired"></i> <span id="device-detail-title">Device Detail</span></h2>
+                <h2><span id="device-detail-title">Device Detail</span></h2>
                 <span class="close-modal" id="close-device-detail-modal">&times;</span>
             </div>
             <div class="modal-body" id="device-detail-body">
                 <div class="loading-placeholder">
-                    <i class="fa-solid fa-circle-notch fa-spin"></i>
                     <p>Memuat detail device...</p>
                 </div>
             </div>

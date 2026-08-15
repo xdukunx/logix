@@ -1,108 +1,372 @@
 /*
- * LogiX design tokens — the Logix-specific semantic layer.
+ * LogiX v3 "Clean Calibration" — canonical design tokens.
  *
- * These are ADDITIVE, not overrides: base surface/text/border/accent live on
- * Astryx's --color-* (configured in theme.ts). This file only adds what Astryx
- * has no token for — the five station statuses, the three access-type tints,
- * and the pulse/shimmer motion. Values are extracted from the Style Tile /
- * build brief §1 and use light-dark() so they switch with <Theme mode>.
+ * Source of truth: docs/design_handoff_logix_v3/README.md (Dashboard block) and
+ * `LogiX Style Tile v2.dc.html`. Every value here is pixel-final; do not
+ * approximate. Screens consume these vars — no hardcoded hex in components.
  *
- * Reference-only source of truth: docs/design/LogiX Style Tile.dc.html.
+ * Light is the default, dark is first-class. The dark ramp is applied by an
+ * attribute/media override rather than light-dark(): a custom property whose
+ * value is light-dark() is resolved on the FIRST style pass and does NOT
+ * re-resolve when `color-scheme` changes at runtime, so toggling the theme
+ * left the canvas on its original ramp while newly-mounted nodes picked up the
+ * other one. Overriding the property itself is plain cascade and always
+ * invalidates correctly.
+ *
+ * Guard rails encoded here: status color exists ONLY as an 8px dot or a 3px
+ * edge/ring — there are deliberately no tinted status backgrounds. Accent
+ * #2563EB is reserved for links, focus rings and primary buttons. No gradient,
+ * glow, pulse or shimmer tokens exist; hierarchy comes from size + spacing.
  */
 
 :root {
-  /* ---- Brand extras (accent variants Astryx doesn't expose) ---- */
+  color-scheme: light;
+
+  /* ---- Surfaces ---- */
+  --lx-bg: #f4f5f7;
+  --lx-card: #ffffff;
+  --lx-border: #e6e9ef;
+  /* Dashed border for offline / empty-slot cards. */
+  --lx-border-dashed: #d9dde3;
+  /* Hairline between table rows — lighter than --lx-border by design. */
+  --lx-hairline: #f0f2f5;
+  /* Recessed fill: menu item hover, callout backgrounds, selected table row. */
+  --lx-sunken: #f4f5f7;
+
+  /* ---- Text ---- */
+  --lx-text: #14181f;
+  --lx-muted: #6a7382;
+
+  /* ---- Accent — links, focus rings, primary buttons. Nothing else. ---- */
   --lx-accent: #2563eb;
-  --lx-accent-hover: light-dark(#1d4ed8, #1e40af);
-  --lx-accent-weak: light-dark(#dbeafe, #1e3a8a);
-  --lx-text-muted: light-dark(#64748b, #94a3b8);
+  --lx-accent-hover: #1d4ed8;
+  --lx-on-accent: #ffffff;
 
-  /* ---- Station status: base dot color / tint bg / label text ---- */
-  --lx-status-inuse: light-dark(#16a34a, #22c55e);
-  --lx-status-inuse-bg: light-dark(#dcfce7, rgba(34, 197, 94, 0.16));
-  --lx-status-inuse-fg: light-dark(#15803d, #4ade80);
+  /* ---- Nav / toggle active pill: dark in light mode, inverted in dark ---- */
+  --lx-pill-active-bg: #14181f;
+  --lx-pill-active-fg: #ffffff;
 
-  --lx-status-locked: light-dark(#d97706, #f59e0b);
-  --lx-status-locked-bg: light-dark(#fef3c7, rgba(245, 158, 11, 0.16));
-  --lx-status-locked-fg: light-dark(#b45309, #fbbf24);
-
-  --lx-status-idle: light-dark(#64748b, #94a3b8);
-  --lx-status-idle-bg: light-dark(#e2e8f0, rgba(148, 163, 184, 0.16));
-  --lx-status-idle-fg: light-dark(#475569, #cbd5e1);
-
-  --lx-status-offline: light-dark(#9ca3af, #6b7280);
-  --lx-status-offline-bg: light-dark(#f1f5f9, rgba(107, 114, 128, 0.16));
-  --lx-status-offline-fg: light-dark(#6b7280, #9ca3af);
-
-  --lx-status-alert: light-dark(#dc2626, #ef4444);
-  --lx-status-alert-bg: light-dark(#fee2e2, rgba(239, 68, 68, 0.16));
-  --lx-status-alert-fg: light-dark(#b91c1c, #f87171);
-
-  /* ---- Access type: icon-square bg / icon color / pill bg / pill text ---- */
-  --lx-access-physical-icon-bg: light-dark(#eff6ff, rgba(37, 99, 235, 0.18));
-  --lx-access-physical-icon: light-dark(#2563eb, #60a5fa);
-  --lx-access-physical-badge-bg: light-dark(#dbeafe, rgba(37, 99, 235, 0.24));
-  --lx-access-physical-badge-fg: light-dark(#1d4ed8, #93c5fd);
-
-  --lx-access-ssh-icon-bg: light-dark(#f1f5f9, #1e293b);
-  --lx-access-ssh-icon: light-dark(#334155, #cbd5e1);
-  --lx-access-ssh-badge-bg: light-dark(#e2e8f0, rgba(148, 163, 184, 0.18));
-  --lx-access-ssh-badge-fg: light-dark(#334155, #cbd5e1);
-
-  --lx-access-anydesk-icon-bg: light-dark(#faf5ff, rgba(124, 58, 237, 0.20));
-  --lx-access-anydesk-icon: light-dark(#7c3aed, #a78bfa);
-  --lx-access-anydesk-badge-bg: light-dark(#f3e8ff, rgba(124, 58, 237, 0.24));
-  --lx-access-anydesk-badge-fg: light-dark(#7c3aed, #c4b5fd);
-
-  /* ---- Motion helpers ---- */
-  --lx-pulse-ring: light-dark(rgba(22, 163, 74, 0.45), rgba(34, 197, 94, 0.5));
-  --lx-skeleton-base: light-dark(#eef2f6, #1e293b);
-  --lx-skeleton-mid: light-dark(#e2e8f0, #334155);
+  /* ---- Status — dot 8px or edge/ring 3px only. Never a filled background. ---- */
+  --lx-status-active: #16a34a;
+  --lx-status-locked: #d97706;
+  --lx-status-idle: #64748b;
+  --lx-status-offline: #9ca3af;
+  --lx-status-alert: #dc2626;
 }
 
-/* Pulsing "in use" dot — halo ring, honoring reduced-motion. */
-.lx-pulse-dot {
-  border-radius: 50%;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .lx-pulse-dot {
-    animation: lx-pulse 2s infinite;
-  }
-}
-@keyframes lx-pulse {
-  0% {
-    box-shadow: 0 0 0 0 var(--lx-pulse-ring);
-  }
-  70% {
-    box-shadow: 0 0 0 6px rgba(0, 0, 0, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+/* The dark ramp. Declared once and applied by both selectors below. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --lx-bg: #0b0f16;
+    --lx-card: #111722;
+    --lx-border: #1e2836;
+    --lx-border-dashed: #1e2836;
+    --lx-hairline: #1e2836;
+    --lx-sunken: #0b0f16;
+
+    --lx-text: #edf1f7;
+    --lx-muted: #8a94a6;
+
+    --lx-pill-active-bg: #edf1f7;
+    --lx-pill-active-fg: #0b0f16;
+
+    --lx-status-active: #22c55e;
+    --lx-status-locked: #f59e0b;
+    --lx-status-idle: #94a3b8;
+    --lx-status-offline: #6b7280;
+    --lx-status-alert: #ef4444;
   }
 }
 
-/* Shimmering skeleton block. Falls back to a flat fill under reduced-motion. */
-.lx-skeleton {
-  background: var(--lx-skeleton-base);
-  border-radius: var(--radius-inner, 6px);
+/* An explicit choice from the theme toggle wins over the OS preference. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --lx-bg: #0b0f16;
+  --lx-card: #111722;
+  --lx-border: #1e2836;
+  --lx-border-dashed: #1e2836;
+  --lx-hairline: #1e2836;
+  --lx-sunken: #0b0f16;
+
+  --lx-text: #edf1f7;
+  --lx-muted: #8a94a6;
+
+  --lx-pill-active-bg: #edf1f7;
+  --lx-pill-active-fg: #0b0f16;
+
+  --lx-status-active: #22c55e;
+  --lx-status-locked: #f59e0b;
+  --lx-status-idle: #94a3b8;
+  --lx-status-offline: #6b7280;
+  --lx-status-alert: #ef4444;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .lx-skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--lx-skeleton-base) 25%,
-      var(--lx-skeleton-mid) 37%,
-      var(--lx-skeleton-base) 63%
-    );
-    background-size: 400px 100%;
-    animation: lx-shimmer 1.4s infinite linear;
+
+:root {
+  /* ---- Radius ---- */
+  --lx-radius-card: 16px;
+  --lx-radius-control: 10px;
+  --lx-radius-menu: 12px;
+  --lx-radius-pill: 999px;
+
+  /* ---- Shadow — cards and modals only; nothing else is elevated ---- */
+  --lx-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.04);
+  --lx-shadow-menu: 0 12px 32px rgba(16, 24, 40, 0.12);
+  --lx-shadow-modal: 0 16px 48px rgba(16, 24, 40, 0.14);
+
+  /* ---- Type ---- */
+  --lx-font: system-ui, "Segoe UI", sans-serif;
+  --lx-font-mono: ui-monospace, "SF Mono", Consolas, monospace;
+
+  /*
+   * ---- Motion ----
+   * Tuned to feel native on macOS. What actually reads as "Apple" is not
+   * bounce -- system animations there are critically damped, with no visible
+   * overshoot. It is the SHAPE of the curve: a fast departure followed by a
+   * long, gentle settle, held slightly longer than most web easing.
+   *
+   * --lx-ease-out is that curve. It is the standard Apple-style decelerate
+   * used for anything arriving on screen. --lx-ease is a gentler symmetric
+   * curve for things merely changing colour.
+   *
+   * Still opacity/transform only, still no overshoot, still nothing that
+   * animates at rest -- the macOS influence is in the timing, not in adding
+   * decoration.
+   *   fast   presses, felt rather than seen
+   *   base   hovers and state changes
+   *   enter  surfaces arriving (menu, modal, sheet, toast)
+   */
+  --lx-motion-fast: 120ms;
+  --lx-motion: 200ms;
+  --lx-motion-enter: 260ms;
+  --lx-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --lx-ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/*
+ * reduce_motion: states snap. This is a hard client-wide kill, not a
+ * softening — README §"Interactions & Behavior summary".
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lx-motion-fast: 0ms;
+    --lx-motion: 0ms;
+    --lx-motion-enter: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
-@keyframes lx-shimmer {
-  0% {
-    background-position: -400px 0;
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* The canvas lives on the root element so it resolves against the same
+   color-scheme as every other token. */
+html {
+  background: var(--lx-bg);
+}
+
+body {
+  background: transparent;
+  color: var(--lx-text);
+  font-family: var(--lx-font);
+  font-size: 14.5px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Mono tabular — every time / ID / duration value in the product renders
+ * through this class. Tabular numerals keep columns aligned.
+ */
+.lx-mono {
+  font-family: var(--lx-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Accent is a link color here and in exactly two other places. */
+a {
+  color: var(--lx-accent);
+}
+a:hover {
+  color: var(--lx-accent-hover);
+}
+
+/*
+ * One focus treatment for the whole app: a 2px accent ring, only for keyboard
+ * users. Components never define their own.
+ */
+:focus-visible {
+  outline: 2px solid var(--lx-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * ---- Micro-interactions -------------------------------------------------
+ *
+ * House rules, so this layer can never drift back into decoration:
+ *   - transform and opacity only (both composite off the main thread; nothing
+ *     here can cause a layout pass mid-interaction)
+ *   - travel is 2-6px, never more; motion should register as a nudge
+ *   - no infinite loops, no motion on anything at rest. Every rule below is
+ *     tied to a user action or a surface arriving.
+ * The reduce-motion block above zeroes all three duration tokens AND forces
+ * every animation/transition to ~0, so this whole section snaps off.
+ */
+
+/* Surfaces arriving. Menus and toasts come from the direction they belong to;
+   modals settle in place rather than sliding, since they own the screen. */
+@keyframes lx-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
   }
-  100% {
-    background-position: 400px 0;
+}
+@keyframes lx-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
   }
+}
+@keyframes lx-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes lx-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes lx-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/*
+ * macOS menus unfold FROM the control that opened them, not from their own
+ * centre. Both popovers here hang off the right edge of their trigger, so the
+ * origin is the top-right corner -- that one detail is most of what makes a
+ * popover read as native rather than as a floating box that faded in.
+ */
+.lx-anim-menu {
+  animation: lx-menu-in var(--lx-motion) var(--lx-ease-out);
+  transform-origin: top right;
+}
+
+/*
+ * Vibrancy. A translucent, blurred surface over the content behind it is the
+ * single most recognisable macOS material. Only the two surfaces that float
+ * above the page get it -- cards and rows stay flat and opaque, per the guard
+ * rails. `saturate` is what stops the blur looking grey and dead.
+ *
+ * color-mix keeps this on the token: it is the card colour with alpha, so it
+ * still flips correctly between light and dark.
+ */
+/* Opaque fallback first, so a browser without backdrop-filter still gets a
+   solid readable surface rather than a transparent one. */
+.lx-material {
+  background: var(--lx-card);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .lx-material {
+    background: color-mix(in srgb, var(--lx-card) 72%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
+}
+.lx-anim-modal {
+  animation: lx-modal-in var(--lx-motion-enter) var(--lx-ease-out);
+}
+.lx-anim-backdrop {
+  animation: lx-backdrop-in var(--lx-motion) var(--lx-ease);
+}
+.lx-anim-toast {
+  animation: lx-toast-in var(--lx-motion-enter) var(--lx-ease-out);
+}
+.lx-anim-sheet {
+  animation: lx-sheet-in var(--lx-motion-enter) var(--lx-ease-out);
+}
+
+/*
+ * Interactive surfaces. macOS does not lift things on hover -- that is a
+ * Material idiom. What it does is swell them a hair and deepen the shadow
+ * (Finder icons, Music artwork), then press them slightly IN on click. The
+ * scale values are deliberately tiny: 0.8% is felt, not seen, and at that
+ * size text stays crisp through the transition.
+ */
+.lx-interactive {
+  transition:
+    transform var(--lx-motion) var(--lx-ease-out),
+    box-shadow var(--lx-motion) var(--lx-ease-out),
+    background-color var(--lx-motion) var(--lx-ease),
+    border-color var(--lx-motion) var(--lx-ease);
+}
+@media (hover: hover) {
+  .lx-interactive:hover {
+    transform: scale(1.008);
+    box-shadow: 0 2px 4px rgba(16, 24, 40, 0.05), 0 8px 24px rgba(16, 24, 40, 0.07);
+  }
+}
+.lx-interactive:active {
+  transform: scale(0.997);
+  transition-duration: var(--lx-motion-fast);
+}
+
+/*
+ * Buttons, menu items, nav pills. The press is the macOS one: a quick dim
+ * plus a barely-there squeeze, snapping in and easing back out. No movement
+ * on hover, so nothing shifts under a cursor that is still aiming.
+ */
+.lx-tap {
+  transition:
+    background-color var(--lx-motion) var(--lx-ease),
+    color var(--lx-motion) var(--lx-ease),
+    border-color var(--lx-motion) var(--lx-ease),
+    opacity var(--lx-motion) var(--lx-ease),
+    transform var(--lx-motion) var(--lx-ease-out);
+}
+.lx-tap:active:not(:disabled) {
+  opacity: 0.72;
+  transform: scale(0.97);
+  transition-duration: var(--lx-motion-fast);
+}
+
+/* Row and menu-item hover wash. Uses the recessed fill, never a status tint. */
+.lx-row-hover {
+  transition: background-color var(--lx-motion) var(--lx-ease);
+}
+@media (hover: hover) {
+  .lx-row-hover:hover {
+    background-color: var(--lx-sunken);
+  }
+}
+
+/*
+ * The status dot is the one thing allowed to draw the eye when data changes,
+ * and only on arrival -- a single 1.0 -> 1.0 scale pop, never a loop. The
+ * guard rail forbids a pulsing dot at rest; this fires once when a station
+ * first appears or changes state.
+ */
+@keyframes lx-dot-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+.lx-anim-dot {
+  animation: lx-dot-in var(--lx-motion) var(--lx-ease-out);
 }

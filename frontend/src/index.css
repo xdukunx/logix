@@ -1,3 +1,20 @@
+/* The app had no box-sizing rule at all, so every element inherited the CSS
+   default of content-box. That means a `width: 360px` input with 14px of
+   padding and a 1px border actually occupies 390px, while a button given the
+   same 360px occupies exactly 360 -- browsers' own UA stylesheet sets
+   border-box on <button> but not on <input>.
+
+   The visible result was inputs punching 30px past the buttons beneath them
+   and out through their card's right padding: the sign-in form had a left
+   margin and no right one. Every fixed width and every `width: 100%` beside a
+   padding value in this codebase was quietly wrong in the same way; this is
+   the one-line reset that makes the numbers in the design mean what they say. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body,
 #root {

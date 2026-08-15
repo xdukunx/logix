@@ -1,149 +1,155 @@
-// Wall / Kiosk mode (design: docs/design/LogiX Wall Mode.dc.html). A dark,
-// read-only, full-screen board for a wall display: live clock, lab occupancy,
-// and a grid of station tiles. Read-only by design — it polls /api/active and
-// carries NO controls (no capture, no power). Reachable at #wall.
-import { useEffect, useState } from "react";
+// Wall / TV mode. Design: docs/design_handoff_logix_v3/LogiX Responsive.dc.html
+// ("TV — mode wall") + README section 4.
+//
+// Dark, read-only, no nav and no menus at all -- just the lab name, a live
+// counter, a clock, and a dense station grid with 21px mono IDs meant to be
+// read from about four metres. User names can be hidden from
+// Settings > Privasi. Reachable at #wall.
+import { useCallback, useMemo, useState } from "react";
 
 import { getJson } from "../api";
-import Wordmark from "../components/Wordmark";
-import { resolveAccessType, ACCESS_TYPE, STATUS, type StationStatus } from "../tokens";
-import type { ActiveWorkstation } from "../types";
-import { usePolling } from "../util";
+import type { StationStatus } from "../tokens";
+import { ForceDark } from "../theme/ThemeMode";
+import type { ActiveWorkstation, Device, LogixConfig } from "../types";
+import { StatusDot } from "../ui/base";
+import { durationSince, formatClock, splitDeviceName, usePolling, useTicker } from "../util";
 
-const DAYS = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-const MONTHS = [
-  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
-];
-const pad = (n: number) => String(n).padStart(2, "0");
-
-const stationStatus = (pc: ActiveWorkstation): StationStatus =>
-  pc.status === "LOCKED" ? "locked" : "inuse";
+interface WallStation {
+  hostname: string;
+  id: string;
+  status: StationStatus;
+  line: string;
+}
 
 export default function WallMode() {
-  const [now, setNow] = useState(new Date());
-  const [pcs, setPcs] = useState<ActiveWorkstation[] | null>(null);
-  const [connected, setConnected] = useState(true);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [active, setActive] = useState<ActiveWorkstation[]>([]);
+  const [hideNames, setHideNames] = useState(false);
+  const [labName, setLabName] = useState("Lab Komputasi FTMM");
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") window.location.hash = "screens";
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener("keydown", onKey);
-    };
+  useTicker(1000); // clock + live durations
+
+  const refresh = useCallback(async () => {
+    try {
+      const [deviceList, activeList] = await Promise.all([
+        getJson<Device[]>("/api/devices", ""),
+        getJson<ActiveWorkstation[]>("/api/active", ""),
+      ]);
+      setDevices(deviceList);
+      setActive(activeList);
+    } catch {
+      // A wall display must not show an error card -- keep the last good board.
+    }
+    try {
+      const config = await getJson<LogixConfig>("/api/config", "");
+      setHideNames(Boolean((config.privacy as Record<string, unknown>)?.hide_names_on_wall));
+      if (config.branding?.subtitle) setLabName(String(config.branding.subtitle));
+    } catch {
+      /* keep defaults */
+    }
   }, []);
 
-  usePolling(async () => {
-    try {
-      setPcs(await getJson<ActiveWorkstation[]>("/api/active", "Gagal memuat"));
-      setConnected(true);
-    } catch {
-      setConnected(false);
-    }
-  }, 10000);
+  usePolling(refresh, 15000);
 
-  const list = pcs ?? [];
-  const inUse = list.filter((p) => p.status === "ACTIVE").length;
-  const total = list.length; // TODO(backend): enrolled total for true "/12"
-  const clock = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  const dateStr = `${DAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+  const stations = useMemo<WallStation[]>(() => {
+    const liveByHost = new Map(active.map((a) => [a.hostname, a]));
+    return devices
+      .map((d) => {
+        const live = liveByHost.get(d.hostname) ?? null;
+        const { id } = splitDeviceName(d.display_name || d.hostname);
+        if (!live) return { hostname: d.hostname, id, status: "offline" as const, line: "Offline" };
+        if (live.status === "LOCKED") {
+          return {
+            hostname: d.hostname,
+            id,
+            status: "locked" as const,
+            line: `Dikunci · ${formatClock(live.status_since ?? live.last_seen)}`,
+          };
+        }
+        if (!live.username) return { hostname: d.hostname, id, status: "idle" as const, line: "Bebas" };
+        const elapsed = live.session_started_at ? durationSince(live.session_started_at) : "";
+        // Privasi: names can be suppressed for a display facing the room.
+        const who = hideNames ? "Dipakai" : live.username;
+        return {
+          hostname: d.hostname,
+          id,
+          status: "active" as const,
+          line: elapsed ? `${who} · ${elapsed}` : who,
+        };
+      })
+      .sort((a, b) => a.id.localeCompare(b.id, "id", { numeric: true }));
+  }, [devices, active, hideNames]);
+
+  const inUse = stations.filter((s) => s.status === "active").length;
+  const now = new Date();
 
   return (
-    <div
-      style={{
-        // Force the dark kiosk palette regardless of the app theme.
-        colorScheme: "dark",
-        minHeight: "100vh",
-        background: "#0b1120",
-        color: "#e2e8f0",
-        padding: "32px 40px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 28,
-        fontFamily: "inherit",
-      }}
-    >
-      {/* Header: brand + clock */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24 }}>
-        <div>
-          <Wordmark size={30} tracking="0.2em" />
-          <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 8 }}>Lab Kimia Komputasi · FTMM</div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 46, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1, fontFamily: "ui-monospace, Consolas, monospace", color: "#f1f5f9" }}>
-            {clock}
-          </div>
-          <div style={{ fontSize: 14, color: "#94a3b8", marginTop: 6 }}>{dateStr}</div>
-        </div>
-      </div>
+    <ForceDark>
+      <div style={{ padding: "40px 48px", minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
+        <header style={{ display: "flex", alignItems: "baseline", gap: 20, marginBottom: 28, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 26, fontWeight: 650 }}>{labName}</span>
+          <span style={{ fontSize: 18, color: "var(--lx-muted)" }}>
+            <span className="lx-mono" style={{ color: "var(--lx-text)" }}>
+              {inUse}
+            </span>{" "}
+            / <span className="lx-mono">{stations.length}</span> stasiun dipakai
+          </span>
+          <span className="lx-mono" style={{ marginLeft: "auto", fontSize: 26 }}>
+            {formatClock(now.toISOString())}
+          </span>
+        </header>
 
-      {/* Occupancy */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
-        <span style={{ fontSize: 40, fontWeight: 800, letterSpacing: "-0.03em", color: "#f1f5f9" }}>
-          {inUse} <span style={{ color: "#64748b" }}>/ {total}</span>
-        </span>
-        <span style={{ fontSize: 18, color: "#94a3b8" }}>stasiun dipakai</span>
-      </div>
-
-      {/* Station grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16, flex: 1, alignContent: "start" }}>
-        {list.map((pc) => {
-          const status = stationStatus(pc);
-          const s = STATUS[status];
-          const at = resolveAccessType(null); // TODO(backend): session access_type
-          const accent = s.dot;
-          return (
-            <div
-              key={pc.hostname}
-              style={{
-                background: "#0f172a",
-                border: "1px solid #1e293b",
-                borderLeft: `3px solid ${accent}`,
-                borderRadius: 12,
-                padding: 18,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ width: 9, height: 9, borderRadius: "50%", background: accent }} />
-                <span style={{ fontSize: 17, fontWeight: 800, color: "#f1f5f9" }}>{pc.device_name || pc.hostname}</span>
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+            gridAutoRows: "minmax(96px, 1fr)",
+            gap: 16,
+          }}
+        >
+          {stations.map((s) => {
+            const isOffline = s.status === "offline";
+            return (
+              <div
+                key={s.hostname}
+                style={{
+                  background: isOffline ? "transparent" : "var(--lx-card)",
+                  border: isOffline
+                    ? "1px dashed var(--lx-border-dashed)"
+                    : "1px solid var(--lx-border)",
+                  borderRadius: "var(--lx-radius-card)",
+                  padding: "18px 20px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <StatusDot status={s.status} size={12} label={s.status} />
+                  <span
+                    className="lx-mono"
+                    style={{
+                      fontSize: 21,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      color: isOffline ? "var(--lx-status-offline)" : undefined,
+                    }}
+                  >
+                    {s.id}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 15,
+                    color: isOffline ? "var(--lx-status-offline)" : "var(--lx-muted)",
+                    marginTop: 8,
+                  }}
+                >
+                  {s.line}
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: "#94a3b8" }}>{pc.username || "—"}</div>
-              <div style={{ marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: s.fg }}>
-                  {pc.status === "ACTIVE" ? "Aktif" : "Terkunci"} · {ACCESS_TYPE[at].label}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-        {list.length === 0 && (
-          <div style={{ color: "#64748b", fontSize: 15 }}>Belum ada stasiun aktif.</div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, borderTop: "1px solid #1e293b", paddingTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#94a3b8" }}>
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: connected ? "#22c55e" : "#ef4444" }} />
-          {connected ? "Server Terhubung" : "Terputus dari Server"} · Diperbarui {clock}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontSize: 13, color: "#64748b" }}>Mode tampilan · hanya lihat, tanpa kontrol</span>
-          <button
-            onClick={() => (window.location.hash = "screens")}
-            style={{ background: "#1e293b", color: "#cbd5e1", border: "1px solid #334155", borderRadius: 6, padding: "7px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
-          >
-            Keluar (Esc)
-          </button>
+            );
+          })}
         </div>
       </div>
-    </div>
+    </ForceDark>
   );
 }

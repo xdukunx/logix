@@ -139,7 +139,7 @@ const hideContextMenu = () => {
 const menuItem = (label, icon, { disabled = false, danger = false, onClick = null, title = "" } = {}) => {
     const li = document.createElement("li");
     li.className = "context-menu-item" + (disabled ? " disabled" : "") + (danger ? " danger" : "");
-    li.innerHTML = `<i class="fa-solid ${icon}"></i> ${escapeHtml(label)}`;
+    li.innerHTML = `${escapeHtml(label)}`;
     if (title) li.title = title;
     if (!disabled && onClick) {
         li.addEventListener("click", () => {
@@ -160,7 +160,7 @@ const showContextMenu = (x, y, card) => {
         const link = document.createElement("a");
         link.href = `anydesk:${anydeskId}`;
         link.className = "context-menu-item";
-        link.innerHTML = `<i class="fa-solid fa-desktop"></i> Remote`;
+        link.innerHTML = `Remote`;
         link.addEventListener("click", hideContextMenu);
         contextMenu.appendChild(link);
     } else {
@@ -239,7 +239,6 @@ export const fetchActiveWorkstations = async () => {
         if (pcs.length === 0) {
             pcsGrid.innerHTML = `
                 <div class="empty-state">
-                    <i class="fa-solid fa-laptop-slash"></i>
                     <p class="empty-title">No Active Devices</p>
                     <p class="empty-helper">Active devices will appear here once a workstation starts a session.</p>
                 </div>
@@ -264,13 +263,13 @@ export const fetchActiveWorkstations = async () => {
                      data-anydesk-id="${escapeHtml(pc.anydesk_id) || ""}"
                      data-active="${isUserActive}">
                     <button class="ws-reply-badge hidden" data-hostname="${hostname}" title="Balasan pengguna belum dibaca">
-                        <i class="fa-solid fa-comment-dots"></i> <span class="ws-reply-count">0</span>
+                        <span class="ws-reply-count">0</span>
                     </button>
                     <div class="ws-status-light ${statusClass}"></div>
                     <div class="ws-host">${deviceName}</div>
                     ${showHostnameMeta ? `<div class="ws-meta">Hostname: ${hostname}</div>` : ""}
                     <div class="ws-meta">Status: ${statusLabel}</div>
-                    <div class="ws-meta"><i class="fa-regular fa-clock"></i> Aktif: ${timeStr}</div>
+                    <div class="ws-meta">Aktif: ${timeStr}</div>
                     ${pc.username ? `
                         <div class="ws-user-box">
                             <p>Pengguna:</p>
@@ -278,7 +277,7 @@ export const fetchActiveWorkstations = async () => {
                         </div>
                     ` : ""}
                     ${isUserActive ? `
-                        <div class="ws-meta ws-context-hint"><i class="fa-solid fa-computer-mouse"></i> Klik kanan untuk opsi (Remote, Lock, Screenshot, Message, Power)</div>
+                        <div class="ws-meta ws-context-hint">Klik kanan untuk opsi (Remote, Lock, Screenshot, Message, Power)</div>
                     ` : ""}
                 </div>
             `;
@@ -345,7 +344,7 @@ const showReplyPopover = (hostname, anchor) => {
     if (replies.length === 0) return;
     replyPopover.innerHTML = `
         <div class="reply-popover-head">
-            <span><i class="fa-solid fa-comments"></i> ${escapeHtml(replies[0].device_name || hostname)}</span>
+            <span>${escapeHtml(replies[0].device_name || hostname)}</span>
             <button class="reply-popover-close" aria-label="Tutup">&times;</button>
         </div>
         <div class="reply-popover-body">

@@ -13,6 +13,13 @@ $Global:StateDir = Join-Path $env:ProgramData 'MindLabLogbook'
 $Global:SessionFile = Join-Path $Global:StateDir 'session.json'
 $Global:ErrorLog = Join-Path $Global:StateDir 'logbook_error.log'
 $Global:PopupLock = Join-Path $Global:StateDir 'popup.lock'
+# Defined HERE rather than only in logbook_monitor.ps1, which set it for
+# itself: the monitor owns this flag's lifecycle, but every process that
+# dot-sources this file needs to be able to READ it -- Get-LogbookSessionState
+# reports PAUSED off it, and a $null path there would silently read as
+# "not locked" in every process except the monitor. The monitor's own
+# assignment is the same value and stays where it is.
+$Global:LockedFlagPath = Join-Path $Global:StateDir 'workstation_locked.flag'
 
 function Write-LogbookError {
     param([string]$Message)
@@ -65,9 +72,18 @@ function Get-LogbookSessionType {
 }
 
 function Get-ProcessByCommandPattern {
-    param([string]$Pattern)
+    param([string]$Pattern, [string]$ImageName = 'powershell.exe')
     try {
-        return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        # -Filter matters here, and it is on the START critical path.
+        # Unfiltered, this asks WMI for EVERY process on the machine and pulls
+        # CommandLine for each (238 processes on the box this was measured on),
+        # then regex-matches them in PowerShell: 204ms median. Filtering by
+        # image name server-side cuts it to 116ms, and every caller in this
+        # file is looking for a powershell.exe running one of our scripts.
+        # ImageName is a parameter rather than a constant so a future caller
+        # hunting a different executable is not forced back to the slow form.
+        $filter = "Name='$ImageName'"
+        return @(Get-CimInstance Win32_Process -Filter $filter -ErrorAction SilentlyContinue | Where-Object {
             $_.CommandLine -and $_.CommandLine -match $Pattern
         })
     } catch {
@@ -130,14 +146,39 @@ function Start-HiddenPowerShell {
 
 function Stop-LogbookTimers {
     try {
+        $pidFile = Join-Path $Global:StateDir 'timer.pid'
+        $readyFlag = Join-Path $Global:StateDir 'timer_ready.flag'
+
+        # FAST NEGATIVE, and this is the single biggest win on the START path.
+        # Finding a timer to kill means asking WMI for process command lines,
+        # measured at 239ms in a fresh process here -- and 83% of everything
+        # Start-LogbookTimer blocked on. (Spawning the widget itself is only
+        # ~45ms, ~15ms warm; the profiling that produced those numbers is why
+        # this is a file check and not a persistent-process rewrite.)
+        #
+        # Both markers are written when a timer starts and removed when one is
+        # stopped, so their joint absence means no timer of ours has been
+        # started since the last stop -- there is nothing to look for and no
+        # reason to pay WMI to confirm it. This is the state a fresh sign-in
+        # is always in, which is exactly when START is pressed.
+        #
+        # Cheaper alternatives were measured and rejected: filtering WMI by
+        # image name is still 125ms, and pushing the whole match into WQL with
+        # LIKE is 131ms -- the cost is the WMI query itself, not the number of
+        # rows it returns.
+        if (-not (Test-Path $pidFile) -and -not (Test-Path $readyFlag)) { return }
+
         $procs = Get-ProcessByCommandPattern 'logbook_timer\.ps1'
         foreach ($p in $procs) {
             if ([int]$p.ProcessId -ne [int]$PID) {
                 Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue
             }
         }
-        $pidFile = Join-Path $Global:StateDir 'timer.pid'
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        # Cleared here as well as in Start-LogbookTimer. It is a readiness
+        # marker for a timer that no longer exists, and leaving it behind
+        # would defeat the fast negative above on the very next START.
+        Remove-Item $readyFlag -Force -ErrorAction SilentlyContinue
     } catch { Write-LogbookError "Stop timers failed: $($_.Exception.Message)" }
 }
 
@@ -488,7 +529,16 @@ function Start-LogbookPopup {
 # install/install.py already deploys log_physical.py + paths.py natively to
 # LOGIX_HOME on every OS, so native is the safe default; WSL is opt-in via
 # LOGIX_USE_WSL=1 in config.env (set by install_logbook_tasks.ps1 -UseWSL).
+# Cached like Find-LogixPython, and for the same reason: measured at ~112ms on
+# a cold process, and the sign-in popup is always cold.
+$script:logixUseWslCached = $null
 function Test-LogbookUseWSL {
+    if ($null -ne $script:logixUseWslCached) { return $script:logixUseWslCached }
+    $script:logixUseWslCached = Test-LogbookUseWSLUncached
+    return $script:logixUseWslCached
+}
+
+function Test-LogbookUseWSLUncached {
     $val = Get-LogbookConfigEnv 'LOGIX_USE_WSL'
     return ($val -eq '1' -or $val -eq 'true')
 }
@@ -499,11 +549,24 @@ function Get-LogixCoreDir {
     return (Join-Path $env:ProgramData 'Logix')
 }
 
+# Cached for the life of the process. Get-Command has to build PowerShell's
+# command cache and walk PATH, which measured ~100-250ms on a COLD process --
+# and the sign-in popup is always a cold process, so that cost landed squarely
+# on the START click. Resolving it once (and, in the popup, warming it before
+# the user can click) takes it off the critical path entirely.
+$script:logixPythonPath = $null
+$script:logixPythonResolved = $false
 function Find-LogixPython {
+    if ($script:logixPythonResolved) { return $script:logixPythonPath }
     foreach ($cmd in @('python', 'py')) {
         $found = Get-Command $cmd -ErrorAction SilentlyContinue
-        if ($found) { return $found.Source }
+        if ($found) {
+            $script:logixPythonPath = $found.Source
+            $script:logixPythonResolved = $true
+            return $script:logixPythonPath
+        }
     }
+    $script:logixPythonResolved = $true
     return $null
 }
 
@@ -525,8 +588,23 @@ function Invoke-WSLBridge {
     return $true
 }
 
+# The async bridge cannot delete its own payload file the way the synchronous
+# path does -- the child may not have read it yet when the parent returns. So
+# each dispatch sweeps the leftovers of previous ones instead: bounded, needs
+# no new process or timer, and self-heals if a spawn ever dies before reading.
+# 10 minutes is far longer than any bridge call and short enough that a folder
+# of payloads never accumulates.
+function Remove-StaleLogbookPayloads {
+    try {
+        $cutoff = (Get-Date).AddMinutes(-10)
+        Get-ChildItem -Path $Global:StateDir -Filter 'payload-*.json' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -lt $cutoff } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch { }
+}
+
 function Invoke-NativeBridge {
-    param([string]$PayloadPath, [string]$Event, [string]$SessionId)
+    param([string]$PayloadPath, [string]$Event, [string]$SessionId, [switch]$Async)
     $python = Find-LogixPython
     if (-not $python) {
         Write-LogbookError "Native bridge: no python/py found on PATH for event $Event"
@@ -542,6 +620,44 @@ function Invoke-NativeBridge {
     # informational one, like log_physical.py's local_only privacy notice --
     # gets promoted from a non-terminating to a terminating error and throws,
     # masquerading as a bridge failure. $LASTEXITCODE is the real signal.
+    if ($Async) {
+        # DETACHED, and deliberately not waited on. Measured on this machine,
+        # the whole bridge call costs ~251ms, of which the actual database
+        # work is 6.6ms: 82ms is starting a Python interpreter and 135ms is
+        # importing the module. Run inline from a WPF Click handler -- which
+        # is where START ran it -- that entire quarter second is spent with
+        # the UI thread blocked, so the window cannot repaint or accept input
+        # at the exact moment the user just pressed the button. That is the
+        # lag, and no amount of tuning the 6.6ms of SQLite touches it.
+        #
+        # Safe to fire and forget specifically because a missing START row is
+        # already a recoverable state this project handles on purpose:
+        # session.json is written first and is the client's own source of
+        # truth, and repair_active_session_from_windows_state() (called
+        # automatically by logbook_report.build(), and exposed as
+        # --repair-active) reconstructs the row from it. The failure mode of
+        # a lost bridge call is therefore "the row is rebuilt later", not
+        # "the session is lost".
+        #
+        # Start-Process does NOT quote arguments containing spaces, not even
+        # in the array form, and both of these paths routinely contain them
+        # (C:\Program Files\..., C:\ProgramData\...). Quote by hand.
+        try {
+            # NOT sweeping here. Measured on the click path at 18-24ms, and it
+            # is housekeeping for PREVIOUS dispatches -- nothing about this
+            # one needs it done first. Initialize-LogbookStartPathWarmup does
+            # the real sweep while the form is being built.
+            Start-Process -FilePath $python `
+                -ArgumentList @(('"{0}"' -f $script), '--json-file', ('"{0}"' -f $PayloadPath)) `
+                -WindowStyle Hidden | Out-Null
+            Write-LogbookInfo "Native bridge dispatched async event=$Event sid=$SessionId"
+            return $true
+        } catch {
+            Write-LogbookError "Native bridge async dispatch failed for event ${Event}: $($_.Exception.Message)"
+            return $false
+        }
+    }
+
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -567,7 +683,16 @@ function Invoke-WSLLogbook {
         [string]$Nama = '',
         [string]$Nim = '',
         [string]$Tujuan = '',
-        [string]$Keterangan = ''
+        [string]$Keterangan = '',
+        # See BASE_COLUMNS in log_physical.py. Only the fail-open path passes
+        # anything other than the default.
+        [ValidateSet('self_declared', 'unverified', 'directory')]
+        [string]$IdentitySource = 'self_declared',
+        [string]$PersonRole = '',
+        # START uses this. See Invoke-NativeBridge's async branch for why it
+        # is safe there and why it is NOT the default: a close/END must know
+        # whether the row was really written before the workstation locks.
+        [switch]$Async
     )
     Ensure-LogbookDirs
     $winUser = "$env:USERDOMAIN\$env:USERNAME"
@@ -586,19 +711,27 @@ function Invoke-WSLLogbook {
         tujuan = $Tujuan
         keterangan = $Keterangan
         anydesk_detected = $AnyDeskDetected
+        identity_source = $IdentitySource
+        person_role = $PersonRole
     }
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
         Write-LogbookInfo "Bridge payload event=$Event sid=$SessionId nama=$Nama nim=$Nim tujuan=$Tujuan"
         if (Test-LogbookUseWSL) {
+            # The WSL bridge has no async path: it shells through wsl.exe,
+            # where a detached launch buys far less and fails in ways that are
+            # much harder to see. Native is the default on Windows anyway.
             return Invoke-WSLBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId
         }
-        return Invoke-NativeBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId
+        return Invoke-NativeBridge -PayloadPath $payloadPath -Event $Event -SessionId $SessionId -Async:$Async
     } catch {
         Write-LogbookError "Bridge log error for event ${Event}: $($_.Exception.Message)"
         return $false
     } finally {
-        Remove-Item $payloadPath -Force -ErrorAction SilentlyContinue
+        # The async child may not have opened the payload yet, so deleting it
+        # here would race it away. Remove-StaleLogbookPayloads (called on the
+        # next dispatch) is what cleans those up instead.
+        if (-not $Async) { Remove-Item $payloadPath -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -656,10 +789,21 @@ function Get-LogbookDefaultConfig {
             privacyOneLiner  = 'Siapa, cara & kapan - bukan ketikan.'
             # Timer widget (C8.2)
             timerEnd         = 'SELESAI'
-            timerEndArmed    = 'Tekan lagi untuk selesai'
+            # The button says what the gesture IS, not just what it does. A pill
+            # labelled only 'SELESAI' promises a tap, so the first tap -- which
+            # correctly does nothing -- reads as a broken button; the label is
+            # the cheapest place to fix that, and it fixes it before the press
+            # rather than during it. timerEnd stays as the bare verb because
+            # other surfaces (the preview client) present it as a plain button.
+            timerEndHold     = 'Tahan untuk selesai'
+            timerEndArmed    = 'Terus tahan...'
+            timerEndConfirm  = 'Yakin selesai?'
+            timerEndDone     = 'Sesi selesai'
             timerNama        = 'Nama'
             timerTujuan      = 'Tujuan'
             timerPerangkat   = 'Perangkat'
+            # Multi-monitor picker (only rendered when there are 2+ displays)
+            monitorPicker    = 'Tampilkan di'
             # Notifications (C8.3)
             msgFromAdmin     = 'Pesan dari Admin'
             msgReply         = 'Balas'
@@ -702,8 +846,12 @@ function Get-LogbookDefaultConfig {
                 notYou         = 'Not you / change details'
                 whatsRecorded  = "What's recorded?"
                 timerEnd       = 'END'
-                timerEndArmed  = 'Press again to end'
+                timerEndHold   = 'Hold to end session'
+                timerEndArmed  = 'Keep holding...'
+                timerEndConfirm = 'Sure?'
+                timerEndDone   = 'Session ended'
                 timerNama      = 'Name'; timerTujuan = 'Purpose'; timerPerangkat = 'Device'
+                monitorPicker  = 'Show on'
                 msgFromAdmin   = 'Message from Admin'; msgReply = 'Reply'; msgClose = 'Close'
                 noticePrivacyTitle = 'Privacy Notice'
                 noticeAlwaysTold = 'You are always notified - never silently.'
@@ -769,7 +917,22 @@ function Get-LogbookConfigEnv {
     param([string]$Key)
     $envVal = [System.Environment]::GetEnvironmentVariable($Key)
     if ($envVal) { return $envVal }
-    $cfgPath = 'C:\ProgramData\Logix\config.env'
+    # Where config.env lives is resolved from the ENVIRONMENT only, never via
+    # Get-LogixCoreDir: that function asks this one for LOGIX_HOME, so routing
+    # this lookup back through it is an infinite loop. logix/paths.py breaks
+    # the same cycle the same way and already documents both overrides
+    # (LOGIX_CONFIG, then the data home) -- the PowerShell side simply never
+    # honoured them, so a machine whose core lives anywhere but the default
+    # read its settings from a directory it does not use.
+    $cfgPath = ''
+    $explicit = [System.Environment]::GetEnvironmentVariable('LOGIX_CONFIG')
+    if ($explicit -and (Test-Path $explicit)) {
+        $cfgPath = $explicit
+    } else {
+        $home2 = [System.Environment]::GetEnvironmentVariable('LOGIX_HOME')
+        if ($home2) { $cfgPath = Join-Path $home2 'config.env' }
+    }
+    if (-not $cfgPath) { $cfgPath = Join-Path $env:ProgramData 'Logix\config.env' }
     if (Test-Path $cfgPath) {
         try {
             $lines = Get-Content $cfgPath -ErrorAction SilentlyContinue
@@ -824,6 +987,175 @@ function Get-AnyDeskId {
         }
     }
     return ''
+}
+
+# What build this agent is. Read from the VERSION file the installer drops
+# beside these scripts, so it describes the code actually on disk rather than
+# something baked in at build time that a hand-copied file would not update.
+# Cached: this is read on every heartbeat.
+$script:LogbookAgentVersion = $null
+function Get-LogbookAgentVersion {
+    if ($null -ne $script:LogbookAgentVersion) { return $script:LogbookAgentVersion }
+    $script:LogbookAgentVersion = ''
+    foreach ($dir in @($PSScriptRoot, (Split-Path $PSScriptRoot -Parent))) {
+        if (-not $dir) { continue }
+        $candidate = Join-Path $dir 'VERSION'
+        if (Test-Path $candidate) {
+            try {
+                $v = (Get-Content $candidate -Raw -ErrorAction Stop).Trim()
+                if ($v) { $script:LogbookAgentVersion = $v; break }
+            } catch { }
+        }
+    }
+    return $script:LogbookAgentVersion
+}
+
+# ---- Sign-in failure policy --------------------------------------------------
+#
+# The sign-in popup gates access to a lab workstation. When it cannot run, the
+# machine must FAIL OPEN: a student in front of a PC they cannot use, with a
+# raw PowerShell exception on screen, is a worse outcome than a session whose
+# operator is unknown. That was already the de facto behaviour, but silently --
+# the popup crashed, nothing recorded it, and the machine's usage simply went
+# missing from the logbook.
+#
+# So: fail open, but ON THE RECORD. Register a session marked
+# identity_source='unverified' so the usage is still counted and visibly
+# attributed to nobody, log the cause, and tell the user in plain language
+# instead of showing them a stack trace.
+function Register-LogbookUnverifiedSession {
+    param(
+        [Parameter(Mandatory)] [string] $Reason
+    )
+    try {
+        $sessionId = [guid]::NewGuid().ToString('N')
+        Write-LogbookError "SIGN-IN FAILED OPEN: $Reason (session $sessionId recorded as unverified)"
+        # Same bridge an ordinary START uses, so the event queues offline and
+        # retries exactly like any other -- a fail-open session must not also
+        # be a lost session.
+        Invoke-WSLLogbook -Event 'START' -SessionType 'Physical' -SessionId $sessionId `
+            -Keterangan "Sesi tanpa verifikasi identitas: $Reason" `
+            -IdentitySource 'unverified' | Out-Null
+        return $sessionId
+    } catch {
+        # Even the fallback failing must not block the desktop.
+        Write-LogbookError "Failed to register unverified session: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+# Plain-language notice, auto-dismissing, never modal to the desktop. The user
+# cannot act on a .NET exception; they can act on "tell the admin".
+function Show-LogbookSignInFailureNotice {
+    param([string]$Reason = '')
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        $tip = New-Object System.Windows.Forms.NotifyIcon
+        $tip.Icon = [System.Drawing.SystemIcons]::Warning
+        $tip.Visible = $true
+        $tip.BalloonTipTitle = 'Logix: pencatatan sesi bermasalah'
+        $tip.BalloonTipText = 'Komputer tetap bisa dipakai. Sesi ini tercatat tanpa identitas -- mohon lapor ke admin lab.'
+        $tip.ShowBalloonTip(15000)
+        Start-Sleep -Seconds 2
+        $tip.Dispose()
+    } catch {
+        Write-LogbookError "Could not show sign-in failure notice: $($_.Exception.Message)"
+    }
+}
+
+# ---- Status bar bridge (YASB and anything else that can read a file) --------
+#
+# The floating pill has one unavoidable problem: it is an overlay, so wherever
+# it sits it sits ON TOP of something -- and docked to the top edge, that
+# something is the browser tab strip. A status bar does not have that problem,
+# because a bar RESERVES its space; nothing is ever underneath it.
+#
+# So the widget publishes its state to a small file and a bar renders it. The
+# timer process is already ticking once a second and already knows all of this,
+# which is what makes this cheap: the bar runs `type <file>`, not a PowerShell
+# process per second.
+$Global:LogbookStatusFile = $null
+function Get-LogbookStatusFile {
+    if (-not $Global:LogbookStatusFile) {
+        $Global:LogbookStatusFile = Join-Path $Global:StateDir 'bar_status.json'
+    }
+    return $Global:LogbookStatusFile
+}
+
+# YASB's custom widget with return_format: json reads {"text", "alt", "tooltip"}.
+# Written whole via a temp file + move so a bar polling mid-write never reads a
+# half-flushed file and renders a blank slot.
+function Write-LogbookBarStatus {
+    param(
+        [string]$Text = '',
+        [string]$Alt = '',
+        [string]$Tooltip = '',
+        [string]$State = 'idle'
+    )
+    try {
+        $path = Get-LogbookStatusFile
+        $payload = [ordered]@{
+            text    = $Text
+            alt     = $Alt
+            tooltip = $Tooltip
+            # Not read by YASB itself -- it is there so a stylesheet or another
+            # bar can colour the slot by session state without parsing the text.
+            state   = $State
+            updated = (Get-Date).ToString('o')
+        }
+        $tmp = "$path.tmp"
+        # NOT Out-File -Encoding UTF8: in Windows PowerShell 5.1 that always
+        # writes a UTF-8 BOM, and YASB's CustomWidget reads this file's output
+        # as a decoded string, then calls json.loads() on it. json.loads on a
+        # STRING (unlike on raw bytes) throws on a leading BOM -- and does so
+        # silently as far as the user can tell: YASB's own error handling
+        # catches JSONDecodeError and swaps in None, so the bar just renders
+        # the raw "{data[text]}" template forever with no error anywhere.
+        # WriteAllText with an explicit no-BOM UTF8Encoding is the same fix
+        # this project already uses for its other JSON writes.
+        [System.IO.File]::WriteAllText(
+            $tmp, ($payload | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding $false))
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } catch { }
+}
+
+# A bar slot showing a stale time is worse than one showing nothing: it says a
+# session is running when the agent may have died. Called when the timer exits.
+function Clear-LogbookBarStatus {
+    try {
+        Write-LogbookBarStatus -Text '' -Alt '' -Tooltip 'Tidak ada sesi aktif' -State 'none'
+    } catch { }
+}
+
+# One-shot action channel from a status bar back to the widget. The bar is a
+# separate process with no handle on the widget's window, and the widget is
+# already polling once a second, so a file it consumes and deletes is both the
+# cheapest and the least stateful thing that can work.
+function Request-LogbookBarAction {
+    param([ValidateSet('open', 'posture')] [string]$Action)
+    try {
+        Ensure-LogbookDirs
+        $path = Join-Path $Global:StateDir 'bar_action'
+        # Temp file plus rename, matching Write-LogbookBarStatus and the copy of
+        # this write in logix_yasb.ps1's callback fast path: the widget polls
+        # for this file ten times a second, so a reader CAN arrive between the
+        # file being created and being written, and it would consume an empty
+        # file and drop the request. A rename has no such in-between state.
+        $tmp = "$path.tmp"
+        $Action | Out-File -FilePath $tmp -Encoding ASCII -Force
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } catch { }
+}
+
+function Read-LogbookBarAction {
+    try {
+        $path = Join-Path $Global:StateDir 'bar_action'
+        if (-not (Test-Path $path)) { return '' }
+        $action = (Get-Content $path -Raw -ErrorAction Stop).Trim()
+        # Consumed on read: a request that survived would re-fire every second.
+        Remove-Item $path -Force -ErrorAction SilentlyContinue
+        return $action
+    } catch { return '' }
 }
 
 function Get-LogbookDeviceApiKey {
@@ -914,11 +1246,20 @@ function Send-LogbookHeartbeat {
         if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
 
         $username = $env:USERNAME
+        # Session context for the dashboard's Monitoring card -- start time,
+        # access type and purpose. Read from the same session file the timer
+        # uses; the schema is untouched, these fields already live there.
+        $sessionStart = ''
+        $accessType = ''
+        $purpose = ''
         if (Test-Path $Global:SessionFile) {
             try {
                 $s = Get-ActiveLogbookSession
                 if ($s -and $s.nama) { $username = $s.nama }
                 elseif ($s -and $s.username) { $username = $s.username }
+                if ($s -and $s.start_time) { $sessionStart = [string]$s.start_time }
+                if ($s -and $s.session_type) { $accessType = [string]$s.session_type }
+                if ($s -and $s.tujuan) { $purpose = [string]$s.tujuan }
             } catch {}
         }
 
@@ -947,7 +1288,24 @@ function Send-LogbookHeartbeat {
             username    = $username
             anydesk_id  = $anydeskId
         }
+        if ($sessionStart) { $payload['session_started_at'] = $sessionStart }
+        if ($accessType)   { $payload['access_type'] = $accessType }
+        if ($purpose)      { $payload['purpose'] = $purpose }
         if ($pendingAcks.Count -gt 0) { $payload['acks'] = $pendingAcks }
+
+        # Which build this workstation is on. Without it the dashboard cannot
+        # tell a fleet running the current agent from one that quietly drifted
+        # -- which is exactly how an install ended up with a sign-in popup
+        # three weeks older than the logbook_common.ps1 beside it, found only
+        # when it crashed.
+        $agentVersion = Get-LogbookAgentVersion
+        if ($agentVersion) { $payload['agent_version'] = $agentVersion }
+        $payload['agent_os'] = 'windows'
+        # This machine's clock, so the server can measure skew. The agent
+        # timestamps its own session events, so a wrong clock here files real
+        # sessions under the wrong hour -- and across midnight, the wrong day.
+        # Nothing downstream can detect that from the data alone.
+        $payload['client_time'] = (Get-Date).ToString('o')
 
         $headers = @{
             'Content-Type' = 'application/json'
@@ -1054,24 +1412,58 @@ function Send-LogbookHeartbeat {
 }
 
 function Get-LogbookConfig {
+    # -MaxCacheAgeSeconds: reuse the cached server config outright when it is
+    # younger than this, skipping the network entirely. 0 (the default) keeps
+    # the original always-fetch behaviour for callers that must be current.
+    #
+    # This exists because the sign-in popup blocked on /api/config at every
+    # login. With the server reachable that is ~190ms; with it unreachable --
+    # a restart, a flaky lab switch, a workstation booting before the server --
+    # it is the full timeout, every single time, while a person stares at
+    # nothing. The config drives labels and branding, so a slightly stale copy
+    # is fine; a slow login is not.
+    param([int]$MaxCacheAgeSeconds = 0)
+
     # Cascading: built-in defaults <- machine config <- per-user config.
     $cfg = Get-LogbookDefaultConfig
-    
-    # Try to fetch from central server first
+
+    # Try to fetch from central server first.
     $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
-    $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
+    # Same credential order as Send-LogbookHeartbeat: this device's own key
+    # first, the shared bootstrap key only as a fallback. Reading just the
+    # shared key was wrong in two ways -- an enrolled device deliberately has
+    # it cleared (so config fetches 401'd and silently fell back to a stale
+    # cache), and a server running with LOGIX_REQUIRE_DEVICE_KEY=1 refuses the
+    # shared key outright.
+    $serverKey = Get-LogbookDeviceApiKey
+    if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
     $serverCfg = $null
     
     $cachePath = Join-Path $Global:StateDir 'server_config_cache.json'
     
-    if ($serverUrl) {
+    # A cache young enough for this caller means we never touch the network.
+    $cacheAge = $null
+    if (Test-Path $cachePath) {
+        $cacheAge = ((Get-Date) - (Get-Item $cachePath).LastWriteTime).TotalSeconds
+    }
+    $useCacheOnly = ($MaxCacheAgeSeconds -gt 0 -and $null -ne $cacheAge -and
+                     $cacheAge -ge 0 -and $cacheAge -lt $MaxCacheAgeSeconds)
+    if ($useCacheOnly) {
+        Write-LogbookInfo ("Config cache is {0:N0}s old (< {1}s) -- skipping the server fetch." -f $cacheAge, $MaxCacheAgeSeconds)
+    }
+
+    if ($serverUrl -and -not $useCacheOnly) {
         try {
             $headers = @{}
             if ($serverKey) { $headers['X-API-Key'] = $serverKey }
             $apiUrl = $serverUrl.TrimEnd('/') + '/api/config'
             Write-LogbookInfo "Fetching config from server: $apiUrl"
-            # 2 second timeout to not block UI startup if server is offline
-            $res = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 2 -UseBasicParsing
+            # Having a cache to fall back on buys a much shorter wait: 1s is
+            # generous for a lab LAN, and losing the race only costs freshness.
+            # With no cache at all this is the only source of labels and
+            # branding, so give it the full 2s before giving up.
+            $timeoutSec = if ($null -ne $cacheAge) { 1 } else { 2 }
+            $res = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec $timeoutSec -UseBasicParsing
             if ($res) {
                 $serverCfg = ConvertTo-LogbookHashtable $res
                 # Save to cache
@@ -1132,6 +1524,504 @@ function Get-LogbookText($cfg, [string]$Key, [string]$Fallback = '') {
     return $Fallback
 }
 
+function Get-LogbookMixedHex([string]$From, [string]$To, [double]$Amount) {
+    # Linear mix of two #RRGGBB strings, returned as #RRGGBB. Used to DERIVE the
+    # quiet members of the palette from the loud ones rather than inventing new
+    # hex values: a wash is its signal colour laid over the surface it sits on,
+    # a soft text is the same colour lifted toward white. That is the whole
+    # reason they stay in tune when a faculty rebrand changes the signal, and
+    # the reason they cannot drift out of tune by hand-editing.
+    #
+    # Opaque on purpose, not an alpha brush: the result is composited ONCE here
+    # against the surface it is known to sit on, so a fill that grows across a
+    # button cannot pick up whatever happens to be behind it.
+    # Parsed by hand rather than through a colour helper: this file is dot-
+    # sourced by processes that never load System.Drawing or WPF (the monitor,
+    # the bar bridge), and adding an assembly load to all of them to mix two
+    # numbers would be the expensive way to do arithmetic.
+    $parse = {
+        param($hex)
+        $h = ([string]$hex).Trim().TrimStart('#')
+        if ($h.Length -ne 6) { return $null }
+        try {
+            return @([Convert]::ToInt32($h.Substring(0, 2), 16),
+                     [Convert]::ToInt32($h.Substring(2, 2), 16),
+                     [Convert]::ToInt32($h.Substring(4, 2), 16))
+        } catch { return $null }
+    }
+    $a = & $parse $From
+    $b = & $parse $To
+    # A bad override must not take the whole widget down with it.
+    if (-not $a -or -not $b) { return $From }
+    $t = [Math]::Max(0.0, [Math]::Min(1.0, $Amount))
+    $c = 0..2 | ForEach-Object { [int][Math]::Round($a[$_] + ($b[$_] - $a[$_]) * $t) }
+    return ('#{0:X2}{1:X2}{2:X2}' -f $c[0], $c[1], $c[2])
+}
+
+
+# ---- START-path warm-up ------------------------------------------------------
+#
+# PowerShell loads cmdlet implementations and .NET types lazily, so the FIRST
+# call to each is far more expensive than every call after it. Measured on this
+# machine, cold vs warm:
+#
+#   ConvertTo-Json              160ms -> 6ms
+#   Start-Process               135ms -> 23ms
+#   Test-LogbookUseWSL          112ms -> cached
+#   Remove-StaleLogbookPayloads  74ms -> cheap
+#   Out-File                     57ms -> ~5ms
+#
+# The sign-in popup is ALWAYS a cold process, and every one of those first
+# calls happens inside the START click handler -- on the WPF UI thread. Their
+# sum, not any single slow operation, is the lag the user feels after pressing
+# the button. None of it is work that has to wait for the click: it can all be
+# paid while the form is being built and the user has not typed their name yet.
+#
+# Deliberately cheap and side-effect free. The one debatable line is the
+# throwaway process: Start-Process cannot be warmed without starting something,
+# and `cmd /c exit` is the smallest thing there is. It costs one short-lived
+# process per sign-in, in exchange for ~110ms off the click, and it is honest
+# about being exactly that.
+function Initialize-LogbookStartPathWarmup {
+    try {
+        [void](Find-LogixPython)
+        [void](Test-LogbookUseWSL)
+        [void](Ensure-LogbookDirs)
+        [void](@{ warm = $true; at = (Get-Date).ToString('o') } | ConvertTo-Json -Depth 3)
+        # The REAL sweep, not a throwaway enumeration to warm the cmdlet:
+        # this is where the previous dispatch's leftovers are cleaned up, and
+        # doing it here keeps those 18-24ms off the START click entirely.
+        Remove-StaleLogbookPayloads
+        Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c', 'exit' `
+            -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+        # A warm-up that fails must never stop a sign-in. Everything it touches
+        # gets done again on the real path anyway; it would just be slower.
+        Write-LogbookError "START warm-up skipped: $($_.Exception.Message)"
+    }
+}
+
+# ---- Server pairing (Device <-> Server), from the client ---------------------
+#
+# A Logix Device is a complete product on its own; a server is an OPTIONAL
+# layer on top of it. That framing only holds if a device can be joined to a
+# server, and unjoined from one, after installation -- by the person using it,
+# from the application. Until now enrolment existed only inside the setup
+# wizard, which is a thing you run once at install time, and there was no way
+# to leave a server at all: changing or dropping one meant hand-editing
+# config.env or reinstalling. Both are answers for a maintainer, not a user.
+#
+# The transport is NOT new. This drives the same POST /api/enroll and the same
+# device.json identity file that API_CONTRACT.md already specifies, because a
+# second enrolment path would be a second thing to keep secure.
+
+function Set-LogbookConfigValue {
+    param([string]$Key, [string]$Value)
+    # Canonical runtime writer for config.env. install_logbook_tasks.ps1
+    # deliberately keeps its own copy (Set-LogixConfigValue): the installer has
+    # to write this file BEFORE the install directory it would load this
+    # library from exists. Same semantics on purpose -- if one changes, change
+    # both, which is what the check in test_logbook_config.ps1 is for.
+    $cfgDir = Get-LogixCoreDir
+    New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+    $cfgPath = Join-Path $cfgDir 'config.env'
+    $lines = if (Test-Path $cfgPath) { @(Get-Content $cfgPath) } else { @() }
+    $pattern = "^\s*#?\s*(?:export\s+)?$Key\s*="
+    $found = $false
+    # @(...) is load-bearing: without it a 0- or 1-line config.env makes $out a
+    # single STRING and += concatenates text instead of appending a line, which
+    # welds every key onto one line. Only bites on a fresh machine -- which is
+    # exactly the machine being paired for the first time.
+    $out = @(foreach ($line in $lines) {
+        if ($line -match $pattern) { $found = $true; "$Key=$Value" } else { $line }
+    })
+    if (-not $found) { $out += "$Key=$Value" }
+    $out | Set-Content -Path $cfgPath -Encoding UTF8
+}
+
+function Get-LogbookDeviceIdentityPath {
+    return (Join-Path (Get-LogixCoreDir) 'device.json')
+}
+
+function Get-LogbookPairingState {
+    # One place that answers "is this device joined to a server, and which".
+    # Deliberately does NOT touch the network: this is the state the UI opens
+    # with, and a settings screen that blocks on a dead server before it can
+    # draw itself is how "not connected" becomes indistinguishable from "hung".
+    $state = [ordered]@{
+        Paired    = $false
+        ServerUrl = ''
+        DeviceId  = ''
+        Category  = ''
+        HasKey    = $false
+    }
+    try {
+        $url = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+        if ($url) { $state.ServerUrl = $url.Trim() }
+        $path = Get-LogbookDeviceIdentityPath
+        if (Test-Path $path) {
+            $id = Get-Content $path -Raw | ConvertFrom-Json
+            $state.DeviceId = [string]$id.device_id
+            $state.Category = [string]$id.category
+            $state.HasKey = -not [string]::IsNullOrWhiteSpace([string]$id.api_key)
+        }
+    } catch { }
+    # Paired means BOTH halves: an identity without a server URL cannot reach
+    # anything, and a URL without an identity is a server we were never let
+    # into. Either one alone is a half-finished pairing, and calling that
+    # "connected" is how a device silently stops syncing.
+    $state.Paired = ($state.ServerUrl -ne '') -and ($state.DeviceId -ne '') -and $state.HasKey
+    return $state
+}
+
+function Test-LogbookServerReachable {
+    param([string]$Url, [int]$TimeoutSec = 8)
+    # Checked BEFORE spending an invite code. An invite is single-use
+    # (API_CONTRACT.md), so firing one at a typo'd address burns it and the
+    # operator has to go back to an admin for another.
+    $result = [ordered]@{ Ok = $false; Detail = '' }
+    if ([string]::IsNullOrWhiteSpace($Url)) { $result.Detail = 'Alamat server kosong.'; return $result }
+    $trimmed = $Url.Trim().TrimEnd('/')
+    if ($trimmed -notmatch '^https?://') { $result.Detail = 'Alamat harus diawali http:// atau https://'; return $result }
+    try {
+        $resp = Invoke-RestMethod -Uri ($trimmed + '/api/health') -Method Get `
+                    -TimeoutSec $TimeoutSec -UseBasicParsing -ErrorAction Stop
+        $result.Ok = $true
+        $result.Detail = if ($resp.version) { "Server terjangkau (versi $($resp.version))." } else { 'Server terjangkau.' }
+    } catch {
+        $result.Detail = "Tidak bisa menghubungi server: $($_.Exception.Message)"
+    }
+    return $result
+}
+
+function Invoke-LogbookServerPairing {
+    param([string]$Url, [string]$Code)
+    # Redeems an invite and stores what comes back. Order matters: device.json
+    # is written BEFORE config.env gains the URL, so a crash between the two
+    # leaves a device that is not "connected" (Get-LogbookPairingState needs
+    # both) rather than one that believes it is enrolled and is not.
+    $out = [ordered]@{ Ok = $false; DeviceId = ''; Category = ''; Error = '' }
+    $trimmed = ([string]$Url).Trim().TrimEnd('/')
+    $code = ([string]$Code).Trim()
+    if (-not $trimmed) { $out.Error = 'Alamat server wajib diisi.'; return $out }
+    if (-not $code) { $out.Error = 'Kode pairing wajib diisi.'; return $out }
+    try {
+        $body = @{
+            invite_code = $code
+            hostname    = $env:COMPUTERNAME
+            os          = 'windows'
+            os_version  = [System.Environment]::OSVersion.VersionString
+        } | ConvertTo-Json
+        $enrolled = Invoke-RestMethod -Uri ($trimmed + '/api/enroll') -Method Post -Body $body `
+                        -ContentType 'application/json' -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop
+        if (-not $enrolled.device_id -or -not $enrolled.api_key) {
+            $out.Error = 'Server menerima kode tetapi tidak mengirim identitas perangkat.'
+            return $out
+        }
+        $identityPath = Get-LogbookDeviceIdentityPath
+        New-Item -ItemType Directory -Force -Path (Split-Path $identityPath -Parent) | Out-Null
+        @{ device_id = $enrolled.device_id; api_key = $enrolled.api_key; category = $enrolled.category } |
+            ConvertTo-Json | Out-File -FilePath $identityPath -Encoding UTF8 -Force
+        Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value $trimmed
+
+        $out.Ok = $true
+        $out.DeviceId = [string]$enrolled.device_id
+        $out.Category = [string]$enrolled.category
+        # The code itself is never logged: it is a credential, and this log is
+        # readable by anyone who can read the state directory.
+        Write-LogbookInfo "Paired with server $trimmed as device $($out.DeviceId)"
+    } catch {
+        $msg = $_.Exception.Message
+        try {
+            $resp = $_.Exception.Response
+            if ($resp) {
+                $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+                $raw = $reader.ReadToEnd()
+                if ($raw) {
+                    $parsed = $raw | ConvertFrom-Json
+                    if ($parsed.detail) { $msg = [string]$parsed.detail }
+                }
+            }
+        } catch { }
+        $out.Error = $msg
+        Write-LogbookError "Pairing failed against $trimmed : $msg"
+    }
+    return $out
+}
+
+function Remove-LogbookServerPairing {
+    # Leaves the server WITHOUT touching a single session: the local database
+    # is this device's own record and is not the server's to take back. What
+    # goes is the identity and the address, which is exactly what "this device
+    # is no longer joined to that server" means.
+    #
+    # Note this is local only. It cannot revoke the key server-side -- that is
+    # an admin action (POST /api/devices/{id}/revoke) and a device being able
+    # to revoke itself remotely would be a device being able to delete its own
+    # audit trail.
+    $out = [ordered]@{ Ok = $false; Error = '' }
+    try {
+        $path = Get-LogbookDeviceIdentityPath
+        if (Test-Path $path) { Remove-Item $path -Force -ErrorAction Stop }
+        Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value ''
+        $out.Ok = $true
+        Write-LogbookInfo "Server pairing removed on this device (local sessions untouched)."
+    } catch {
+        $out.Error = $_.Exception.Message
+        Write-LogbookError "Unpair failed: $($_.Exception.Message)"
+    }
+    return $out
+}
+
+# ---- Multi-monitor placement -------------------------------------------------
+#
+# The sign-in surface COVERS every screen on purpose: it is a kiosk lock, paired
+# with the keyboard lockdown and the Task Manager gate, and a second monitor
+# left uncovered is simply a way around all three. That part is correct and
+# must not be traded away.
+#
+# What was wrong is that the 320px card inside it was centred on the WHOLE
+# virtual desktop. On an extended pair that centre is the seam between the two
+# monitors, so the dialog a user is supposed to type into was split down the
+# middle across a bezel. Coverage is a property of the WINDOW; which display
+# the dialog belongs to is a property of the CARD. Separating those two is the
+# whole fix.
+function Import-LogbookFormsAssembly {
+    # Loaded on demand, never at file scope. This file is dot-sourced by the
+    # monitor and the bar bridge too, and they have no use for WinForms; the
+    # sign-in path already pays enough startup cost for a person who is
+    # standing there waiting. Idempotent -- Add-Type on an already-loaded
+    # assembly is a no-op, but the type check skips even that.
+    if (-not ([System.Management.Automation.PSTypeName]'System.Windows.Forms.Screen').Type) {
+        Add-Type -AssemblyName System.Windows.Forms
+    }
+    if (-not ([System.Management.Automation.PSTypeName]'System.Drawing.Rectangle').Type) {
+        Add-Type -AssemblyName System.Drawing
+    }
+}
+
+function Get-LogbookScreens {
+    # Every display, left-to-right, with the label the picker shows.
+    Import-LogbookFormsAssembly
+    $screens = @([System.Windows.Forms.Screen]::AllScreens | Sort-Object { $_.Bounds.Left })
+    $out = @()
+    for ($i = 0; $i -lt $screens.Count; $i++) {
+        $s = $screens[$i]
+        $out += [pscustomobject]@{
+            Index   = $i
+            Screen  = $s
+            Primary = $s.Primary
+            Bounds  = $s.Bounds
+            Label   = "Layar $($i + 1)"
+            Detail  = ("{0} x {1}{2}" -f $s.Bounds.Width, $s.Bounds.Height,
+                        $(if ($s.Primary) { ' - Utama' } else { '' }))
+        }
+    }
+    return $out
+}
+
+function Get-LogbookPreferredScreen {
+    Import-LogbookFormsAssembly
+    # Where the person actually is. The cursor is the only signal available
+    # before anything is on screen -- they were just using that machine, and on
+    # a lab workstation the mouse is where their attention is. Primary is the
+    # fallback, never the assumption: on a docked setup the primary display is
+    # routinely the one that is switched off.
+    try {
+        $screens = Get-LogbookScreens
+        $pos = [System.Windows.Forms.Cursor]::Position
+        foreach ($s in $screens) {
+            if ($s.Bounds.Contains($pos)) { return $s }
+        }
+        foreach ($s in $screens) { if ($s.Primary) { return $s } }
+        if ($screens.Count -gt 0) { return $screens[0] }
+    } catch { }
+    return $null
+}
+
+function Get-LogbookDipScale($Window) {
+    # Window.Left/Width are device-INDEPENDENT units; Screen.Bounds is physical
+    # pixels. They are equal only at 100% scaling, which is why placing a card
+    # by raw pixel arithmetic lands it somewhere else entirely on a 125%/150%
+    # laptop panel. Returns the px -> DIP factors, or 1,1 before the window has
+    # an HWND (nothing to scale against yet).
+    try {
+        $src = [System.Windows.PresentationSource]::FromVisual($Window)
+        if ($src -and $src.CompositionTarget) {
+            $m = $src.CompositionTarget.TransformFromDevice
+            if ($m.M11 -gt 0 -and $m.M22 -gt 0) { return @($m.M11, $m.M22) }
+        }
+    } catch { }
+    return @(1.0, 1.0)
+}
+
+function Set-LogbookWindowToVirtualScreen($Window) {
+    Import-LogbookFormsAssembly
+    # Cover everything. Deliberately in the same call as the DIP conversion:
+    # sized in raw pixels on a scaled display the window OVER-covers, which is
+    # harmless for a lock screen but makes every coordinate inside it lie.
+    $v = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $scale = Get-LogbookDipScale $Window
+    $Window.WindowState = 'Normal'
+    $Window.Left   = $v.Left * $scale[0]
+    $Window.Top    = $v.Top * $scale[1]
+    $Window.Width  = $v.Width * $scale[0]
+    $Window.Height = $v.Height * $scale[1]
+}
+
+function Set-LogbookCardOnScreen($Window, $Card, $Target) {
+    # Pin the card inside ONE display's bounds. Alignment moves from Center to
+    # Left/Top because "centre of the window" is precisely the wrong anchor
+    # when the window spans several displays; the margin then does the real
+    # positioning, in the window's own coordinate space.
+    if (-not $Window -or -not $Card -or -not $Target) { return }
+    Import-LogbookFormsAssembly
+    try {
+        $v = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $scale = Get-LogbookDipScale $Window
+        $b = $Target.Bounds
+
+        $cardW = $Card.Width
+        if ([double]::IsNaN($cardW) -or $cardW -le 0) { $cardW = $Card.ActualWidth }
+        $cardH = $Card.ActualHeight
+        if ($cardH -le 0) { $cardH = $Card.DesiredSize.Height }
+
+        # Centre of the target display, expressed relative to the window origin.
+        $left = (($b.Left - $v.Left) + ($b.Width / 2.0)) * $scale[0] - ($cardW / 2.0)
+        $top  = (($b.Top - $v.Top) + ($b.Height / 2.0)) * $scale[1] - ($cardH / 2.0)
+
+        # A card taller than the display would otherwise hang off the top edge,
+        # where the title bar and the close affordance live.
+        $minLeft = ($b.Left - $v.Left) * $scale[0]
+        $minTop  = ($b.Top - $v.Top) * $scale[1]
+        if ($left -lt $minLeft) { $left = $minLeft }
+        if ($top -lt $minTop) { $top = $minTop }
+
+        $Card.HorizontalAlignment = 'Left'
+        $Card.VerticalAlignment   = 'Top'
+        $Card.Margin = New-Object System.Windows.Thickness ([Math]::Round($left)), ([Math]::Round($top)), 0, 0
+    } catch {
+        Write-LogbookError "Card placement failed: $($_.Exception.Message)"
+    }
+}
+
+function Add-LogbookMonitorPicker($Window, $Card, $Panel, $cfg, $Screens, $Current) {
+    # Builds the display chips. Returns nothing; wiring is done by side effect
+    # on $Panel. Stays hidden for a single display -- a "choose a display"
+    # control on a one-display machine is a question with one answer, which is
+    # not a choice, it is an obstacle.
+    if (-not $Panel) { return }
+    if (-not $Screens -or $Screens.Count -lt 2) { $Panel.Visibility = 'Collapsed'; return }
+
+    $theme = Get-LogbookTheme $cfg
+    $conv = New-Object System.Windows.Media.BrushConverter
+    $Panel.Children.Clear()
+
+    $lbl = New-Object System.Windows.Controls.TextBlock
+    $lbl.Text = (Get-LogbookText $cfg 'monitorPicker' 'Tampilkan di')
+    $lbl.FontSize = 11
+    $lbl.Foreground = $conv.ConvertFromString($theme.muted)
+    $lbl.VerticalAlignment = 'Center'
+    $lbl.Margin = New-Object System.Windows.Thickness 0, 0, 8, 0
+    [void]$Panel.Children.Add($lbl)
+
+    foreach ($s in $Screens) {
+        $btn = New-Object System.Windows.Controls.Button
+        $btn.Content = [string]($s.Index + 1)
+        $btn.ToolTip = "$($s.Label) - $($s.Detail)"
+        $btn.Width = 26
+        $btn.Height = 22
+        $btn.FontSize = 11
+        $btn.Margin = New-Object System.Windows.Thickness 0, 0, 4, 0
+        $btn.Cursor = 'Hand'
+        $btn.BorderThickness = New-Object System.Windows.Thickness 1
+        $btn.Tag = $s
+
+        $isCurrent = ($Current -and $s.Index -eq $Current.Index)
+        $btn.Background = $conv.ConvertFromString($(if ($isCurrent) { $theme.accent } else { $theme.surfaceWidget }))
+        $btn.BorderBrush = $conv.ConvertFromString($(if ($isCurrent) { $theme.accent } else { $theme.border }))
+        $btn.Foreground = $conv.ConvertFromString($(if ($isCurrent) { '#FFFFFF' } else { $theme.muted }))
+
+        # A pill, not a default WPF button: the chrome-free chip is the whole
+        # reason this reads as a choice rather than as an error dialog.
+        $tpl = [Windows.Markup.XamlReader]::Parse(@"
+<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button">
+  <Border CornerRadius="11" Background="{TemplateBinding Background}"
+          BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+  </Border>
+</ControlTemplate>
+"@)
+        $btn.Template = $tpl
+
+        $btn.Add_Click({
+            param($sender, $e)
+            $target = $sender.Tag
+            Set-LogbookCardOnScreen -Window $Window -Card $Card -Target $target
+            # Repaint the chips so the selected one is unambiguous.
+            foreach ($child in $Panel.Children) {
+                if ($child -is [System.Windows.Controls.Button]) {
+                    $on = ($child.Tag.Index -eq $target.Index)
+                    $child.Background  = $conv.ConvertFromString($(if ($on) { $theme.accent } else { $theme.surfaceWidget }))
+                    $child.BorderBrush = $conv.ConvertFromString($(if ($on) { $theme.accent } else { $theme.border }))
+                    $child.Foreground  = $conv.ConvertFromString($(if ($on) { '#FFFFFF' } else { $theme.muted }))
+                }
+            }
+            Save-LogbookPreferredMonitor $target
+        }.GetNewClosure())
+
+        [void]$Panel.Children.Add($btn)
+    }
+    $Panel.Visibility = 'Visible'
+}
+
+# The chosen display is remembered per machine. A lab workstation's monitor
+# layout does not change between sessions, so asking again every single sign-in
+# would be asking a question whose answer we already have.
+function Save-LogbookPreferredMonitor($Target) {
+    try {
+        if (-not $Target) { return }
+        Ensure-LogbookDirs
+        $path = Join-Path $Global:StateDir 'monitor_pref.json'
+        $obj = @{ deviceName = $Target.Screen.DeviceName
+                  bounds = ("{0},{1},{2},{3}" -f $Target.Bounds.Left, $Target.Bounds.Top, $Target.Bounds.Width, $Target.Bounds.Height) }
+        $tmp = "$path.tmp"
+        [System.IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Compress),
+            (New-Object System.Text.UTF8Encoding $false))
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    } catch { }
+}
+
+function Get-LogbookSavedMonitor($Screens) {
+    # Matched on DeviceName AND geometry: a remembered "\\.\DISPLAY2" means
+    # nothing if that display was unplugged and a different one took the name.
+    try {
+        $path = Join-Path $Global:StateDir 'monitor_pref.json'
+        if (-not (Test-Path $path)) { return $null }
+        $saved = Get-Content $path -Raw | ConvertFrom-Json
+        foreach ($s in $Screens) {
+            $geo = "{0},{1},{2},{3}" -f $s.Bounds.Left, $s.Bounds.Top, $s.Bounds.Width, $s.Bounds.Height
+            if ($s.Screen.DeviceName -eq [string]$saved.deviceName -and $geo -eq [string]$saved.bounds) {
+                return $s
+            }
+        }
+    } catch { }
+    return $null
+}
+
+function Set-LogbookPopupMonitorPlacement($Window, $Card, $Panel, $cfg) {
+    # One call the popup controllers use. Order matters: saved choice wins over
+    # the cursor, because it is an explicit instruction and the cursor is only
+    # ever an inference.
+    $screens = Get-LogbookScreens
+    $target = Get-LogbookSavedMonitor $screens
+    if (-not $target) { $target = Get-LogbookPreferredScreen }
+    if (-not $target -and $screens.Count -gt 0) { $target = $screens[0] }
+    if ($target) { Set-LogbookCardOnScreen -Window $Window -Card $Card -Target $target }
+    if ($Panel) { Add-LogbookMonitorPicker -Window $Window -Card $Card -Panel $Panel -cfg $cfg -Screens $screens -Current $target }
+    return $target
+}
+
 function Get-LogbookTheme($cfg) {
     # Resolve the full client palette from config, with the Client Foundation
     # defaults as fallbacks. Backward-compatible: a config that only sets the
@@ -1151,19 +2041,212 @@ function Get-LogbookTheme($cfg) {
     $text            = & $val $c 'text'            '#EEF3FB'
     $muted           = & $val $c 'muted'           '#93A1B8'
     $surfaceElevated = & $val $c 'surfaceElevated' (& $val $c 'primary' '#0E1626')
+    $surfaceWidget   = & $val $c 'surfaceWidget'   '#0B1017'
+    $critical        = & $val $s 'critical'        '#EF4444'
     return @{
         accent          = $accent
         text            = $text
         muted           = $muted
         surface         = & $val $c 'surface'       '#070C15'
-        surfaceWidget   = & $val $c 'surfaceWidget' '#0B1017'
+        surfaceWidget   = $surfaceWidget
         surfaceElevated = $surfaceElevated
         border          = & $val $c 'border'        '#223451'
         signalNormal    = & $val $s 'normal'        '#22C55E'
         signalNotice    = & $val $s 'notice'        '#3B82F6'
         signalWarning   = & $val $s 'warning'       '#F59E0B'
-        signalCritical  = & $val $s 'critical'      '#EF4444'
+        signalCritical  = $critical
+        # The quiet half of the critical signal, derived (see
+        # Get-LogbookMixedHex) rather than picked. Full-strength #EF4444 is a
+        # correct ALERT colour and a wrong SURFACE colour: on a card whose
+        # whole palette is deep navy, muted slate and a green dot, a button
+        # that floods solid red on press does not read as "this is serious",
+        # it reads as a different application's button. The guard rail this
+        # file already states -- status colour appears only as a dot or an
+        # edge, never as a tinted background -- is exactly the rule that flood
+        # broke. These three keep the meaning and drop the shouting:
+        #   Wash: the signal laid over the widget surface at low strength, so
+        #         a growing fill stays a member of this palette.
+        #   Edge: the same mix at border strength, for the 1px outline that is
+        #         the design's sanctioned place for a status colour.
+        #   Soft: the signal lifted toward white, for TEXT that has to stay
+        #         legible on the wash -- #EF4444 on a near-black wash is under
+        #         the contrast the body text on this card holds itself to.
+        criticalWash    = Get-LogbookMixedHex $surfaceWidget $critical 0.16
+        criticalEdge    = Get-LogbookMixedHex $surfaceWidget $critical 0.45
+        criticalSoft    = Get-LogbookMixedHex $critical      '#FFFFFF' 0.35
     }
+}
+
+function Build-LogbookClientResources($cfg) {
+    # The v3 "Clean Calibration" client token set, emitted as a WPF
+    # ResourceDictionary fragment. This is the client-side twin of the web
+    # dashboard's tokens.css: one place defines the palette, every window
+    # references it via {StaticResource ...} instead of inlining hex.
+    #
+    # Values come from docs/design_handoff_logix_v3/README.md ("Client widget
+    # (WPF, always dark)") and remain config-overridable through
+    # Get-LogbookTheme, so a faculty rebrand still works.
+    #
+    # Guard rails encoded here: no gradient brushes, and status colour exists
+    # only as a dot fill or a 3px edge -- there is deliberately no tinted
+    # status background brush to reach for. LxNotice is the accent blue,
+    # matching the message states in the Timer prototype (D-02 state 04/07).
+    $t = Get-LogbookTheme $cfg
+    return @"
+    <SolidColorBrush x:Key="LxSurface"  Color="$($t.surfaceWidget)"/>
+    <SolidColorBrush x:Key="LxElevated" Color="$($t.surfaceElevated)"/>
+    <SolidColorBrush x:Key="LxHairline" Color="$($t.border)"/>
+    <SolidColorBrush x:Key="LxText"     Color="$($t.text)"/>
+    <SolidColorBrush x:Key="LxMuted"    Color="$($t.muted)"/>
+    <SolidColorBrush x:Key="LxAccent"   Color="$($t.accent)"/>
+    <SolidColorBrush x:Key="LxActive"   Color="$($t.signalNormal)"/>
+    <SolidColorBrush x:Key="LxNotice"   Color="$($t.accent)"/>
+    <SolidColorBrush x:Key="LxWarning"  Color="$($t.signalWarning)"/>
+    <SolidColorBrush x:Key="LxCritical" Color="$($t.signalCritical)"/>
+    <SolidColorBrush x:Key="LxCriticalWash" Color="$($t.criticalWash)"/>
+    <SolidColorBrush x:Key="LxCriticalEdge" Color="$($t.criticalEdge)"/>
+    <SolidColorBrush x:Key="LxCriticalSoft" Color="$($t.criticalSoft)"/>
+
+    <!-- Two type voices only: Segoe UI for words, Consolas for time/ID/duration. -->
+    <Style x:Key="LxLabel" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{StaticResource LxMuted}"/>
+    </Style>
+    <Style x:Key="LxValue" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+    <Style x:Key="LxMono" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Consolas"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+    </Style>
+
+    <!-- Dark dropdown. WPF's stock ComboBox chrome is light-themed and
+         unreadable on this surface, so the whole control is re-templated:
+         a hairline Border, a chevron, and a dark popup list. PART_EditableTextBox
+         is present because the Tujuan dropdown is editable (the "Lainnya"
+         free-text escape hatch types straight into it). -->
+    <Style x:Key="LxComboItem" TargetType="ComboBoxItem">
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="ItemBg" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="ItemBg" Property="Background" Value="{StaticResource LxElevated}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="LxCombo" TargetType="ComboBox">
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="ItemContainerStyle" Value="{StaticResource LxComboItem}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid>
+              <ToggleButton x:Name="ToggleBtn" Focusable="False" ClickMode="Press"
+                            IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="ComboBg" CornerRadius="12" Background="{StaticResource LxSurface}"
+                            BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+                      <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0"
+                            Data="M 2,3.5 L 5,6.5 L 8,3.5" Stroke="{StaticResource LxMuted}" StrokeThickness="1.5"
+                            StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Border>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False"
+                                Content="{TemplateBinding SelectionBoxItem}"
+                                Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+              <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" Background="Transparent"
+                       BorderThickness="0" Foreground="{StaticResource LxText}"
+                       CaretBrush="{StaticResource LxAccent}" Margin="{TemplateBinding Padding}"
+                       VerticalAlignment="Center"/>
+              <Popup x:Name="PART_Popup" AllowsTransparency="True" Placement="Bottom"
+                     IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="None">
+                <Border Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
+                        BorderThickness="1" CornerRadius="12" Padding="6"
+                        MinWidth="{TemplateBinding ActualWidth}" MaxHeight="240">
+                  <ScrollViewer><ItemsPresenter/></ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsEditable" Value="True">
+                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                <Setter TargetName="ContentSite" Property="Visibility" Value="Collapsed"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.75"/>
+                <Setter TargetName="ToggleBtn" Property="Visibility" Value="Collapsed"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Pill button: fully rounded, no gradient, no glow. Outline by default;
+         the caller sets Background/Foreground for the primary + armed forms. -->
+    <Style x:Key="LxPill" TargetType="Button">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FontFamily" Value="Segoe UI Semibold"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="16,9"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <!-- 20, not 999: WPF generates degenerate elliptical arcs from a
+                 corner radius far larger than the box, which renders a
+                 stretched button as a full ellipse rather than a stadium.
+                 20 exceeds half the tallest pill here, so it still clamps to
+                 a true half-height round-end. -->
+            <Border x:Name="PillBg" CornerRadius="20"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+              <TextBlock Text="{TemplateBinding Content}" HorizontalAlignment="Center"
+                         VerticalAlignment="Center" TextWrapping="NoWrap"
+                         Foreground="{TemplateBinding Foreground}"
+                         FontFamily="{TemplateBinding FontFamily}"
+                         FontSize="{TemplateBinding FontSize}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="PillBg" Property="Opacity" Value="0.75"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="PillBg" Property="Opacity" Value="0.5"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+"@
 }
 
 # NIM/NIP/NIK is numbers-only (student/staff ID, national ID) -- reject
@@ -1220,6 +2303,7 @@ function Build-LogbookPopupXaml($cfg) {
     $tKet     = ConvertTo-LogbookXmlText ([string]$cfg.text.ketLabel)
     $tSubmit  = ConvertTo-LogbookXmlText ([string]$cfg.text.submit)
     $tHint    = ConvertTo-LogbookXmlText ([string]$cfg.text.hint)
+    $tHeading = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'signinTitle' 'Mulai sesi')
 
     $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
     $purposeItems = (@($cfg.purposes)    | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
@@ -1235,162 +2319,145 @@ function Build-LogbookPopupXaml($cfg) {
     # ShowInTaskbar=True is the safer, lower-risk direction to try first.
     # Same change applied to every other fullscreen/topmost window this
     # client shows (welcome-back, lock, emergency overlay, timer widget).
+    $res = Build-LogbookClientResources $cfg
+    # v3 sign-in popup (design: docs/design_handoff_logix_v3/
+    # "LogiX Sign-in Popup.dc.html", README section 6).
+    #
+    # A 320px dark dialog (radius 22) centred over a dimmed full-screen scrim,
+    # matching the pill's visual language. Shown for PHYSICAL access only --
+    # SSH/AnyDesk sessions are logged from remote-login credentials and never
+    # raise this window.
+    #
+    # Deviation from the prototype, deliberate: the design draws three fields
+    # (NIM, Tujuan, read-only access type). This build also renders Nama and
+    # Keterangan because `requiredFields` in config can demand them and the
+    # session schema (which we must not change) stores them -- dropping the
+    # inputs would leave those columns permanently empty in every report. The
+    # layout, spacing and type scale are otherwise the design's.
+    #
+    # Element names are the existing contract logbook_popup.ps1 binds to
+    # (NamaBox / NimBox / AccessBox / TujuanBox / KetBox / SubmitBtn /
+    # HintText / StartTimeText / MainCard / BgImage / MascotImage); only the
+    # presentation changed, so the controller keeps working untouched.
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" Background="$surface"
-        AllowsTransparency="True" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True"
+        Background="$overlay" FontFamily="Segoe UI">
   <Window.Resources>
-    <SolidColorBrush x:Key="PrussianBlue" Color="$primary" />
-    <SolidColorBrush x:Key="Silver" Color="$muted" />
-    <SolidColorBrush x:Key="Pompadour" Color="$accent" />
-    <SolidColorBrush x:Key="WhiteBrush" Color="$text" />
-
-    <Style x:Key="LabelTextStyle" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="FontSize" Value="13" />
-      <Setter Property="Foreground" Value="$text" />
-      <Setter Property="Margin" Value="0,0,0,7" />
+$res
+    <!-- Dark field: hairline border, radius 12, accent ring on focus. -->
+    <Style x:Key="LxField" TargetType="TextBox">
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="CaretBrush" Value="{StaticResource LxAccent}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="FieldBg" CornerRadius="12" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="FieldBg" Property="BorderBrush" Value="{StaticResource LxAccent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
-
-    <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
-      <Setter Property="Height" Value="44" />
-      <Setter Property="Padding" Value="12,8" />
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="Medium" />
-      <Setter Property="BorderBrush" Value="$muted" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Background" Value="$primary" />
-      <Setter Property="Foreground" Value="$text" />
-      <Setter Property="CaretBrush" Value="$text" />
-      <Setter Property="SelectionBrush" Value="$accent" />
-      <Setter Property="SelectionTextBrush" Value="$text" />
-    </Style>
-
-    <Style x:Key="ReadableComboBoxItemStyle" TargetType="ComboBoxItem">
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Background" Value="$text" />
-      <Setter Property="Foreground" Value="$accent" />
-      <Setter Property="Padding" Value="10,7" />
-      <Setter Property="MinHeight" Value="36" />
-      <Setter Property="BorderBrush" Value="#E6E6E6" />
-      <Setter Property="BorderThickness" Value="0,0,0,1" />
-    </Style>
-
-    <Style x:Key="ReadableComboBoxStyle" TargetType="ComboBox">
-      <Setter Property="Height" Value="44" />
-      <Setter Property="Padding" Value="8,6" />
-      <Setter Property="FontFamily" Value="Segoe UI" />
-      <Setter Property="FontSize" Value="14" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Background" Value="$text" />
-      <Setter Property="Foreground" Value="$accent" />
-      <Setter Property="BorderBrush" Value="$muted" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="TextElement.Foreground" Value="$accent" />
-      <Setter Property="ItemContainerStyle" Value="{StaticResource ReadableComboBoxItemStyle}" />
+    <Style x:Key="LxFieldLabel" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{StaticResource LxMuted}"/>
+      <Setter Property="Margin" Value="0,0,0,6"/>
     </Style>
   </Window.Resources>
 
   <Grid>
-    <Image Name="BgImage" Stretch="Fill" Opacity="0.88">
-      <Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect>
-    </Image>
-    <Rectangle Fill="$overlay" />
+    <!-- Kept for the controller's optional wallpaper/mascot hooks; the v3
+         dialog itself is chrome-free, so both start collapsed. -->
+    <Image Name="BgImage" Stretch="UniformToFill" Opacity="0.18" Visibility="Collapsed"/>
 
-    <Border Name="MainCard" Width="790" CornerRadius="18" BorderBrush="$border" BorderThickness="1" Background="$primary"
-            HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True">
-      <Border.Effect><DropShadowEffect BlurRadius="32" ShadowDepth="0" Opacity="0.42" Color="$accent" /></Border.Effect>
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <Border Name="MainCard" Width="320" CornerRadius="22" Padding="28,26"
+            Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="20" Direction="270" Opacity="0.55" Color="#000000"/></Border.Effect>
+      <StackPanel>
 
-        <Border Grid.Row="0" CornerRadius="18,18,0,0" Padding="30,26,30,24" BorderBrush="$text" BorderThickness="0,0,0,1">
-          <!-- Mascot hero: the faculty mascot (MascotImage, populated from
-               branding.logoPath in logbook_popup.ps1) sits centred above the
-               wordmark and title. LogoText stays the wordmark fallback and is
-               always shown beneath the mascot. -->
-          <StackPanel HorizontalAlignment="Center">
-            <Image Name="MascotImage" Height="132" MaxWidth="240" Stretch="Uniform" HorizontalAlignment="Center"
-                   SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" Margin="0,0,0,12" />
-            <TextBlock Name="LogoText" Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="30"
-                       FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
-            <TextBlock Text="$title" FontFamily="Segoe UI" FontSize="20" FontWeight="SemiBold"
-                       Foreground="$text" HorizontalAlignment="Center" Margin="0,4,0,0" />
-            <TextBlock Text="$subtitle" FontFamily="Segoe UI" FontSize="13" Foreground="$muted"
-                       HorizontalAlignment="Center" Margin="0,2,0,0" />
-          </StackPanel>
-        </Border>
-
-        <StackPanel Grid.Row="1" Margin="36,28,36,34">
-          <TextBlock Text="$tIntro" FontFamily="Segoe UI" FontSize="12.5"
-                     FontWeight="SemiBold" Foreground="$text" Margin="0,0,0,7" />
-          <TextBlock Name="StartTimeText" Text="$tStart" FontFamily="Segoe UI"
-                     FontSize="12" Foreground="$muted" Margin="0,0,0,18" />
-
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-              <TextBlock Text="$tNama" Style="{StaticResource LabelTextStyle}" />
-              <TextBox Name="NamaBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-              <TextBlock Text="$tNim" Style="{StaticResource LabelTextStyle}" />
-              <TextBox Name="NimBox" Style="{StaticResource InputTextBoxStyle}" Margin="0,0,0,15" />
-            </StackPanel>
-          </Grid>
-
-          <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="230" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0">
-              <TextBlock Text="$tAccess" Style="{StaticResource LabelTextStyle}" />
-              <ComboBox Name="AccessBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
-$accessItems
-              </ComboBox>
-            </StackPanel>
-            <StackPanel Grid.Column="2">
-              <TextBlock Text="$tPurpose" Style="{StaticResource LabelTextStyle}" />
-              <ComboBox Name="TujuanBox" Style="{StaticResource ReadableComboBoxStyle}" IsEditable="True" IsReadOnly="True" Margin="0,0,0,15">
-$purposeItems
-              </ComboBox>
-            </StackPanel>
-          </Grid>
-
-          <TextBlock Text="$tKet" Style="{StaticResource LabelTextStyle}" />
-          <TextBox Name="KetBox" Style="{StaticResource InputTextBoxStyle}" Height="122" Padding="12,10" TextWrapping="Wrap" AcceptsReturn="True"
-                   VerticalScrollBarVisibility="Auto" Margin="0,0,0,20" />
-
-          <Grid Margin="0,0,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="18" />
-              <ColumnDefinition Width="198" />
-            </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="$primary" CornerRadius="10" Padding="12,9" BorderBrush="$border" BorderThickness="1">
-              <TextBlock Name="HintText" Text="$tHint"
-                         FontFamily="Segoe UI" FontSize="11.5" FontWeight="SemiBold" Foreground="$muted" TextWrapping="Wrap" />
-            </Border>
-            <Button Grid.Column="2" Name="SubmitBtn" Height="48" Content="$tSubmit" FontFamily="Segoe UI"
-                    FontSize="21" FontWeight="Bold" Background="$accent" Foreground="$text" BorderBrush="$border"
-                    BorderThickness="1" IsEnabled="False" Opacity="0.45" />
-          </Grid>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+          <Border Width="26" Height="26" CornerRadius="8" Background="{StaticResource LxAccent}" Margin="0,0,9,0">
+            <TextBlock Text="&gt;_" FontFamily="Consolas" FontSize="12" FontWeight="Bold"
+                       Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Name="LogoText" Text="$logoText" FontFamily="Consolas" FontSize="13"
+                     Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+          <Image Name="MascotImage" Width="0" Height="0" Visibility="Collapsed"/>
         </StackPanel>
-      </Grid>
+
+        <!-- Short heading + the configured intro as supporting copy. The
+             design's heading is two words; `text.intro` is a full sentence,
+             so it reads as body rather than clipping the title. -->
+        <TextBlock Text="$tHeading" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Foreground="{StaticResource LxText}" Margin="0,0,0,4"/>
+        <TextBlock Text="$tIntro" FontSize="12" TextWrapping="Wrap" LineHeight="17"
+                   Foreground="{StaticResource LxMuted}" Margin="0,0,0,18"/>
+
+        <TextBlock Text="$tNim" Style="{StaticResource LxFieldLabel}"/>
+        <TextBox Name="NimBox" Style="{StaticResource LxField}" FontFamily="Consolas" Margin="0,0,0,14"/>
+
+        <TextBlock Text="$tNama" Style="{StaticResource LxFieldLabel}"/>
+        <TextBox Name="NamaBox" Style="{StaticResource LxField}" Margin="0,0,0,14"/>
+
+        <TextBlock Text="$tPurpose" Style="{StaticResource LxFieldLabel}"/>
+        <ComboBox Name="TujuanBox" Style="{StaticResource LxCombo}" IsEditable="True" Margin="0,0,0,14">
+$purposeItems
+          <ComboBoxItem Content="Lainnya - tulis sendiri..." />
+        </ComboBox>
+
+        <TextBlock Text="$tKet" Style="{StaticResource LxFieldLabel}"/>
+        <TextBox Name="KetBox" Style="{StaticResource LxField}" Margin="0,0,0,14"/>
+
+        <!-- Access type is auto-detected, never a user choice: the control is
+             present so the controller can select the detected value, but it is
+             disabled and reads as a status line with a dot. -->
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+          <Ellipse Width="8" Height="8" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <TextBlock Text="$tAccess" FontSize="12" Foreground="{StaticResource LxMuted}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <ComboBox Name="AccessBox" Style="{StaticResource LxCombo}" IsEnabled="False" FontSize="12" BorderThickness="0" Padding="0" VerticalAlignment="Center">
+$accessItems
+          </ComboBox>
+        </StackPanel>
+
+        <Button Name="SubmitBtn" Content="$tSubmit" Style="{StaticResource LxPill}"
+                Padding="0,11" HorizontalContentAlignment="Center" FontSize="13"
+                Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                Foreground="#FFFFFF" Margin="0,0,0,14"/>
+
+        <!-- Inline validation: one sentence telling the user how to fix it.
+             No shake, no separate dialog. -->
+        <TextBlock Name="HintText" Text="$tHint" FontSize="11.5" TextWrapping="Wrap"
+                   TextAlignment="Center" Foreground="{StaticResource LxMuted}" Margin="0,0,0,10"/>
+
+        <TextBlock Name="StartTimeText" Text="$tStart" FontSize="11" TextWrapping="Wrap"
+                   TextAlignment="Center" LineHeight="16" Foreground="{StaticResource LxMuted}"/>
+
+        <!-- Multi-monitor: one chip per display, filled in by the controller
+             (Add-LogbookMonitorPicker) because the number of displays is not
+             known until runtime. Collapsed by default and left that way on a
+             single-screen machine, so the ordinary case gains no extra step,
+             no extra question, and not one pixel of height. It is only ever
+             a CORRECTION affordance: the dialog has already placed itself on
+             the display the user is working at. -->
+        <StackPanel Name="MonitorPicker" Visibility="Collapsed" Orientation="Horizontal"
+                    HorizontalAlignment="Center" Margin="0,16,0,0"/>
+      </StackPanel>
     </Border>
   </Grid>
 </Window>
@@ -1480,43 +2547,53 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
 "@
 }
 
-function Build-LogbookEmergencyOverlayXaml($cfg) {
-    # Emergency countdown (design: LogiX Notifications S3). A shutdown in 30s is
-    # too important for the corner widget, so Variant 3 escapes to a centered,
-    # dimmed-backdrop, always-on-top overlay. Big live Consolas numeral, red,
-    # pulsing ring. The controller drives CountNumber via a DispatcherTimer.
-    $theme  = Get-LogbookTheme $cfg
-    $red    = $theme.signalCritical; $text = $theme.text; $muted = $theme.muted
-    $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
-    $tTitle = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencyTitle' 'Peringatan Sistem')
-    $tBody  = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencyBody' 'Perangkat ini akan dimatikan oleh admin. Simpan pekerjaan Anda sekarang.')
-    $tSaved = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'emergencySaved' 'Saya sudah menyimpan')
-    $device = ConvertTo-LogbookXmlText (Get-LogbookDeviceDisplayName)
+function Build-LogbookCountdownOverlayXaml($cfg) {
+    # The shared "escape both postures" overlay (design: D-02 state 08). One
+    # component serves BOTH the idle auto-end warning and an admin Emergency
+    # Broadcast -- the controller shows/hides the countdown numeral and swaps
+    # the action row rather than there being two overlays to keep in step.
+    #
+    # Dimmed backdrop + a single centered 360px card, radius 22. Both action
+    # labels are TextWrapping="NoWrap" so "Perpanjang sesi" / "Selesai
+    # sekarang" can never break across two lines.
+    $res = Build-LogbookClientResources $cfg
+    $tExtend = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'overlayExtend' 'Perpanjang sesi')
+    $tEndNow = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'overlayEndNow' 'Selesai sekarang')
+    $tAck    = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'overlayAck' 'Saya paham')
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="#CC070C15" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True"
+        Background="#B805080D" FontFamily="Segoe UI">
+  <Window.Resources>
+$res
+  </Window.Resources>
   <Grid>
-    <Border Width="440" CornerRadius="16" Background="$elevated" BorderBrush="$red" BorderThickness="1"
-            HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30" >
-      <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="0" Opacity="0.6" Color="#000000" /></Border.Effect>
+    <Border Name="OverlayCard" Width="360" CornerRadius="22" Padding="26,24" RenderTransformOrigin="0.5,0.5"
+            Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border.RenderTransform><ScaleTransform x:Name="OverlayScale" ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+      <Border.Effect><DropShadowEffect BlurRadius="64" ShadowDepth="20" Direction="270" Opacity="0.6" Color="#000000"/></Border.Effect>
       <StackPanel HorizontalAlignment="Center">
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
-          <Ellipse Width="10" Height="10" Fill="$red" Margin="0,0,9,0" VerticalAlignment="Center"/>
-          <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="16" FontWeight="Bold" Foreground="$red" VerticalAlignment="Center"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
+          <Ellipse Name="OverlayDot" Width="8" Height="8" Fill="{StaticResource LxCritical}" VerticalAlignment="Center" Margin="0,0,7,0"/>
+          <TextBlock Name="OverlayTitle" Text="Sesi berakhir dalam" FontFamily="Segoe UI Semibold" FontSize="13"
+                     Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
         </StackPanel>
-        <TextBlock Text="$device" FontFamily="Consolas" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-        <Grid Width="180" Height="180" HorizontalAlignment="Center">
-          <Ellipse Name="Ring" Width="180" Height="180" Stroke="$red" StrokeThickness="4" Opacity="0.85"/>
-          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-            <TextBlock Name="CountNumber" Text="30" FontFamily="Consolas" FontSize="76" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center"/>
-            <TextBlock Text="detik" FontFamily="Segoe UI" FontSize="13" Foreground="$muted" HorizontalAlignment="Center" Margin="0,-6,0,0"/>
-          </StackPanel>
-        </Grid>
-        <TextBlock Text="$tBody" FontSize="14" Foreground="$text" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360" Margin="0,16,0,18"/>
-        <Button Name="SavedBtn" Content="$tSaved" Height="44" MinWidth="200" Cursor="Hand"
-                Background="$red" Foreground="#FFFFFF" BorderThickness="0" FontFamily="Segoe UI Semibold" FontSize="15" FontWeight="Bold"/>
+        <TextBlock Name="CountNumber" Text="05:00" FontFamily="Consolas" FontSize="44" LineHeight="51"
+                   Foreground="{StaticResource LxCritical}" HorizontalAlignment="Center"/>
+        <TextBlock Name="OverlayBody" Text="" FontSize="12" Foreground="{StaticResource LxMuted}"
+                   TextWrapping="Wrap" TextAlignment="Center" MaxWidth="308" Margin="0,6,0,16"/>
+        <StackPanel Name="OverlayActions" Orientation="Horizontal" HorizontalAlignment="Center">
+          <Button Name="ExtendBtn" Content="$tExtend" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"
+                  Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                  Foreground="#FFFFFF" Margin="0,0,8,0"/>
+          <Button Name="EndNowBtn" Content="$tEndNow" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"/>
+          <Button Name="AckBtn" Content="$tAck" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"
+                  Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                  Foreground="#FFFFFF" Visibility="Collapsed"/>
+        </StackPanel>
       </StackPanel>
     </Border>
   </Grid>
@@ -1532,6 +2609,7 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
     $accent = $theme.accent; $text = $theme.text; $muted = $theme.muted
     $surface = $theme.surface; $elevated = $theme.surfaceElevated; $border = $theme.border
     $warn   = $theme.signalWarning
+    $res    = Build-LogbookClientResources $cfg
     $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
     $namaX  = ConvertTo-LogbookXmlText $Nama
     $reasonX = ConvertTo-LogbookXmlText $Reason
@@ -1548,6 +2626,9 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="Segoe UI">
+  <Window.Resources>
+$res
+  </Window.Resources>
   <Grid>
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
       <Image Name="MascotImage" Height="96" Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,10"/>
@@ -1555,12 +2636,14 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
       <TextBlock Name="LockClock" Text="--:--" FontFamily="Consolas" FontSize="15" Foreground="$muted" HorizontalAlignment="Center" Margin="0,6,0,22"/>
       <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="20" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" TextAlignment="Center"/>
       <TextBlock Text="$tPaused" FontSize="14" Foreground="$muted" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,20"/>
-      <Border Background="$elevated" CornerRadius="12" BorderBrush="$border" BorderThickness="1" Padding="20,16" Margin="0,0,0,20">
+      <Border Background="$elevated" CornerRadius="22" BorderBrush="$border" BorderThickness="1" Padding="20,16" Margin="0,0,0,20">
         <StackPanel>
+          <!-- v3: status is a dot plus a label, never a tinted pill. The
+               amber fill this badge used to carry was the one guard-rail
+               violation left on this screen. -->
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,10">
-            <Border Background="#22F59E0B" CornerRadius="999" Padding="9,3" Margin="0,0,10,0">
-              <TextBlock Text="$tBadge" FontFamily="Segoe UI Semibold" FontSize="11" FontWeight="Bold" Foreground="$warn"/>
-            </Border>
+            <Ellipse Width="8" Height="8" Fill="$warn" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBlock Text="$tBadge" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$text" VerticalAlignment="Center" Margin="0,0,10,0"/>
             <TextBlock Text="$tElapsed" FontSize="12" Foreground="$muted" VerticalAlignment="Center"/>
           </StackPanel>
           <TextBlock Name="LockElapsed" Text="00:00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" Margin="0,0,0,12"/>
@@ -1577,229 +2660,579 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
         </StackPanel>
       </Border>
       <TextBlock Text="$tHint" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-      <Button Name="UnlockBtn" Content="$tUnlock" Height="46" MinWidth="220" HorizontalAlignment="Center" Cursor="Hand"
-              Background="$accent" Foreground="#FFFFFF" BorderThickness="0" FontFamily="Segoe UI Semibold" FontSize="15" FontWeight="Bold"/>
+      <Button Name="UnlockBtn" Content="$tUnlock" Style="{StaticResource LxPill}" MinWidth="220"
+              HorizontalAlignment="Center" Padding="24,12" FontSize="14"
+              Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}" Foreground="#FFFFFF"/>
     </StackPanel>
   </Grid>
 </Window>
 "@
 }
 
-# Chamfered-rounded shape path data (three rounded corners, a diagonal
-# chamfer replacing the top-right one), parameterized by content height and
-# width so it can be recomputed at runtime as the timer widget grows/shrinks
-# (collapsed clock-only <-> expanded info <-> message extension). r/c are
-# fixed; height and width vary. See logbook_timer.ps1's
-# Sync-LogbookTimerShape.
-function Get-LogbookTimerShapeData([double]$ContentHeight, [double]$ContentWidth = 320) {
-    $r = 20; $c = 44
-    # Clamped to a sane range -- defense in depth against any future bug
-    # feeding this a wildly wrong size (a prior version of the
-    # message-extend animation had exactly that bug, filling the screen).
-    $h = [Math]::Round([Math]::Min([Math]::Max($ContentHeight, 90), 500))
-    $w = [Math]::Round([Math]::Min([Math]::Max($ContentWidth, 150), 500))
-    return "M $r,0 L $($w-$c),0 L $w,$c L $w,$($h-$r) A $r,$r 0 0 1 $($w-$r),$h L $r,$h A $r,$r 0 0 1 0,$($h-$r) L 0,$r A $r,$r 0 0 1 $r,0 Z"
+# Timer widget -- v3 "Pill & Strip" (design: docs/design_handoff_logix_v3/
+# "LogiX Timer Pill & Strip.dc.html", README section 5).
+#
+# One instrument, two postures, both anchored to the TOP EDGE of the screen:
+#   Pill   150x32 capsule at rest; hover expands it to a 240px card.
+#   Strip  a 3px full-width line (a separate click-through window, see
+#          Build-LogbookStripXaml); dwelling at the top edge drops a 24px
+#          sliver from THIS window.
+# Double-click toggles the posture and the choice is remembered across
+# sessions. All three visuals live in one window and are swapped by
+# Visibility, so there is a single always-on-top surface to manage.
+#
+# Sizing is SizeToContent -- unlike the previous chamfered-Path widget, every
+# surface here is a plain Border with CornerRadius, so there is no Path
+# geometry or Grid.Clip to keep in sync and WPF's own measure pass is
+# trustworthy. RootVisual carries a 16px margin purely as bleed room for the
+# drop shadows.
+#
+# Guard rails: no gradient, no glow, no pulse. The status dot is a static 8px
+# Ellipse. Colours come exclusively from Build-LogbookClientResources.
+# ---- Click-through -----------------------------------------------------------
+#
+# A WPF window with AllowsTransparency + Background="Transparent" still HIT-TESTS
+# across its entire rectangle. For the timer widget that rectangle is the pill
+# PLUS the invisible margin its drop shadow needs, parked on the top edge of the
+# screen -- exactly where browser tab strips and title-bar buttons live. The
+# reported symptom was browser tabs that simply would not click.
+#
+# The fix is WS_EX_TRANSPARENT, toggled from a cursor poll: on while the pointer
+# is anywhere else (every click falls straight through to the app underneath),
+# off the moment the pointer reaches the widget's visible surface.
+#
+# Why not answer WM_NCHITTEST with HTTRANSPARENT, which is the textbook answer?
+# Because that requires writing to the hook's `ref bool handled` parameter, and
+# a PowerShell scriptblock converted to a delegate cannot write to a ref
+# parameter -- the assignment is silently dropped, WPF never sees handled=true,
+# and the return value is ignored. It looks correct and does nothing;
+# test_logbook_clickthrough.ps1 is what caught it.
+# Deliberately its own type rather than the timer's LogixWin: this file is
+# dot-sourced by scripts that never create a widget, and keeping the helper
+# self-contained is what lets the click-through be tested on its own.
+# Compiled on first use -- see Use-LogbookNativeType for why that matters.
+$script:LogixClickThroughSrc = @"
+using System;
+using System.Runtime.InteropServices;
+public static class LogixClickThrough {
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X; public int Y; }
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongPtr")] static extern IntPtr GetLongPtr64(IntPtr h, int i);
+    [DllImport("user32.dll", EntryPoint="GetWindowLong")] static extern int GetLong32(IntPtr h, int i);
+    [DllImport("user32.dll", EntryPoint="SetWindowLongPtr")] static extern IntPtr SetLongPtr64(IntPtr h, int i, IntPtr v);
+    [DllImport("user32.dll", EntryPoint="SetWindowLong")] static extern int SetLong32(IntPtr h, int i, int v);
+    // High bit set = physically down right now. Polled, not hooked -- this is
+    // for "did the user click OUTSIDE the popup", the same signal a native
+    // dropdown/menu uses to dismiss itself.
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+    const int VK_LBUTTON = 0x01;
+    public static bool LeftButtonDown() { return (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0; }
+
+    static long Ex(IntPtr h) {
+        return IntPtr.Size == 8 ? GetLongPtr64(h, GWL_EXSTYLE).ToInt64() : (long)(uint)GetLong32(h, GWL_EXSTYLE);
+    }
+    public static POINT Cursor() { POINT p; GetCursorPos(out p); return p; }
+    public static bool IsOn(IntPtr h) { return (Ex(h) & WS_EX_TRANSPARENT) != 0; }
+
+    // Read-modify-write so the caller's WS_EX_TOOLWINDOW / WS_EX_NOACTIVATE
+    // survive. Widening through uint first, never a bare int|long: that is the
+    // CS0675 sign-extension warning, and Add-Type treats warnings as errors.
+    public static void Set(IntPtr h, bool on) {
+        long cur = Ex(h);
+        long bit = (long)(uint)WS_EX_TRANSPARENT;
+        long next = on ? (cur | bit) : (cur & ~bit);
+        if (next == cur) return;
+        if (IntPtr.Size == 8) { SetLongPtr64(h, GWL_EXSTYLE, new IntPtr(next)); }
+        else { SetLong32(h, GWL_EXSTYLE, (int)(uint)next); }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int L, T, R, B; }
+    [DllImport("user32.dll", EntryPoint = "GetWindowRect")] static extern bool GetWindowRectRaw(IntPtr h, out RECT r);
+    // The window's TRUE on-screen footprint, in the same physical pixels
+    // GetCursorPos reports. Needed because this host (plain powershell.exe,
+    // no per-monitor-v2 manifest) is not DPI-aware -- Windows silently
+    // bitmap-scales the whole window for display, and WPF's own
+    // PointToScreen has no idea that happened, so it keeps answering in the
+    // UN-scaled logical space. The two agree near the window's origin and
+    // drift apart with distance from it, which is why a short pill was fine
+    // and a tall card was not: the drift is proportional to how far down
+    // the element sits.
+    public static RECT WindowRect(IntPtr h) { RECT r; GetWindowRectRaw(h, out r); return r; }
+}
+"@
+
+# Compile a P/Invoke helper the first time something actually calls it.
+#
+# Add-Type shells out to csc.exe: roughly 370ms for the first type in a process
+# and 250ms for every one after. Compiling at file scope charged that to EVERY
+# script that dot-sources this file, whether or not it uses the type -- and the
+# sign-in popup, the one surface a person stands there waiting for at login, was
+# paying ~570ms for a click-through helper and an idle-input helper it never
+# touches. Parsing this whole file, by comparison, costs 18ms.
+function Use-LogbookNativeType {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Source
+    )
+    if (([System.Management.Automation.PSTypeName]$Name).Type) { return }
+    Add-Type -TypeDefinition $Source
 }
 
-# Session timer widget (Logix Control dashboard follow-up). Same
-# pure-string-building pattern as Build-LogbookPopupXaml above -- config-
-# driven colors, XML-escaped free-text inputs. The shape is a single Path
-# geometry used both as the border/fill layer and, via Grid.Clip, to clip
-# the content layer so nothing renders past the cut corner.
-# Base fill is a fixed near-black -- "dominated by black" is a deliberate
-# constant, not config-driven; only the primary/accent accents come from
-# branding.colors.
-#
-# Width is FIXED at the narrow clock width -- the widget must only ever
-# grow DOWNWARD (an explicit product decision; a first iteration that also
-# widened on hover was rejected). Height is driven by two independently
-# toggleable sections --
-#   InfoSection    (nama/tujuan/device + accent bar): visible for the
-#                  first 10s of a session or while the user hovers the
-#                  widget, collapsed otherwise so the user can focus on
-#                  the time, not the data.
-#   MessageSection (an incoming admin message): collapsed by default,
-#                  animated open/closed by logbook_timer.ps1, extending
-#                  the shape downward from wherever it currently ends --
-#                  below the timer if InfoSection is collapsed, below the
-#                  full info block if it's expanded.
-# Both sections are Grid rows sized "Auto", so a Collapsed section takes
-# zero space -- no reserved blank area, unlike an earlier "*"-row design.
-# Everything inside must fit the narrow width: values ellipsize, message
-# text wraps.
+# Screen rectangle of a laid-out element, in physical pixels. Two PointToScreen
+# calls rather than ActualWidth arithmetic, so it is correct at any DPI and
+# follows the pill as it auto-sizes -- no rectangle here can drift out of step
+# with the XAML.
+# PointToScreen alone is wrong on this host: plain powershell.exe carries no
+# per-monitor-v2 manifest, so Windows bitmap-scales the whole window for
+# display while WPF's PointToScreen keeps answering in the un-scaled logical
+# space. The two agree near the window's origin and drift apart with distance
+# from it -- harmless for a short pill, but the redesigned card is tall enough
+# that its bottom (the SELESAI button) landed outside its own click-through
+# rect. Ground truth instead in the window's real GetWindowRect (physical
+# pixels, same space GetCursorPos reports) and scale this element's
+# window-relative DIP offset into that space.
+function Get-LogbookSurfaceRect($Element, [IntPtr]$Hwnd = [IntPtr]::Zero) {
+    if (-not $Element -or -not $Element.IsVisible -or $Element.ActualWidth -le 0) { return $null }
+    $win = [System.Windows.Window]::GetWindow($Element)
+    if (-not $win -or $win.ActualWidth -le 0 -or $win.ActualHeight -le 0) { return $null }
+    if ($Hwnd -eq [IntPtr]::Zero) {
+        $Hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $win).Handle
+    }
+    if ($Hwnd -eq [IntPtr]::Zero) { return $null }
+    Use-LogbookNativeType -Name 'LogixClickThrough' -Source $script:LogixClickThroughSrc
+
+    $native = [LogixClickThrough]::WindowRect($Hwnd)
+    $scaleX = ($native.R - $native.L) / $win.ActualWidth
+    $scaleY = ($native.B - $native.T) / $win.ActualHeight
+
+    $toWin = $Element.TransformToVisual($win)
+    $tl = $toWin.Transform((New-Object System.Windows.Point 0, 0))
+    $br = $toWin.Transform((New-Object System.Windows.Point $Element.ActualWidth, $Element.ActualHeight))
+
+    return @{
+        L = $native.L + ($tl.X * $scaleX)
+        T = $native.T + ($tl.Y * $scaleY)
+        R = $native.L + ($br.X * $scaleX)
+        B = $native.T + ($br.Y * $scaleY)
+    }
+}
+
+# Should the window pass clicks through, given where the pointer is? Pure, so
+# the test can drive it with synthetic points instead of moving the real mouse.
+# $Grace widens the target slightly: the pill is small on purpose now, and a
+# hover target you have to hit exactly is a worse problem than the one we fixed.
+function Test-LogbookClickThrough {
+    param($Rect, [double]$X, [double]$Y, [double]$Grace = 3)
+    if (-not $Rect) { return $true }
+    return ($X -lt ($Rect.L - $Grace) -or $X -gt ($Rect.R + $Grace) -or
+            $Y -lt ($Rect.T - $Grace) -or $Y -gt ($Rect.B + $Grace))
+}
+
+# -GetSurface returns the FrameworkElement the user can currently see (the pill,
+# the expanded card, the sliver), or $null when nothing is visible.
+# -OnPointerEnter / -OnPointerLeave let the caller drive expand/collapse from
+# this poll. That matters: while the window is click-through it receives no
+# mouse messages at all, so WPF's own MouseEnter cannot be the only trigger.
+function Register-LogbookClickThrough {
+    param(
+        [Parameter(Mandatory)] $Window,
+        [Parameter(Mandatory)] [scriptblock] $GetSurface,
+        [scriptblock] $OnPointerEnter,
+        [scriptblock] $OnPointerLeave,
+        # Fires on a left-click that lands OUTSIDE the current surface --
+        # dismiss-on-outside-click, the same rule every native menu/dropdown
+        # uses. Only meaningful while the caller considers something "open"
+        # (GetSurface returning non-null); a caller with nothing open should
+        # just not need it.
+        [scriptblock] $OnOutsideClick,
+        [int] $PollMs = 40,
+        [double] $Grace = 3
+    )
+    Use-LogbookNativeType -Name 'LogixClickThrough' -Source $script:LogixClickThroughSrc
+    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $Window).Handle
+    if ($hwnd -eq [IntPtr]::Zero) {
+        throw "Register-LogbookClickThrough needs a realised window (call it from SourceInitialized or later)."
+    }
+    # Start click-through: the pointer is not on the widget the instant it appears.
+    [LogixClickThrough]::Set($hwnd, $true)
+
+    $st = [pscustomobject]@{ Hwnd = $hwnd; Get = $GetSurface; Grace = $Grace
+                             Enter = $OnPointerEnter; Leave = $OnPointerLeave
+                             Outside = $OnOutsideClick; Over = $false; WasDown = $false }
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromMilliseconds($PollMs)
+    $timer.Add_Tick({
+        try {
+            $p = [LogixClickThrough]::Cursor()
+            $rect = Get-LogbookSurfaceRect (& $st.Get) $st.Hwnd
+            $through = Test-LogbookClickThrough -Rect $rect -X $p.X -Y $p.Y -Grace $st.Grace
+            [LogixClickThrough]::Set($st.Hwnd, $through)
+
+            $over = -not $through
+            if ($over -ne $st.Over) {
+                $st.Over = $over
+                if ($over) { if ($st.Enter) { & $st.Enter } }
+                else       { if ($st.Leave) { & $st.Leave } }
+            }
+
+            # Edge-triggered on the button transition, not "is it down" --
+            # otherwise a click that STARTED outside and dragged in (or a
+            # held button from before the surface even opened) would fire
+            # every single poll tick while held.
+            $down = [LogixClickThrough]::LeftButtonDown()
+            if ($down -and -not $st.WasDown -and $through -and $rect -and $st.Outside) {
+                & $st.Outside
+            }
+            $st.WasDown = $down
+        } catch { }
+    }.GetNewClosure())
+    $timer.Start()
+    # Handed back so the caller can stop it on shutdown, and so a test can tick
+    # it by hand.
+    return $timer
+}
+
 function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
-    $theme        = Get-LogbookTheme $cfg
-    $accent       = $theme.accent
-    $muted        = $theme.muted
-    $text         = $theme.text
-    $primary        = $theme.surfaceElevated
-    $widget         = $theme.surfaceWidget
-    $border         = $theme.border
-    $signalNormal   = $theme.signalNormal
-    $signalWarning  = $theme.signalWarning
-    $signalCritical = $theme.signalCritical
-    $tSelesai       = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEnd' 'SELESAI')
+    $res = Build-LogbookClientResources $cfg
+    $tSelesai = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEndHold' 'Tahan untuk selesai')
+    # Baked in rather than filled at press time. The caption has to occupy its
+    # final height from the very first layout: it is Hidden, not Collapsed, so
+    # revealing it cannot change the card's size. See the XAML note below.
+    $tArmed = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'timerEndArmed' 'Terus tahan...')
 
-    $sessionType = ConvertTo-LogbookXmlText ([string]$session.session_type)
-    $nama        = ConvertTo-LogbookXmlText ([string]$session.nama)
-    $tujuan      = ConvertTo-LogbookXmlText ([string]$session.tujuan)
-    $device      = ConvertTo-LogbookXmlText ([string]$deviceName)
-
-    # Fixed initial height (matches HEIGHT_EXPANDED in logbook_timer.ps1 --
-    # InfoSection defaults to Visible). Deliberately NOT SizeToContent --
-    # two earlier attempts at having WPF auto-size the window (first via
-    # SizeToContent toggling, then via Measure()/DesiredSize) both produced
-    # wrong/huge heights that only surfaced on a live Windows run, not in
-    # XML-structural tests. logbook_timer.ps1 owns height transitions
-    # entirely via a small set of fixed target heights instead. Width 230
-    # (shape 210) is the permanent width -- sized for the clock, verified
-    # headlessly to fit worst-case digits with slack.
-    $seedShapeData = Get-LogbookTimerShapeData 190 210
+    $nama   = ConvertTo-LogbookXmlText ([string]$session.nama)
+    $tujuan = ConvertTo-LogbookXmlText ([string]$session.tujuan)
+    # A display name reads "WS-07 - GPU-A100": the station ID is the card
+    # header's right-hand identity, the spec goes on the Perangkat row next to
+    # the access type. Split only on a SPACED separator (" - " or a spaced middle dot) --
+    # "WS-07" contains a hyphen itself, so an unspaced split leaves just "WS".
+    $parts = [regex]::Split([string]$deviceName, '\s+(?:-|\u00B7)\s+')
+    $station = ConvertTo-LogbookXmlText ($parts[0].Trim())
+    $spec = if ($parts.Count -gt 1) { (($parts[1..($parts.Count - 1)]) -join ' ').Trim() } else { $parts[0].Trim() }
+    $access = ConvertTo-LogbookXmlText ([string]$session.session_type)
+    $perangkat = ConvertTo-LogbookXmlText $spec
+    if ($access) { $perangkat = "$perangkat &#183; $access" }
 
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="230" Height="210" WindowStyle="None" ResizeMode="NoResize"
-        Topmost="True" ShowInTaskbar="True" AllowsTransparency="True" Background="Transparent" Left="18" Top="18">
-  <Grid Name="RootVisual" RenderTransformOrigin="0.5,0.5">
-    <Grid.RenderTransform>
-      <!-- Scaled/faded on entrance by logbook_timer.ps1 for the center-stage
-           reveal before the widget glides to its top-left dock. Origin 0.5,0.5
-           so it grows from its own center. Default 1,1 keeps the widget fully
-           visible if the entrance animation never runs. -->
-      <ScaleTransform ScaleX="1" ScaleY="1"/>
-    </Grid.RenderTransform>
-    <Path Name="ShapePath" Margin="10" Fill="$widget" Stroke="$border" StrokeThickness="1.3" Data="$seedShapeData">
-      <Path.Effect>
-        <DropShadowEffect BlurRadius="22" ShadowDepth="0" Opacity="0.55" Color="#070C15" />
-      </Path.Effect>
-    </Path>
+        WindowStyle="None" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
+        Topmost="True" ShowInTaskbar="False" AllowsTransparency="True"
+        Background="Transparent" FontFamily="Segoe UI" Left="0" Top="0">
+  <Window.Resources>
+$res
+  </Window.Resources>
 
-    <Grid Name="ContentGrid" Margin="10" Clip="$seedShapeData">
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-      </Grid.RowDefinitions>
+  <Grid Name="RootVisual" Margin="20,6,20,36">
 
-      <Grid Grid.Row="0" Margin="18,14,18,0">
-        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <Ellipse Name="Pulse" Width="8" Height="8" Fill="$signalNormal" Margin="0,3,8,0" VerticalAlignment="Center" />
-        <TextBlock Name="Label" Grid.Column="1" Text="$sessionType" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-      </Grid>
-
-      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="18,4,18,4" VerticalAlignment="Bottom">
-        <TextBlock Name="ClockMain" Text="00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text"/>
-        <TextBlock Name="ClockSeconds" Text="00" FontFamily="Consolas" FontSize="16" FontWeight="Bold" Foreground="$muted" Margin="4,0,0,6" VerticalAlignment="Bottom"/>
-      </StackPanel>
-
-      <StackPanel Grid.Row="2" Name="InfoSection" Visibility="Visible">
-        <Border Height="1" Background="#22FFFFFF" Margin="18,0,18,8"/>
-
-        <Grid Margin="18,0,18,4">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Nama" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-          <TextBlock Grid.Column="1" Name="NamaValue" Text="$nama" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <Grid Margin="18,0,18,4">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Tujuan" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-          <TextBlock Grid.Column="1" Name="TujuanValue" Text="$tujuan" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <Grid Margin="18,0,18,8">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <TextBlock Text="Device" FontFamily="Segoe UI" FontSize="10.5" Foreground="$muted"/>
-          <TextBlock Grid.Column="1" Name="DeviceValue" Text="$device" FontFamily="Segoe UI Semibold" FontSize="10.5" Foreground="$text" TextTrimming="CharacterEllipsis"/>
-        </Grid>
-
-        <Border Height="4" Margin="18,0,18,12" CornerRadius="2">
-          <Border.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-              <GradientStop Color="$primary" Offset="0"/>
-              <GradientStop Color="$accent" Offset="1"/>
-            </LinearGradientBrush>
-          </Border.Background>
+    <!-- ===== 1. PILL (collapsed, default posture) ===================== -->
+    <Border Name="PillView" Height="26" CornerRadius="13" Padding="11,0" Opacity="0.72"
+            Background="#EB0B1017" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Top">
+      <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+      <!-- Lighter than the card's: a 26px pill under a 24/8 shadow looks like it
+           is hovering an inch off the glass. -->
+      <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="5" Direction="270" Opacity="0.35" Color="#000000"/></Border.Effect>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Ellipse Name="PillDot" Width="7" Height="7" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <TextBlock Name="PillClock" Text="00:00" FontFamily="Consolas" FontSize="12"
+                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+        <Border Name="PillBadge" Visibility="Collapsed" MinWidth="16" Height="16" CornerRadius="8"
+                Background="{StaticResource LxNotice}" Margin="8,0,0,0" VerticalAlignment="Center">
+          <TextBlock Name="PillBadgeText" Text="1" FontFamily="Consolas" FontSize="10" FontWeight="Bold"
+                     Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
         </Border>
       </StackPanel>
+    </Border>
 
-      <!-- SELESAI lives in its OWN row, a sibling of InfoSection (NOT nested
-           inside it): once revealed, present regardless of whether Nama/
-           Tujuan/Device are shown or collapsed (hover / first-10s only).
-           Two-step to prevent misclicks. Filled soft surface + icon (not a
-           hollow outline pill) so it reads as a real, deliberate control at
-           a glance; stretches to the same 18px inset every other row in
-           this card uses, so it aligns with the layout instead of floating
-           centered. Warms to the brand accent (blue) on hover; the
-           controller (logbook_timer.ps1) arms it red on first press and
-           ends the session on a confirming second press within 3s.
-           Starts Collapsed/Opacity 0: the center-stage + glide-to-dock
-           sequence shows only the clock and session data, deliberately
-           withholding the "end session" action until the widget is fully
-           settled in its resting corner. logbook_timer.ps1's
-           Show-LogbookSelesaiButton reveals it (fade + the window growing
-           to fit) right when the dock animation completes. -->
-      <Button Grid.Row="3" Name="SelesaiBtn" Content="$tSelesai" Cursor="Hand" Margin="18,0,18,12"
-              Visibility="Collapsed" Opacity="0"
-              Padding="0,10" Background="#14FFFFFF" BorderBrush="$border" BorderThickness="1" Foreground="$muted"
-              FontFamily="Segoe UI Semibold" FontSize="12" FontWeight="Bold">
-        <Button.Template>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="SelesaiBg" CornerRadius="9" Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
-              <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Path Data="M18.36 6.64A9 9 0 1 1 5.64 6.64 M12 2 L12 12" Stroke="{TemplateBinding Foreground}"
-                      StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                      Width="13" Height="13" Stretch="Uniform" Margin="0,0,7,0"/>
-                <!-- MaxWidth+TextTrimming: the armed-state label ("Tekan lagi
-                     untuk selesai") is long enough to overflow the button's
-                     ~194px width at this font/weight and get hard-clipped by
-                     the widget's own chamfered-shape Clip, found by live
-                     clicking the real widget rather than just rendering the
-                     short "SELESAI" label. 150 is comfortably under
-                     "SELESAI"'s own natural width, so it has zero effect
-                     on the normal (unarmed) state. -->
-                <TextBlock Text="{TemplateBinding Content}" VerticalAlignment="Center" MaxWidth="150" TextTrimming="CharacterEllipsis"
-                           Foreground="{TemplateBinding Foreground}" FontFamily="Segoe UI Semibold" FontSize="{TemplateBinding FontSize}" FontWeight="Bold"/>
-              </StackPanel>
-            </Border>
-            <ControlTemplate.Triggers>
-              <!-- Hover uses the brand accent (blue), not amber: "Blue is
-                   the direction, everything else is a theme" (Client
-                   Foundation). Amber/red stay reserved for the two-step
-                   arm/confirm escalation, not mere hover. -->
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="SelesaiBg" Property="Background" Value="#332563EB"/>
-                <Setter TargetName="SelesaiBg" Property="BorderBrush" Value="$accent"/>
-                <Setter Property="Foreground" Value="$accent"/>
-              </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="SelesaiBg" Property="Opacity" Value="0.75"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Button.Template>
-      </Button>
+    <!-- ===== 2. SLIVER (strip posture, peeked) ======================== -->
+    <Border Name="SliverView" Visibility="Collapsed" Height="24" CornerRadius="12"
+            Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Top" Padding="14,0">
+      <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+      <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="8" Direction="270" Opacity="0.45" Color="#000000"/></Border.Effect>
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Ellipse Name="SliverDot" Width="6" Height="6" Fill="{StaticResource LxActive}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <Border Name="SliverBadge" Visibility="Collapsed" MinWidth="15" Height="15" CornerRadius="8"
+                Background="{StaticResource LxNotice}" Margin="0,0,8,0" VerticalAlignment="Center">
+          <TextBlock Name="SliverBadgeText" Text="1" FontFamily="Consolas" FontSize="10" FontWeight="Bold"
+                     Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
+        </Border>
+        <TextBlock Name="SliverText" Text="00:00" FontFamily="Consolas" FontSize="12"
+                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+      </StackPanel>
+    </Border>
 
-      <Border Grid.Row="4" Name="MessageSection" Visibility="Collapsed" Margin="14,0,14,14" Padding="10,10" CornerRadius="10"
-              Background="#16FFFFFF" BorderThickness="3,1,1,1" BorderBrush="$accent">
-        <Grid>
-          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-          <Border Name="MessageIconBadge" Grid.Column="0" Width="24" Height="24" CornerRadius="12" Background="$accent" VerticalAlignment="Top" Margin="0,1,10,0">
-            <TextBlock Name="MessageIcon" Text="!" FontFamily="Segoe UI Semibold" FontSize="12" Foreground="#0B0F19" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-          </Border>
-          <StackPanel Grid.Column="1">
-            <TextBlock Name="MessageTitle" Text="Emergency Alert" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$accent"/>
-            <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="10.5" Foreground="$text" TextWrapping="Wrap" Margin="0,2,0,0"/>
+    <!-- ===== 3. EXPAND CARD (hover / sliver click) ==================== -->
+    <Border Name="CardView" Visibility="Collapsed" Width="240" CornerRadius="22"
+            Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
+            HorizontalAlignment="Center" VerticalAlignment="Top" Padding="18,16" RenderTransformOrigin="0.5,0">
+      <Border.RenderTransform><ScaleTransform ScaleX="1" ScaleY="1"/></Border.RenderTransform>
+      <Border.Effect><DropShadowEffect BlurRadius="36" ShadowDepth="12" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
+      <StackPanel>
+
+        <!-- Session identity. Hidden while armed or while a message is open.
+             A ring plus a big centered clock, not a label/value table: the
+             "feels native" reference for this was a status-bar widget's own
+             popup (YASB's pomodoro), which anchors a circular dial with the
+             time inside it rather than a form. There is no fixed-duration
+             target here to draw a partial arc against, since a lab session
+             has no "25:00" to count down to, so the ring is a static frame,
+             not a progress indicator: an accurate one that looks decorative
+             beats a precise-looking one that lies about progress that does
+             not exist. -->
+        <StackPanel Name="CardInfo" HorizontalAlignment="Center">
+          <Grid Width="152" Height="152" Margin="0,2,0,14" HorizontalAlignment="Center">
+            <Ellipse Width="152" Height="152" Stroke="{StaticResource LxHairline}" StrokeThickness="2"/>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+              <Ellipse Name="CardDot" Width="8" Height="8" Fill="{StaticResource LxActive}"
+                       HorizontalAlignment="Center" Margin="0,0,0,10"/>
+              <TextBlock Name="CardClock" Text="00:00:00" FontFamily="Consolas" FontSize="24" FontWeight="SemiBold"
+                         Foreground="{StaticResource LxText}" HorizontalAlignment="Center"/>
+              <TextBlock Name="CardStation" Text="$station" FontFamily="Consolas" FontSize="11"
+                         Foreground="{StaticResource LxMuted}" HorizontalAlignment="Center" Margin="0,6,0,0"
+                         TextTrimming="CharacterEllipsis" MaxWidth="120"/>
+            </StackPanel>
+          </Grid>
+          <TextBlock Name="NamaValue" Text="$nama" FontFamily="Consolas" FontSize="12.5"
+                     Foreground="{StaticResource LxText}" HorizontalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" MaxWidth="204" Margin="0,0,0,3"/>
+          <!-- Two real TextBlocks, not inline Runs: the test suite finds
+               fields by walking TextBlock elements specifically, and a Run
+               is a different element type it would silently never find. -->
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,14">
+            <TextBlock Name="TujuanValue" Text="$tujuan" FontSize="11.5" Foreground="{StaticResource LxMuted}"
+                       TextTrimming="CharacterEllipsis" MaxWidth="95"/>
+            <TextBlock Text=" &#183; " FontSize="11.5" Foreground="{StaticResource LxMuted}"/>
+            <TextBlock Name="DeviceValue" Text="$perangkat" FontSize="11.5" Foreground="{StaticResource LxMuted}"
+                       TextTrimming="CharacterEllipsis" MaxWidth="95"/>
           </StackPanel>
+        </StackPanel>
+
+        <!-- Admin message. Never auto-expands; revealed when the user hovers. -->
+        <StackPanel Name="CardMessage" Visibility="Collapsed">
+          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10"/>
+          <TextBlock Name="MessageMeta" Text="ADMIN" FontFamily="Consolas" FontSize="10.5"
+                     Foreground="{StaticResource LxMuted}" Margin="0,0,0,4"/>
+          <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="12.5" LineHeight="18"
+                     Foreground="{StaticResource LxText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        </StackPanel>
+
+        <!-- Quick replies: two one-tap answers plus a free-text escape. -->
+        <StackPanel Name="CardQuickReply" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,2">
+          <Button Name="QuickOkBtn" Content="OK" Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5" Margin="0,0,6,0"/>
+          <Button Name="QuickWaitBtn" Content="Butuh 10 mnt" Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5" Margin="0,0,6,0"/>
+          <Button Name="QuickFreeBtn" Content="Balas..." Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5"
+                  Foreground="{StaticResource LxMuted}"/>
+        </StackPanel>
+
+        <!-- Free-text reply. Enter sends; the card will not auto-collapse while
+             this field has focus. -->
+        <Grid Name="CardReplyRow" Visibility="Collapsed" Margin="0,0,0,2">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <Border CornerRadius="999" BorderBrush="{StaticResource LxAccent}" BorderThickness="1" Padding="13,6" Margin="0,0,6,0">
+            <TextBox Name="ReplyInput" Background="Transparent" BorderThickness="0" FontSize="12"
+                     Foreground="{StaticResource LxText}" CaretBrush="{StaticResource LxAccent}"
+                     MaxLength="140" VerticalContentAlignment="Center"/>
+          </Border>
+          <Button Name="ReplySendBtn" Grid.Column="1" Width="30" Height="30" Cursor="Hand"
+                  Background="{StaticResource LxAccent}" BorderThickness="0">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border CornerRadius="15" Background="{TemplateBinding Background}">
+                  <Path Data="M 5,12 L 19,12 M 13,6 L 19,12 L 13,18" Stroke="#FFFFFF" StrokeThickness="2.2"
+                        StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                        Width="13" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
         </Grid>
-      </Border>
-    </Grid>
+
+        <!-- Reply confirmation. Dot returns to green, card auto-collapses in 5s. -->
+        <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal">
+          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10" Visibility="Collapsed"/>
+          <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
+                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,0"/>
+          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12"
+                     Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- SELESAI: press-and-hold to confirm, not a tap.
+             Progress is drawn as a STROKE TRACING THE PILL'S PERIMETER, not
+             as a bar filling it left to right. Two reasons, and the second is
+             the one that decided it:
+
+             1. This file's own guard rail says a status colour appears as a
+                dot or an EDGE and never as a tinted background. An outline is
+                exactly an edge; the wash this replaces was the one place the
+                rule was being bent.
+             2. A fill runs underneath the words. However carefully the label
+                is handled (this control previously drew it twice, so the text
+                changed colour as the fill passed under it), the label is
+                still competing with a moving background at the moment the
+                user most needs to read it. An outline never touches the text.
+
+             SelesaiRing's Data is built by the controller from the MEASURED
+             size, like the clip below it, because the card swaps between its
+             240 and 260px variants. The trace itself is a StrokeDashArray
+             animation: one dash as long as the swept fraction of the
+             perimeter, then a gap longer than the rest of it.
+
+             SelesaiFill survives for the CONFIRMED state only. That single
+             moment is where full-strength critical is the right colour,
+             because it is a moment and not a surface. It stays
+             square-cornered and relies
+             on the controller's rounded clip; giving it its own CornerRadius
+             made a part-grown fill read as a floating lozenge detached from
+             the left edge. -->
+        <Border Name="SelesaiBtn" Height="36" CornerRadius="20" ClipToBounds="True"
+                Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
+                BorderThickness="1" Cursor="Hand">
+          <Grid Name="SelesaiTrack">
+            <Border Name="SelesaiFill" Background="{StaticResource LxCriticalEdge}"
+                    HorizontalAlignment="Left" Width="0"/>
+            <Path Name="SelesaiRing" Stroke="{StaticResource LxCriticalSoft}" StrokeThickness="2"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0"
+                  IsHitTestVisible="False"/>
+            <TextBlock Name="SelesaiLabel" Text="$tSelesai" HorizontalAlignment="Center"
+                       VerticalAlignment="Center" TextWrapping="NoWrap"
+                       FontFamily="Segoe UI Semibold" FontSize="12.5"
+                       Foreground="{StaticResource LxText}"/>
+          </Grid>
+        </Border>
+        <!-- Hidden, NOT Collapsed, and its text is baked in rather than set on
+             press. Collapsed reserves no space, so revealing this on mouse-down
+             grew the card, slid SELESAI out from under the stationary cursor,
+             and WPF fired MouseLeave on the button, cancelling the hold about
+             110ms after it started, every time. Reserving the space means
+             pressing changes no geometry at all. -->
+        <TextBlock Name="ArmedCaption" Visibility="Hidden" Text="$tArmed"
+                   FontSize="11" Foreground="{StaticResource LxMuted}"
+                   HorizontalAlignment="Center" Margin="0,8,0,0"/>
+      </StackPanel>
+    </Border>
   </Grid>
+</Window>
+"@
+}
+
+function Build-LogbookServerPairingXaml($cfg, $state) {
+    # "Koneksi Server": the screen that makes the server optional in practice
+    # and not just on paper. Deliberately shaped as a STATUS panel with actions
+    # rather than as a wizard -- a wizard implies a thing you must finish, and
+    # the correct outcome here is very often "stay unpaired".
+    $res = Build-LogbookClientResources $cfg
+    $serverUrl = ConvertTo-LogbookXmlText ([string]$state.ServerUrl)
+    $deviceId  = ConvertTo-LogbookXmlText ([string]$state.DeviceId)
+    $idLine = if ($state.DeviceId) { "ID perangkat: $deviceId" } else { '' }
+
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" SizeToContent="Height"
+        Width="420" WindowStartupLocation="CenterScreen"
+        Topmost="False" ShowInTaskbar="True" AllowsTransparency="True"
+        Background="Transparent" FontFamily="Segoe UI">
+  <Window.Resources>
+$res
+  </Window.Resources>
+  <Border CornerRadius="20" Background="{StaticResource LxElevated}" Margin="18"
+          BorderBrush="{StaticResource LxHairline}" BorderThickness="1" Padding="26,24">
+    <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="14" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
+    <StackPanel>
+
+      <Grid Margin="0,0,0,18">
+        <TextBlock Text="Koneksi Server" FontFamily="Segoe UI Semibold" FontSize="17"
+                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+        <Button Name="CloseBtn" Content="Tutup" Style="{StaticResource LxPill}" Padding="12,5"
+                FontSize="11.5" HorizontalAlignment="Right" Foreground="{StaticResource LxMuted}"/>
+      </Grid>
+
+      <!-- Status first. Someone opening this screen is usually asking "is it
+           connected?", not "how do I connect?" -->
+      <Border CornerRadius="14" Background="{StaticResource LxSurface}" Padding="14,12" Margin="0,0,0,18"
+              BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+        <StackPanel>
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Name="StatusDot" Width="8" Height="8" Fill="{StaticResource LxMuted}"
+                     VerticalAlignment="Center" Margin="0,0,9,0"/>
+            <TextBlock Name="StatusText" Text="Tidak terhubung" FontSize="13"
+                       Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <TextBlock Name="DeviceIdText" Text="$idLine" FontFamily="Consolas" FontSize="11"
+                     Foreground="{StaticResource LxMuted}" Margin="17,5,0,0"
+                     TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+      </Border>
+
+      <TextBlock Text="Alamat server" FontSize="11.5" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
+      <Border CornerRadius="10" Background="{StaticResource LxSurface}" Padding="12,9" Margin="0,0,0,14"
+              BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+        <TextBox Name="ServerBox" Text="$serverUrl" Background="Transparent" BorderThickness="0"
+                 FontSize="12.5" FontFamily="Consolas" Foreground="{StaticResource LxText}"
+                 CaretBrush="{StaticResource LxAccent}"/>
+      </Border>
+
+      <StackPanel Name="CodeRow">
+        <TextBlock Text="Kode pairing" FontSize="11.5" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
+        <Border CornerRadius="10" Background="{StaticResource LxSurface}" Padding="12,9" Margin="0,0,0,6"
+                BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
+          <TextBox Name="CodeBox" Background="Transparent" BorderThickness="0"
+                   FontSize="12.5" FontFamily="Consolas" Foreground="{StaticResource LxText}"
+                   CaretBrush="{StaticResource LxAccent}"/>
+        </Border>
+        <TextBlock Text="Minta kode sekali-pakai ini ke admin lab." FontSize="11"
+                   Foreground="{StaticResource LxMuted}" Margin="0,0,0,14"/>
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+        <Button Name="ConnectBtn" Content="Hubungkan" Style="{StaticResource LxPill}" Padding="16,8"
+                FontSize="12.5" Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                Foreground="#FFFFFF" Margin="0,0,7,0"/>
+        <Button Name="TestBtn" Content="Uji koneksi" Style="{StaticResource LxPill}" Padding="14,8"
+                FontSize="12.5" Margin="0,0,7,0"/>
+        <Button Name="DisconnectBtn" Content="Putuskan" Style="{StaticResource LxPill}" Padding="14,8"
+                FontSize="12.5" Foreground="{StaticResource LxMuted}" Visibility="Collapsed"/>
+      </StackPanel>
+
+      <TextBlock Name="MessageText" Text="" FontSize="11.5" TextWrapping="Wrap" LineHeight="17"
+                 Foreground="{StaticResource LxMuted}" Margin="0,14,0,0"/>
+
+      <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,16,0,12"/>
+      <!-- Said plainly, because the alternative reading (that an unpaired
+           device is a crippled one) is the exact misunderstanding this whole
+           screen exists to prevent. -->
+      <TextBlock FontSize="11" TextWrapping="Wrap" LineHeight="17" Foreground="{StaticResource LxMuted}"
+                 Text="Tanpa server pun Logix tetap mencatat sesi dan membuat laporan di komputer ini. Menghubungkan ke server hanya menambah pemantauan terpusat dan laporan gabungan."/>
+    </StackPanel>
+  </Border>
+</Window>
+"@
+}
+
+function Build-LogbookStripXaml($cfg) {
+    # Strip posture: a 3px full-width line pinned to the very top of the
+    # screen, coloured by session status. Its own window because it must span
+    # the whole width while the pill/card window stays narrow and draggable.
+    # The controller makes it click-through (WS_EX_TRANSPARENT) so it never
+    # steals a click from the app underneath -- the top edge stays a usable
+    # target for the application, and the sliver is what the user aims at.
+    $res = Build-LogbookClientResources $cfg
+    return @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" ResizeMode="NoResize" Topmost="True" ShowInTaskbar="False"
+        AllowsTransparency="True" Background="Transparent" Height="3" Left="0" Top="0">
+  <Window.Resources>
+$res
+  </Window.Resources>
+  <Border Name="StripBar" Background="{StaticResource LxActive}"/>
 </Window>
 "@
 }
@@ -1825,6 +3258,14 @@ function Get-ActiveLogbookSessionAgeSeconds {
 function Close-ActiveLogbookSession {
     param([string]$Reason = 'END')
     Ensure-LogbookDirs
+    # Marks the ENDING state for any other process that asks (see
+    # Get-LogbookSessionState). Best-effort in both directions: failing to
+    # WRITE it must not stop a close, and it is deliberately NOT removed on
+    # the failure path below -- a marker left next to a session file that is
+    # still there is exactly how the "close was attempted and did not
+    # finish" case becomes visible instead of looking like a healthy
+    # running session.
+    try { Set-Content -LiteralPath $Global:SessionEndingFlag -Value (Get-Date).ToString('o') -Encoding ASCII -Force } catch { }
     try {
         if (Test-Path $Global:SessionFile) {
             $session = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
@@ -1848,6 +3289,9 @@ function Close-ActiveLogbookSession {
             Write-LogbookInfo "Closed active session sid=$($session.session_id) reason=$Reason"
         }
         Stop-LogbookTimers
+        # Cleared only on the success path. Every `return $false` above and
+        # below leaves it in place on purpose.
+        try { Remove-Item $Global:SessionEndingFlag -Force -ErrorAction SilentlyContinue } catch { }
         return $true
     } catch {
         Write-LogbookError "Close active session failed: $($_.Exception.Message)"
@@ -1938,6 +3382,116 @@ function Close-OverAgeLogbookSessionIfAny {
 # the workstation here is deliberate: it both signals departure to anyone
 # walking up to the machine and guarantees the *next* sign-in goes through
 # the unlock path, which starts a fresh session when none is on disk.
+# ---- Explicit session lifecycle state ---------------------------------------
+#
+# The lifecycle was real but implicit: spread across "does session.json
+# exist", "is timer_ready.flag there", "is workstation_locked.flag there",
+# "is a timer process alive" -- each checked ad hoc, in a different order, by
+# whichever caller needed it. That is workable until two callers disagree
+# about what the combination MEANS, which is how a session ends up displayed
+# as running while the thing running it is gone.
+#
+# This is deliberately a DERIVED state, not a stored one. Nothing here
+# introduces a new source of truth to keep in step with the old ones: every
+# state below is read from a fact that already existed and was already being
+# maintained by the code that owns it. Control flow elsewhere still keys off
+# those same facts directly and is unchanged -- this is one named place to
+# ASK the question, which is the smallest change that makes the lifecycle
+# explicit without rewiring the timer, the lock path, sync, or reporting.
+#
+#   IDLE      no session
+#   STARTING  session recorded, its widget has not reached the screen yet
+#   RUNNING   session recorded, widget up
+#   PAUSED    session recorded, workstation locked (what the lock screen
+#             itself calls this -- see the lockPausedBadge text key)
+#   ENDING    a close is in progress right now
+#   ERROR     a combination that should not persist: unreadable session
+#             file, a close that never finished, or a widget that died
+$Global:SessionEndingFlag = Join-Path $Global:StateDir 'session_ending.flag'
+
+# How long a close may legitimately be in progress before a still-present
+# marker stops meaning "ending" and starts meaning "this close never
+# finished". Close-ActiveLogbookSession logs the event, removes the file and
+# locks the workstation; seconds, not tens of seconds.
+$Global:SessionEndingGraceSeconds = 30
+
+function Get-LogbookSessionState {
+    <#
+      Returns @{ State = '<one of the above>'; Detail = '<why>' }.
+      Safe to call from any process at any time -- read-only, no side effects,
+      and it never throws (an unreadable state directory is itself an answer).
+    #>
+    $result = [ordered]@{ State = 'IDLE'; Detail = '' }
+    try {
+        $hasSession = Test-Path $Global:SessionFile
+        $endingFlag = Test-Path $Global:SessionEndingFlag
+
+        if (-not $hasSession) {
+            # A leftover ending marker with no session file means the close
+            # DID succeed and only the cleanup was interrupted. The session
+            # is over either way, so this reports IDLE rather than inventing
+            # a COMPLETED state that nothing could act on.
+            $result.State = 'IDLE'
+            $result.Detail = if ($endingFlag) { 'no active session (stale ending marker ignored)' } else { 'no active session' }
+            return $result
+        }
+
+        if ($endingFlag) {
+            $age = $null
+            try { $age = ((Get-Date) - (Get-Item $Global:SessionEndingFlag).LastWriteTime).TotalSeconds } catch { }
+            if ($null -ne $age -and $age -le $Global:SessionEndingGraceSeconds) {
+                $result.State = 'ENDING'
+                $result.Detail = "close in progress ($([int]$age)s)"
+            } else {
+                # The documented failure in Close-ActiveLogbookSession: the
+                # event is logged but session.json cannot be removed (ACL /
+                # ownership, typically a file created by an elevated run).
+                # Before this, that looked exactly like a healthy running
+                # session -- which is precisely why "SELESAI did nothing" was
+                # so hard to see.
+                $result.State = 'ERROR'
+                $result.Detail = 'a close was started but the session file is still present -- see logbook_error.log (likely ACL/ownership; run repair_logbook_permissions.ps1)'
+            }
+            return $result
+        }
+
+        try {
+            $null = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
+        } catch {
+            $result.State = 'ERROR'
+            $result.Detail = "session file present but unreadable: $($_.Exception.Message)"
+            return $result
+        }
+
+        if (Test-Path $Global:LockedFlagPath) {
+            $result.State = 'PAUSED'
+            $result.Detail = 'workstation locked'
+            return $result
+        }
+
+        if (-not (Test-Path (Join-Path $Global:StateDir 'timer_ready.flag'))) {
+            $result.State = 'STARTING'
+            $result.Detail = 'session recorded, timer widget not on screen yet'
+            return $result
+        }
+
+        $timers = @(Get-ProcessByCommandPattern 'logbook_timer\.ps1')
+        if ($timers.Count -eq 0) {
+            $result.State = 'ERROR'
+            $result.Detail = 'session is open but its timer widget is not running (the monitor restarts it on its next tick)'
+            return $result
+        }
+
+        $result.State = 'RUNNING'
+        $result.Detail = 'session active'
+        return $result
+    } catch {
+        $result.State = 'ERROR'
+        $result.Detail = "could not determine session state: $($_.Exception.Message)"
+        return $result
+    }
+}
+
 function Close-LogbookSessionAndLock {
     Close-ActiveLogbookSession -Reason 'END' | Out-Null
     # Guarantee the next sign-in form appears rather than relying solely on the
@@ -1967,7 +3521,102 @@ function Get-LogbookHeartbeatSeconds {
     return 5
 }
 
+# How often the monitor retries a failed sync of local session events to the
+# server, when nothing else has triggered one. Deliberately a SEPARATE, much
+# coarser cadence than the heartbeat: sync_unsynced_logs() spawns a Python
+# process and makes an HTTP call, so running it every heartbeat tick (5s by
+# default) would be needless load on both this machine and the server for a
+# device that just went offline for a while.
+#
+# WHY THIS EXISTS AT ALL: every event insert already tries an inline,
+# best-effort sync (log_physical.py's own post-insert call), and any two
+# events happening close together will naturally pick up whatever the
+# previous one could not send. But a device that goes idle right after a
+# failed sync -- machine locked, nobody logging in or out -- would otherwise
+# never retry again until the NEXT session event, which could be hours away.
+# Before this, --sync-to-server existed only as a manual CLI flag with no
+# caller anywhere in the codebase; this is the smallest change that makes
+# "failed synchronization must be retryable" true unattended, without a new
+# service, timer, or scheduled task -- it rides the monitor loop that is
+# already running continuously on every device.
+function Get-LogbookSyncRetrySeconds {
+    $val = Get-LogbookConfigEnv 'LOGIX_SYNC_RETRY_SECONDS'
+    $parsed = 0
+    if ($val -and [int]::TryParse($val, [ref]$parsed) -and $parsed -ge 30) {
+        return $parsed
+    }
+    return 120
+}
+
+# Best-effort periodic retry, called from the monitor's heartbeat loop. Cheap
+# to call every tick: it does nothing (no process spawn at all) unless BOTH a
+# server is actually configured AND the retry interval has actually elapsed.
+# Restart-safe by construction -- $script:nextSyncRetryAt lives only in this
+# process's memory, so a monitor restart just means the next tick recomputes
+# "due now", not "wait out whatever was left of the old interval". That is
+# the correct behaviour: pending events are what matters, and they live in
+# SQLite, not in this timer.
+#
+# Launched DETACHED (Start-Process, no -Wait), never run inline. --sync-to-
+# server retries up to 3 times with exponential backoff and a 10s per-attempt
+# timeout -- tens of seconds in the worst case -- and this loop is also what
+# answers a remote lock/message/power command within Get-LogbookHeartbeatSeconds
+# (2-5s by design, per that function's own comment). Blocking it on a sync
+# attempt would make the ONE thing this loop promises to be snappy about
+# exactly as slow as the network it is retrying against.
+$script:nextSyncRetryAt = [datetime]::MinValue
+function Invoke-LogbookPeriodicSyncRetry {
+    if (-not (Get-LogbookConfigEnv 'LOGIX_SERVER_URL')) { return }  # device-only: nothing to do, ever
+    if ((Get-Date) -lt $script:nextSyncRetryAt) { return }
+    $script:nextSyncRetryAt = (Get-Date).AddSeconds((Get-LogbookSyncRetrySeconds))
+    try {
+        $python = Find-LogixPython
+        if (-not $python) { return }
+        $syncScript = Join-Path (Get-LogixCoreDir) 'log_physical.py'
+        if (-not (Test-Path $syncScript)) { return }
+        # Quoted by hand, not via the -ArgumentList array form: Start-Process
+        # does not quote array elements containing spaces even then (see
+        # ps51-startprocess-quoting-conhost) -- immaterial for this fixed
+        # flag today, but matches how every other Start-Process call in this
+        # codebase is written so the next person copying this one does not
+        # inherit a bug the very next time an argument needs a space.
+        Start-Process -FilePath $python -ArgumentList @(('"{0}"' -f $syncScript), '--sync-to-server') `
+            -WindowStyle Hidden | Out-Null
+    } catch {
+        Write-LogbookError "Periodic sync retry failed to launch: $($_.Exception.Message)"
+    }
+}
+
+# Idle auto-end threshold, in seconds. RETURNS 0 WHEN THE POLICY IS OFF -- every
+# caller must treat 0 as "never auto-close", not as "close immediately".
+#
+# Resolution order:
+#   1. devices.idle_auto_end.<category> from the server-delivered config
+#      (Settings > Perangkat). Ships disabled for every category, so an
+#      upgrade never starts closing sessions on its own.
+#   2. LOGIX_IDLE_TIMEOUT_HOURS, the pre-existing env override.
+#   3. The historical 4-hour default.
 function Get-LogbookIdleTimeoutSeconds {
+    try {
+        $cfg = Get-LogbookConfig
+        $policy = $null
+        if ($cfg -and $cfg.devices -and $cfg.devices.idle_auto_end) {
+            $category = [string]$cfg.devices.category
+            if (-not $category) { $category = 'custom' }
+            $map = $cfg.devices.idle_auto_end
+            if ($map.Contains($category)) { $policy = $map[$category] }
+        }
+        if ($null -ne $policy) {
+            if (-not $policy.enabled) { return 0 }
+            $h = 0.0
+            if ([double]::TryParse([string]$policy.hours, [ref]$h) -and $h -gt 0) {
+                return [int]($h * 3600)
+            }
+        }
+    } catch {
+        Write-LogbookError "Idle policy lookup failed: $($_.Exception.Message)"
+    }
+
     $hours = Get-LogbookConfigEnv 'LOGIX_IDLE_TIMEOUT_HOURS'
     $parsed = 0.0
     if ($hours -and [double]::TryParse($hours, [ref]$parsed) -and $parsed -gt 0) {
@@ -1976,8 +3625,7 @@ function Get-LogbookIdleTimeoutSeconds {
     return 4 * 3600
 }
 
-if (-not ([System.Management.Automation.PSTypeName]'LogixIdle').Type) {
-    Add-Type @"
+$script:LogixIdleSrc = @"
 using System;
 using System.Runtime.InteropServices;
 public static class LogixIdle {
@@ -1987,7 +3635,6 @@ public static class LogixIdle {
     public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 }
 "@
-}
 
 # Seconds since the last keyboard/mouse input anywhere on the machine (not
 # per-window) -- used only to catch "left unlocked and walked away"; a
@@ -1996,6 +3643,7 @@ public static class LogixIdle {
 # any duration" per the product decision above.
 function Get-LogbookIdleSeconds {
     try {
+        Use-LogbookNativeType -Name 'LogixIdle' -Source $script:LogixIdleSrc
         $lii = New-Object LogixIdle+LASTINPUTINFO
         $lii.cbSize = [uint32][System.Runtime.InteropServices.Marshal]::SizeOf($lii)
         if (-not [LogixIdle]::GetLastInputInfo([ref]$lii)) { return $null }

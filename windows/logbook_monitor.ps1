@@ -196,6 +196,12 @@ while ($true) {
         }
     } catch { Write-LogbookError "Monitor heartbeat failed: $($_.Exception.Message)" }
 
+    # Failed-sync retry, unattended. See Invoke-LogbookPeriodicSyncRetry's own
+    # comment for why this exists (nothing anywhere else in the codebase ever
+    # called --sync-to-server before this) and why it launches detached
+    # rather than blocking this loop.
+    try { Invoke-LogbookPeriodicSyncRetry } catch { Write-LogbookError "Periodic sync retry threw: $($_.Exception.Message)" }
+
     # Cap total session span even while locked/slept: a session older than
     # Get-LogbookMaxSessionSeconds is closed regardless of lock state, so it
     # never resumes -- or reports to the dashboard -- as a multi-day "active"
@@ -214,7 +220,10 @@ while ($true) {
         if ((Test-Path $Global:SessionFile) -and -not (Test-Path $Global:LockedFlagPath)) {
             $idleSec = Get-LogbookIdleSeconds
             $limitSec = Get-LogbookIdleTimeoutSeconds
-            if ($null -ne $idleSec -and $idleSec -ge $limitSec) {
+            # A limit of 0 means the policy is OFF for this device's category.
+            # Without the -gt 0 guard that would read as "idle >= 0" and close
+            # every session on the very first check.
+            if ($null -ne $idleSec -and $limitSec -gt 0 -and $idleSec -ge $limitSec) {
                 Write-LogbookInfo "Idle timeout reached (${idleSec}s >= ${limitSec}s); auto-closing session."
                 Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
             }

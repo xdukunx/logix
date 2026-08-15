@@ -1,6 +1,9 @@
 import os
+import csv
+import io
 import json
 import logging
+import re
 import sqlite3
 import subprocess
 import secrets
@@ -165,7 +168,45 @@ BASE_COLUMNS = {
     # back to the old tuple-based dedup in that case.
     "event_uid": "TEXT",
     "synced": "INTEGER DEFAULT 0",
+    # When the SERVER received this event, as opposed to `timestamp`, which is
+    # whatever the workstation's clock said. A lab PC with a wrong clock files
+    # sessions under the wrong day; keeping both means a report can fall back
+    # to an anchor the admin controls. Note that a CONSTANT offset cancels out
+    # of a duration (end - start) -- what it corrupts is which day a session
+    # lands in, and that is what this column is for.
+    "server_received_at": "TEXT",
+    # How the person's identity was established, not just what they typed:
+    #   self_declared -- typed their own nama + NIM at the popup (today's only
+    #                    real path)
+    #   unverified    -- the sign-in popup could not run and the machine was
+    #                    let through anyway (see the fail-open policy); the
+    #                    session is real, the person is not established
+    #   directory     -- resolved against the campus directory (reserved; the
+    #                    API is not wired up yet)
+    # Recorded now so plugging a directory in later is additive rather than a
+    # migration that has to reinterpret every historical row.
+    "identity_source": "TEXT",
+    # mahasiswa / tendik / dosen. Free text and usually empty today; a campus
+    # directory would populate it authoritatively.
+    "person_role": "TEXT",
 }
+
+# An unattended session cannot legitimately run forever. Used two ways: to cap
+# what a reconciled session may claim, and to catch a clock that jumped
+# mid-session (which is the one skew that does NOT cancel out of a duration).
+MAX_SESSION_HOURS = 16
+
+IDENTITY_SOURCES = {"self_declared", "unverified", "directory"}
+
+# Any one of these ends a session span. AUTO_CLOSE is the one the server itself
+# writes during reconciliation; the rest come from the agent.
+CLOSING_EVENTS = {"END", "LOCK", "AUTO_FINISH", "AUTO_CLOSE", "DISCONNECT", "LOGOFF"}
+
+# How long a device must be silent before an unclosed session is treated as
+# abandoned rather than merely in progress. Comfortably longer than the stale
+# heartbeat threshold, so a device having a bad minute is never reconciled out
+# from under a student who is still sitting there.
+ORPHAN_SESSION_SILENCE_MINUTES = 30
 
 # Logix Control: persisted device registry. See docs/LOGIX_CONTROL.md §5.
 # device_id is still assigned as a stopgap on first-seen hostname via
@@ -197,6 +238,17 @@ DEVICE_COLUMNS = {
     # enrolled, and set back to NULL on revoke -- never returned by
     # GET /api/devices (see get_devices()).
     "api_key": "TEXT UNIQUE",
+    # What build this workstation is actually running. The server accepted an
+    # agent_version at enrolment and then threw it away, so there was no way to
+    # answer "which build is WS-01 on?" -- which is exactly how an install
+    # drifted into a mixed version (a sign-in popup three weeks older than the
+    # logbook_common.ps1 beside it) and was only found when it crashed.
+    "agent_version": "TEXT",
+    "agent_os": "TEXT",
+    # server_now - client_now at the last heartbeat, in seconds. Positive means
+    # the workstation clock is BEHIND the server.
+    "clock_skew_seconds": "REAL",
+    "clock_skew_checked_at": "TEXT",
     # Set by PUT /api/devices/rename. Once true, upsert_device() (heartbeat
     # path) stops overwriting display_name with whatever the agent reports --
     # otherwise an admin rename would silently revert on the device's next
@@ -220,6 +272,8 @@ ENROLLMENT_INVITE_COLUMNS = {
     "expires_at": "TEXT NOT NULL",
     "used_at": "TEXT",
     "used_by_device_id": "TEXT",
+    # Optional pin: when set, only this hostname may redeem the invite.
+    "hostname": "TEXT",
 }
 
 INVITE_TTL_MINUTES = 15
@@ -431,6 +485,11 @@ class LogPayload(BaseModel):
     anydesk_detected: Optional[int] = 0
     raw_json: Optional[str] = ""
     event_uid: Optional[str] = ""
+    # See BASE_COLUMNS. Defaults to self_declared because that is what every
+    # existing agent is doing when it posts a START: relaying what the person
+    # typed into the sign-in popup.
+    identity_source: Optional[str] = "self_declared"
+    person_role: Optional[str] = ""
 
 class HeartbeatPayload(BaseModel):
     hostname: str
@@ -444,6 +503,23 @@ class HeartbeatPayload(BaseModel):
     # rides the next one instead. Each entry: {command_id, status
     # ("done"|"failed"), detail}.
     acks: Optional[List[Dict[str, Any]]] = None
+    # Session context for the Monitoring station card (v3 design D-03): the
+    # card's second line is "{user} · {access type} · {duration}", which needs
+    # a start time and an access type the server did not previously receive.
+    # All optional -- an older agent build simply omits them and the card
+    # degrades to the username alone.
+    session_started_at: Optional[str] = None
+    access_type: Optional[str] = None
+    purpose: Optional[str] = None
+    # What build is on this workstation, so an operator can see drift before it
+    # turns into a crash. Omitted by an older agent, in which case the stored
+    # value is simply left alone rather than blanked.
+    agent_version: Optional[str] = None
+    agent_os: Optional[str] = None
+    # The workstation's own clock at the moment it sent this. Compared against
+    # server time to measure skew. Optional: an older agent omits it and no
+    # skew is recorded, which is different from a skew of zero.
+    client_time: Optional[str] = None
 
 class ControlRequest(BaseModel):
     hostname: str
@@ -502,7 +578,16 @@ DEFAULT_CONFIG = {
     "privacy": {
         "notice": "This system records session information only.",
         "collected": ["device name", "session start and end", "selected purpose", "workstation status"],
-        "not_collected": ["keystrokes", "screenshots", "browser history", "private files"]
+        "not_collected": ["keystrokes", "screenshots", "browser history", "private files"],
+        # Days to keep the personal fields (nama, NIM, Windows username, free-
+        # text keterangan). After this the row is REDACTED IN PLACE, not
+        # deleted: the session shape -- when, which workstation, which purpose,
+        # how long -- is what utilisation reporting needs, and none of it
+        # identifies anybody. Keeping student names indefinitely because the
+        # rows were useful for something else is the thing being avoided.
+        # 0 disables purging, which is a deliberate choice a deployment has to
+        # make rather than the accidental default.
+        "retention_days": 365
     }
 }
 
@@ -530,6 +615,16 @@ def init_db():
         existing_log_cols = {row["name"] for row in conn.execute("PRAGMA table_info(physical_log)").fetchall()}
         if "event_uid" not in existing_log_cols:
             conn.execute("ALTER TABLE physical_log ADD COLUMN event_uid TEXT")
+        # Same additive idiom for the columns added since. Deliberately driven
+        # off BASE_COLUMNS rather than a hand-written list, so adding a column
+        # up there cannot silently skip existing databases the way a forgotten
+        # ALTER TABLE would.
+        for col, decl in BASE_COLUMNS.items():
+            if col == "id" or col in existing_log_cols:
+                continue
+            if col == "event_uid":
+                continue  # handled above, before the unique index
+            conn.execute(f"ALTER TABLE physical_log ADD COLUMN {col} {decl}")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_physical_log_event_uid "
             "ON physical_log(event_uid) WHERE event_uid IS NOT NULL AND event_uid != ''"
@@ -557,9 +652,21 @@ def init_control_tables():
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_api_key ON devices(api_key)")
         if "display_name_set_by_admin" not in existing_device_cols:
             conn.execute("ALTER TABLE devices ADD COLUMN display_name_set_by_admin INTEGER DEFAULT 0")
+        # Driven off DEVICE_COLUMNS for the same reason as physical_log above:
+        # adding a column to the dict must not require remembering to add an
+        # ALTER here as well. api_key keeps its own line because a UNIQUE index
+        # is created against it immediately afterwards.
+        for col, decl in DEVICE_COLUMNS.items():
+            if col in existing_device_cols or col in ("api_key", "display_name_set_by_admin"):
+                continue
+            conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {decl}")
 
         invite_defs = ",\n        ".join(f"{k} {v}" for k, v in ENROLLMENT_INVITE_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS enrollment_invites (\n        {invite_defs}\n    )")
+        # Additive migration: invites created before hostname pinning shipped.
+        existing_invite_cols = {row["name"] for row in conn.execute("PRAGMA table_info(enrollment_invites)").fetchall()}
+        if "hostname" not in existing_invite_cols:
+            conn.execute("ALTER TABLE enrollment_invites ADD COLUMN hostname TEXT")
 
         policy_defs = ",\n        ".join(f"{k} {v}" for k, v in POLICY_COLUMNS.items())
         conn.execute(f"CREATE TABLE IF NOT EXISTS device_policies (\n        {policy_defs}\n    )")
@@ -635,8 +742,50 @@ def init_control_tables():
 # *effective* display_name -- callers (post_heartbeat) must use this, not the
 # name they passed in, so the in-memory HEARTBEATS cache and the /api/active
 # view it feeds also respect an admin rename (see display_name_set_by_admin).
-def upsert_device(conn, hostname: str, display_name: str) -> str:
-    now = datetime.now().isoformat()
+def measure_clock_skew(client_time: Optional[str], server_now: Optional[datetime] = None) -> Optional[float]:
+    """server_now - client_now, in seconds. Positive => the workstation is behind.
+
+    Returns None (not 0.0) when the agent did not report a clock: "we did not
+    measure" and "measured, and it is perfect" are different facts, and only
+    one of them should be allowed to clear a skew alert.
+    """
+    if not client_time:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(client_time))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone().replace(tzinfo=None)
+    return ((server_now or datetime.now()) - parsed).total_seconds()
+
+
+def upsert_device(conn, hostname: str, display_name: str,
+                  agent_version: Optional[str] = None,
+                  agent_os: Optional[str] = None,
+                  client_time: Optional[str] = None) -> str:
+    now_dt = datetime.now()
+    now = now_dt.isoformat()
+
+    # Only overwrite what the agent actually told us. An older agent omits
+    # these entirely, and blanking a known-good agent_version because a build
+    # predating the field checked in would be worse than having no value.
+    extra_sets: List[str] = []
+    extra_args: List[Any] = []
+    if agent_version:
+        extra_sets.append("agent_version = ?")
+        extra_args.append(agent_version)
+    if agent_os:
+        extra_sets.append("agent_os = ?")
+        extra_args.append(agent_os)
+    skew = measure_clock_skew(client_time, now_dt)
+    if skew is not None:
+        extra_sets.append("clock_skew_seconds = ?")
+        extra_args.append(skew)
+        extra_sets.append("clock_skew_checked_at = ?")
+        extra_args.append(now)
+    extra_sql = ("".join(f", {s}" for s in extra_sets))
+
     existing = conn.execute(
         "SELECT device_id, display_name_set_by_admin, display_name FROM devices WHERE hostname = ?", (hostname,)
     ).fetchone()
@@ -646,21 +795,25 @@ def upsert_device(conn, hostname: str, display_name: str) -> str:
             # is authoritative until explicitly changed again, regardless
             # of what this heartbeat's agent-reported name says.
             conn.execute(
-                "UPDATE devices SET last_seen = ?, status = 'active', updated_at = ? WHERE hostname = ?",
-                (now, now, hostname),
+                f"UPDATE devices SET last_seen = ?, status = 'active', updated_at = ?{extra_sql} WHERE hostname = ?",
+                (now, now, *extra_args, hostname),
             )
             conn.commit()
             return existing["display_name"]
         else:
             conn.execute(
-                "UPDATE devices SET display_name = ?, last_seen = ?, status = 'active', updated_at = ? WHERE hostname = ?",
-                (display_name, now, now, hostname),
+                f"UPDATE devices SET display_name = ?, last_seen = ?, status = 'active', updated_at = ?{extra_sql} "
+                "WHERE hostname = ?",
+                (display_name, now, now, *extra_args, hostname),
             )
     else:
         conn.execute(
-            "INSERT INTO devices (device_id, hostname, display_name, last_seen, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (str(uuid.uuid4()), hostname, display_name, now, now, now),
+            "INSERT INTO devices (device_id, hostname, display_name, last_seen, created_at, updated_at, "
+            "agent_version, agent_os, clock_skew_seconds, clock_skew_checked_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), hostname, display_name, now, now, now,
+             agent_version or None, agent_os or None, skew,
+             now if skew is not None else None),
         )
     conn.commit()
     return display_name
@@ -853,15 +1006,162 @@ def _reconcile_event_alerts(conn, category: str, action_status: str, severity: s
         )
 
 
+def reconcile_open_sessions(conn, now: Optional[datetime] = None) -> int:
+    """Close sessions whose workstation went away and never sent an END.
+
+    A machine that BSODs, loses power, or is reimaged mid-session leaves a
+    START with no closing event. _session_spans gives that span a duration of
+    None, and the Riwayat summary sums `duration or 0` -- so the session
+    silently contributes ZERO hours while still counting as a session and a
+    user. The report stays green and the numbers are quietly wrong, which is
+    worse than an obvious gap.
+
+    The close is written at the last moment we can actually evidence the
+    machine was alive -- the newest of its own events and the device's
+    last_seen -- never at `now`, which would invent hours nobody worked. It is
+    additionally capped at MAX_SESSION_HOURS so a device that vanished for a
+    fortnight cannot book a fortnight.
+
+    Returns how many sessions were closed.
+    """
+    now = now or datetime.now()
+    cutoff = now - timedelta(minutes=ORPHAN_SESSION_SILENCE_MINUTES)
+
+    def _parse(value) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+    last_seen_by_host = {
+        r["hostname"]: _parse(r["last_seen"])
+        for r in conn.execute("SELECT hostname, last_seen FROM devices").fetchall()
+    }
+    # HEARTBEATS is in-process and therefore fresher than the DB between
+    # writes, but it is also empty after a restart -- take whichever is newer.
+    for hostname, beat in HEARTBEATS.items():
+        live = _parse(beat.get("last_seen"))
+        if live and (last_seen_by_host.get(hostname) is None or live > last_seen_by_host[hostname]):
+            last_seen_by_host[hostname] = live
+
+    rows = conn.execute(
+        "SELECT session_id, event, timestamp, hostname, nama, nim, username, tujuan, "
+        "session_type, source, identity_source, person_role "
+        "FROM physical_log WHERE session_id IS NOT NULL AND session_id != '' "
+        "ORDER BY session_id, timestamp ASC"
+    ).fetchall()
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        grouped.setdefault(r["session_id"], []).append(dict(r))
+
+    closed = 0
+    for session_id, events in grouped.items():
+        start = next((e for e in events if e["event"] == "START"), None)
+        if not start or any(e["event"] in CLOSING_EVENTS for e in events):
+            continue
+        started_at = _parse(start["timestamp"])
+        if not started_at:
+            continue
+
+        hostname = start["hostname"] or ""
+        last_seen = last_seen_by_host.get(hostname)
+
+        # Only act on POSITIVE evidence that the machine went away: a device we
+        # know about, which used to report, and has now gone quiet. Absence of
+        # heartbeat data is not evidence of death -- a device that never
+        # enrolled, or was deleted from the registry, tells us nothing about
+        # whether its session is still running, and writing an AUTO_CLOSE on
+        # that basis would be inventing an end time. Those stay open and are
+        # counted separately (see open_sessions in the summary) rather than
+        # being quietly given a fabricated duration.
+        if last_seen is None or last_seen > cutoff:
+            continue
+
+        last_event = max((_parse(e["timestamp"]) for e in events if _parse(e["timestamp"])), default=started_at)
+        last_evidence = max([d for d in (last_seen, last_event) if d] or [started_at])
+
+        end_at = min(last_evidence, started_at + timedelta(hours=MAX_SESSION_HOURS))
+        if end_at < started_at:
+            end_at = started_at
+
+        reason = (
+            "Ditutup otomatis oleh server: perangkat berhenti mengirim heartbeat "
+            "dan sesi tidak pernah diakhiri. Waktu selesai memakai tanda hidup terakhir."
+        )
+        conn.execute(
+            "INSERT INTO physical_log (timestamp, event, username, nama, nim, tujuan, keterangan, "
+            "session_type, source, session_id, hostname, event_uid, synced, server_received_at, "
+            "identity_source, person_role) "
+            "VALUES (?, 'AUTO_CLOSE', ?, ?, ?, ?, ?, ?, 'server_reconcile', ?, ?, ?, 1, ?, ?, ?)",
+            (
+                end_at.isoformat(), start["username"], start["nama"], start["nim"], start["tujuan"],
+                reason, start["session_type"], session_id, hostname,
+                f"reconcile:{session_id}", now.isoformat(),
+                start["identity_source"], start["person_role"],
+            ),
+        )
+        closed += 1
+
+    if closed:
+        conn.commit()
+        logger.info("reconcile_open_sessions: closed %d abandoned session(s)", closed)
+    return closed
+
+
+REDACTED_MARKER = "[redacted]"
+
+
+def purge_expired_personal_data(conn, retention_days: int, now: Optional[datetime] = None) -> int:
+    """Redact the personal fields of sessions older than the retention window.
+
+    Redacts rather than deletes. What a lab needs long-term is utilisation --
+    which workstation, when, for how long, what for -- and none of that needs a
+    student's name or NIM attached a year later. Deleting the rows outright
+    would throw away the usage history along with the personal data.
+
+    Idempotent: rows already redacted are skipped, so running it on a timer
+    costs nothing and re-running it after a restore is safe.
+    """
+    if not retention_days or retention_days <= 0:
+        return 0
+    cutoff = ((now or datetime.now()) - timedelta(days=retention_days)).isoformat()
+    cur = conn.execute(
+        "UPDATE physical_log SET nama = ?, nim = ?, username = ?, windows_user = ?, keterangan = ?, "
+        "raw_json = NULL "
+        "WHERE timestamp < ? AND (nama IS NOT NULL AND nama != '' AND nama != ?)",
+        (REDACTED_MARKER, REDACTED_MARKER, REDACTED_MARKER, REDACTED_MARKER, REDACTED_MARKER,
+         cutoff, REDACTED_MARKER),
+    )
+    affected = cur.rowcount or 0
+    if affected:
+        conn.commit()
+        logger.info("purge_expired_personal_data: redacted %d row(s) older than %s",
+                    affected, cutoff)
+    return affected
+
+
+# A workstation clock this far from the server's is reported. Sessions are
+# timestamped by the agent, so beyond roughly this much a session starts
+# landing in the wrong hour -- and, across midnight, the wrong day's report.
+CLOCK_SKEW_ALERT_SECONDS = 120
+
+
 def reconcile_alerts(conn) -> None:
     # Close the loop roadmap item I left open: a command stuck 'queued'
     # past its TTL is now actually marked 'expired' here, before
     # command_expired alerts are evaluated further down.
     reconcile_expired_actions(conn)
+    # An abandoned session is a data-integrity problem, not just a display one
+    # -- fold it into the same lazy pass so the numbers are correct by the time
+    # anybody reads them.
+    reconcile_open_sessions(conn)
 
     now = datetime.now()
     devices = conn.execute(
-        "SELECT device_id, hostname, display_name, category, last_seen FROM devices"
+        "SELECT device_id, hostname, display_name, category, last_seen, clock_skew_seconds FROM devices"
     ).fetchall()
     device_names = {d["device_id"]: (d["display_name"] or d["hostname"], d["hostname"]) for d in devices}
 
@@ -880,6 +1180,22 @@ def reconcile_alerts(conn) -> None:
             )
         else:
             _resolve_alert_if_unresolved(conn, "device_stale", device_id)
+
+        # The agent timestamps its own events, so a wrong workstation clock
+        # files real sessions under the wrong hour -- and across midnight, the
+        # wrong day. Nothing downstream can detect that from the data alone,
+        # which is why it is surfaced here instead.
+        skew = d["clock_skew_seconds"]
+        if skew is not None and abs(skew) >= CLOCK_SKEW_ALERT_SECONDS:
+            direction = "tertinggal" if skew > 0 else "mendahului"
+            _get_or_create_alert(
+                conn, "clock_skew", device_id, device_name, "warning",
+                f"Jam tidak sinkron: {device_name}",
+                f"Jam {device_name} ({d['hostname']}) {direction} {abs(int(skew))} detik dari server. "
+                "Sesi akan tercatat pada waktu yang salah sampai jam diperbaiki.",
+            )
+        else:
+            _resolve_alert_if_unresolved(conn, "clock_skew", device_id)
 
         if status == "offline":
             _get_or_create_alert(
@@ -1010,6 +1326,15 @@ def require_permission(action: str):
 # Dependency to verify the shared ingest API key sent by local agents.
 # Unset LOGIX_INGEST_API_KEY only ever happens in dev mode; production
 # deployments must configure it, otherwise ingest is rejected outright.
+# Once every workstation has enrolled and holds its own key, set
+# LOGIX_REQUIRE_DEVICE_KEY=1. The shared bootstrap key then stops being
+# accepted for ingest entirely, so a leaked LOGIX_INGEST_API_KEY no longer lets
+# anything post as a device -- only a real per-device handshake works. This is
+# the posture a settled lab should run in; the shared key exists to get the
+# first devices on board, not to stay valid forever.
+REQUIRE_DEVICE_KEY = os.environ.get("LOGIX_REQUIRE_DEVICE_KEY", "0") == "1"
+
+
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
     # A per-device key issued by /api/enroll takes priority over the shared
     # bootstrap key. Guard empty/missing header BEFORE the DB lookup -- a
@@ -1029,6 +1354,10 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         finally:
             conn.close()
 
+    # Device-key-only posture: the per-device lookup above is the ONLY way in.
+    if REQUIRE_DEVICE_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: a per-device key is required")
+
     expected = os.environ.get("LOGIX_INGEST_API_KEY", "")
     if not expected:
         if LOGIX_DEV_MODE:
@@ -1038,9 +1367,120 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing X-API-Key")
 
 
+def device_hostname_for_key(x_api_key: Optional[str]) -> Optional[str]:
+    """The hostname a per-device key belongs to, or None for the shared key."""
+    if not x_api_key:
+        return None
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT hostname FROM devices WHERE api_key = ?", (x_api_key,)
+        ).fetchone()
+        return row["hostname"] if row else None
+    finally:
+        conn.close()
+
+
+def assert_device_scope(x_api_key: Optional[str], hostname: Optional[str]) -> None:
+    """A per-device key may only speak for its own device.
+
+    verify_api_key established that SOMEBODY enrolled holds this key -- that is
+    authentication. It never checked that the key belongs to the hostname in
+    the payload, which is authorization, and without it any enrolled
+    workstation could file heartbeats and session records as any other. In a
+    student lab, where config.env sits on a machine people use all day, that
+    turns one compromised box into forged data for the whole room.
+
+    The shared bootstrap key legitimately speaks for many devices, so this only
+    binds when a per-device key was actually presented -- which is also why
+    LOGIX_REQUIRE_DEVICE_KEY exists.
+    """
+    owner = device_hostname_for_key(x_api_key)
+    if not owner:
+        return
+    claimed = (hostname or "").strip()
+    if claimed and owner.strip().lower() != claimed.lower():
+        logger.warning("device scope: key for %s used to speak for %s (rejected)", owner, claimed)
+        raise HTTPException(
+            status_code=403,
+            detail="This device key does not belong to that hostname",
+        )
+
+
+class InsecureConfiguration(RuntimeError):
+    """Raised at startup when the server would come up in an unsafe posture."""
+
+
+def assert_safe_posture(*, strict: bool = True) -> List[str]:
+    """Refuse to serve a production deployment that is missing its secrets.
+
+    Every one of these has a silent, dangerous failure mode if it is only a
+    warning: an unset admin password is a login that can never succeed (or, in
+    dev mode, the literal string "admin123"); an unset ingest key means the
+    dev-mode branch of verify_api_key accepts *anything*. Failing to start is
+    loud, happens before a single request is served, and cannot be missed the
+    way a log line can.
+
+    Returns the list of non-fatal warnings. Raises InsecureConfiguration for
+    anything fatal, which aborts uvicorn's startup.
+    """
+    fatal: List[str] = []
+    warnings: List[str] = []
+
+    if LOGIX_DEV_MODE:
+        # Dev mode is a development convenience, not a deployment mode: it
+        # enables the passwordless /api/auth/dev-login shortcut, defaults the
+        # admin password to "admin123", and lets an unset ingest key accept any
+        # device. Never a fatal error (it *is* how you develop), but it must be
+        # impossible to leave on by accident without seeing it.
+        warnings.append(
+            "LOGIX_DEV_MODE=1: passwordless dev-login is enabled and ingest auth "
+            "may be bypassed. Never use this on a shared or lab server."
+        )
+        return warnings
+
+    if not os.environ.get("ADMIN_EMAILS", "").strip():
+        fatal.append("ADMIN_EMAILS is empty -- nobody could sign in.")
+    if not ADMIN_PASSWORD:
+        fatal.append(
+            "LOGIX_ADMIN_PASSWORD is not set -- admin login would be permanently closed."
+        )
+    elif len(ADMIN_PASSWORD) < 12:
+        fatal.append(
+            f"LOGIX_ADMIN_PASSWORD is only {len(ADMIN_PASSWORD)} characters; use at least 12."
+        )
+
+    if not REQUIRE_DEVICE_KEY and not os.environ.get("LOGIX_INGEST_API_KEY", "").strip():
+        fatal.append(
+            "LOGIX_INGEST_API_KEY is not set and LOGIX_REQUIRE_DEVICE_KEY is not 1 -- "
+            "agents would have no way to authenticate."
+        )
+
+    if not os.environ.get("LOGIX_ALLOWED_ORIGINS", "").strip():
+        warnings.append(
+            "LOGIX_ALLOWED_ORIGINS is empty: the dashboard must be served from the "
+            "same origin as the API (no cross-origin browser access)."
+        )
+    if not REQUIRE_DEVICE_KEY:
+        warnings.append(
+            "The shared LOGIX_INGEST_API_KEY is still accepted. Once every device has "
+            "enrolled, set LOGIX_REQUIRE_DEVICE_KEY=1 so only per-device keys work."
+        )
+
+    if fatal:
+        raise InsecureConfiguration(
+            "Refusing to start -- unsafe configuration:\n  - " + "\n  - ".join(fatal)
+            + "\n\nSet these in the server environment, or set LOGIX_DEV_MODE=1 for "
+              "local development only."
+        )
+    return warnings
+
+
 def startup_event():
     # Invoked from the lifespan handler at the top of this module (was
     # @app.on_event("startup"), now deprecated in FastAPI).
+    for warning in assert_safe_posture():
+        logger.warning("SECURITY: %s", warning)
     init_db()
     init_control_tables()
     rehydrate_pending_commands()
@@ -1157,9 +1597,32 @@ def logout(authorization: Optional[str] = Header(None)):
     return {"status": "success"}
 
 
+# Read access to the config needs SOME credential, but it has two legitimate
+# callers with different ones: the dashboard (admin session bearer token) and
+# the agent (X-API-Key, per-device or the shared ingest key). This accepts
+# either and rejects anonymous callers.
+#
+# It was previously wide open. Nothing secret lives in the config today -- it
+# is branding, purpose lists, privacy copy and the idle policy -- but it does
+# describe the lab's internal setup to anyone who can reach the port, and a
+# config blob is exactly the kind of thing that later grows a webhook URL or
+# an SMTP password. Failing closed now is cheap; retrofitting it after someone
+# puts a secret in there is not.
+def verify_token_or_api_key(
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None),
+):
+    try:
+        _resolve_session(authorization)
+        return
+    except HTTPException:
+        pass
+    verify_api_key(x_api_key)
+
+
 # Config Endpoints
 @app.get("/api/config")
-def get_config():
+def get_config(_: None = Depends(verify_token_or_api_key)):
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -1181,7 +1644,11 @@ def update_config(config: Dict[str, Any], email: str = Depends(require_permissio
 
 # Heartbeat Endpoint (Workstations post here periodically)
 @app.post("/api/heartbeat")
-def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key)):
+def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
+                   x_api_key: Optional[str] = Header(None)):
+    # Authenticated above; authorized here. A per-device key may only report
+    # for its own machine.
+    assert_device_scope(x_api_key, payload.hostname)
     ad_id = payload.anydesk_id or ""
     device_name = payload.device_name or payload.hostname
 
@@ -1192,18 +1659,38 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key))
     try:
         conn = get_db()
         try:
-            device_name = upsert_device(conn, payload.hostname, device_name)
+            device_name = upsert_device(
+                conn, payload.hostname, device_name,
+                agent_version=payload.agent_version,
+                agent_os=payload.agent_os,
+                client_time=payload.client_time,
+            )
         finally:
             conn.close()
     except Exception:
         logger.warning("heartbeat: upsert_device failed for %s", payload.hostname, exc_info=True)
 
+    now = datetime.now()
+    status = payload.status.upper()
+    # "Dikunci admin · 14:02" needs the moment the status last CHANGED, not the
+    # last heartbeat -- carry the previous timestamp forward while it holds.
+    previous = HEARTBEATS.get(payload.hostname)
+    status_since = (
+        previous["status_since"]
+        if previous and previous.get("status_since") and previous.get("status") == status
+        else now
+    )
+
     HEARTBEATS[payload.hostname] = {
-        "status": payload.status.upper(),
+        "status": status,
+        "status_since": status_since,
         "username": payload.username,
         "anydesk_id": ad_id,
         "device_name": device_name,
-        "last_seen": datetime.now()
+        "session_started_at": payload.session_started_at or "",
+        "access_type": payload.access_type or "",
+        "purpose": payload.purpose or "",
+        "last_seen": now,
     }
 
     # Apply any outcomes the agent is reporting for commands delivered on a
@@ -1254,13 +1741,18 @@ def get_active_workstations(email: str = Depends(verify_token)):
     active_pcs = []
     for host, info in HEARTBEATS.items():
         if compute_sync_status(categories.get(host), info["last_seen"], now) == "online":
+            status_since = info.get("status_since")
             active_pcs.append({
                 "hostname": host,
                 "device_name": info["device_name"],
                 "status": info["status"],
                 "username": info["username"],
                 "anydesk_id": info["anydesk_id"],
-                "last_seen": info["last_seen"].isoformat()
+                "last_seen": info["last_seen"].isoformat(),
+                "status_since": status_since.isoformat() if status_since else None,
+                "session_started_at": info.get("session_started_at") or None,
+                "access_type": info.get("access_type") or None,
+                "purpose": info.get("purpose") or None,
             })
     return active_pcs
 
@@ -1502,6 +1994,12 @@ class EnrollInviteRequest(BaseModel):
     category: Optional[str] = "custom"
     display_name: Optional[str] = ""
     note: Optional[str] = ""
+    # Pin the invite to one machine. When set, only that hostname can redeem
+    # it -- so a code read off an admin's screen (or out of a chat message)
+    # cannot be used to enrol some other box. This is what turns enrolment
+    # from "whoever types the code first" into a handshake with a device the
+    # admin has already registered by name.
+    hostname: Optional[str] = ""
 
 
 class EnrollRequest(BaseModel):
@@ -1524,13 +2022,30 @@ ENROLL_RATE_LIMIT_WINDOW_MINUTES = 5
 
 
 def _check_enroll_rate_limit(client_ip: str):
-    now = datetime.now()
-    window_start = now - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
+    """Throttle FAILED enrolment attempts only.
+
+    The limit exists to stop someone brute-forcing invite codes against an
+    endpoint that necessarily has no auth. Counting successes as well made
+    commissioning a real lab impossible: 24 workstations enrolled from one
+    provisioning host, or from behind one NAT address, hit the ceiling on the
+    eleventh machine and the rest failed with 429 -- a deployment blocker that
+    only appears at a scale nobody had tested.
+
+    Only failures are recorded (see _record_enroll_failure), which costs no
+    security: a success consumes a single-use, hostname-pinned invite, so an
+    attacker cannot produce a run of them without already holding valid codes.
+    """
+    window_start = datetime.now() - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
     attempts = [t for t in _ENROLL_ATTEMPTS.get(client_ip, []) if t > window_start]
+    _ENROLL_ATTEMPTS[client_ip] = attempts
     if len(attempts) >= ENROLL_RATE_LIMIT_MAX_ATTEMPTS:
-        _ENROLL_ATTEMPTS[client_ip] = attempts
         raise HTTPException(status_code=429, detail="Too many enrollment attempts, try again later")
-    attempts.append(now)
+
+
+def _record_enroll_failure(client_ip: str):
+    window_start = datetime.now() - timedelta(minutes=ENROLL_RATE_LIMIT_WINDOW_MINUTES)
+    attempts = [t for t in _ENROLL_ATTEMPTS.get(client_ip, []) if t > window_start]
+    attempts.append(datetime.now())
     _ENROLL_ATTEMPTS[client_ip] = attempts
 
 
@@ -1550,16 +2065,21 @@ def create_enroll_invite(payload: EnrollInviteRequest, email: str = Depends(requ
     try:
         conn.execute(
             "INSERT INTO enrollment_invites "
-            "(invite_code, category, display_name, note, created_by, created_at, expires_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(invite_code, category, display_name, note, created_by, created_at, expires_at, hostname) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (invite_code, category, payload.display_name, payload.note, email,
-             now.isoformat(), expires_at.isoformat()),
+             now.isoformat(), expires_at.isoformat(), (payload.hostname or "").strip()),
         )
         conn.commit()
     finally:
         conn.close()
 
-    return {"invite_code": invite_code, "expires_at": expires_at.isoformat(), "category": category}
+    return {
+        "invite_code": invite_code,
+        "expires_at": expires_at.isoformat(),
+        "category": category,
+        "hostname": (payload.hostname or "").strip(),
+    }
 
 
 @app.post("/api/enroll")
@@ -1567,6 +2087,16 @@ def redeem_enroll_invite(payload: EnrollRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown"
     _check_enroll_rate_limit(client_ip)
 
+    try:
+        return _redeem_enroll_invite(payload, client_ip)
+    except HTTPException as exc:
+        # 429 is the limiter itself; counting it would extend its own window.
+        if exc.status_code != 429:
+            _record_enroll_failure(client_ip)
+        raise
+
+
+def _redeem_enroll_invite(payload: EnrollRequest, client_ip: str):
     conn = get_db()
     try:
         invite = conn.execute(
@@ -1578,6 +2108,16 @@ def redeem_enroll_invite(payload: EnrollRequest, request: Request):
             raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
         if datetime.now() > datetime.fromisoformat(invite["expires_at"]):
             raise HTTPException(status_code=410, detail="Invite code expired")
+
+        # A hostname-pinned invite only works on the machine it was issued for.
+        # Deliberately the same generic message as an unknown code, so this
+        # cannot be used to probe which hostnames an admin has registered.
+        pinned = (invite["hostname"] or "").strip() if "hostname" in invite.keys() else ""
+        if pinned and pinned.lower() != payload.hostname.strip().lower():
+            logger.warning(
+                "enroll: invite pinned to %s redeemed from %s (rejected)", pinned, payload.hostname
+            )
+            raise HTTPException(status_code=400, detail="Invalid or already-used invite code")
 
         category = invite["category"] or "custom"
         device_id = str(uuid.uuid4())
@@ -1998,7 +2538,12 @@ def mark_reply_read(reply_id: int, email: str = Depends(require_permission("repl
 
 # Logging Endpoints
 @app.post("/api/log")
-def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
+def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key),
+              x_api_key: Optional[str] = Header(None)):
+    # Session records are the data this whole system exists to be trusted
+    # about; a device key must not be able to write them for another machine.
+    for entry in logs:
+        assert_device_scope(x_api_key, entry.hostname)
     conn = get_db()
     inserted = 0
     try:
@@ -2043,7 +2588,14 @@ def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
                 payload.anydesk_detected,
                 payload.raw_json,
                 payload.event_uid or None,
-                1  # mark as synced on the server DB
+                1,  # mark as synced on the server DB
+                datetime.now().isoformat(),
+                # Unknown values are stored as-is rather than rejected: a
+                # future agent may know a source this build does not, and
+                # dropping the event would be a far worse outcome than
+                # recording a label the dashboard renders verbatim.
+                payload.identity_source or "self_declared",
+                payload.person_role or "",
             ]
             conn.execute(sql, vals)
             inserted += 1
@@ -2058,12 +2610,168 @@ def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key)):
     return {"status": "success", "inserted": inserted}
 
 
+# Riwayat (v3) filters the session log by a period preset, so both log
+# endpoints take an inclusive YYYY-MM-DD range. `timestamp` is stored as an
+# ISO string, so a lexical compare on its date prefix is both correct and
+# index-friendly. Returns the SQL fragment plus its args.
+def _date_range_clause(column: str, start_date: Optional[str], end_date: Optional[str]):
+    clause, args = "", []
+    for label, value, op in (("start_date", start_date, ">="), ("end_date", end_date, "<=")):
+        if not value:
+            continue
+        try:
+            datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid {label}, expected YYYY-MM-DD")
+        clause += f" AND substr({column}, 1, 10) {op} ?"
+        args.append(value)
+    return clause, args
+
+
+# Pairs each session's START with whichever close event came first and yields
+# one span per session. Shared by the Riwayat summary and the CSV exports so
+# "148 j total / 96 sesi / 31 pengguna" and the downloaded file can never
+# disagree about what counts as a session.
+def _session_spans(conn, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    clause, args = _date_range_clause("timestamp", start_date, end_date)
+    rows = conn.execute(
+        "SELECT session_id, event, timestamp, hostname, nama, nim, username, tujuan, session_type, "
+        "identity_source, person_role "
+        f"FROM physical_log WHERE session_id IS NOT NULL AND session_id != ''{clause} "
+        "ORDER BY session_id, timestamp ASC",
+        args,
+    ).fetchall()
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        grouped.setdefault(r["session_id"], []).append(dict(r))
+
+    closing = CLOSING_EVENTS
+    spans = []
+    for session_id, events in grouped.items():
+        start_row = next((e for e in events if e["event"] == "START"), None)
+        if not start_row:
+            continue
+        close_row = next((e for e in events if e["event"] in closing), None)
+        duration = None
+        duration_capped = False
+        if close_row:
+            try:
+                duration = max(
+                    0.0,
+                    (
+                        datetime.fromisoformat(close_row["timestamp"])
+                        - datetime.fromisoformat(start_row["timestamp"])
+                    ).total_seconds(),
+                )
+            except Exception:
+                duration = None
+            # A constant clock offset cancels out of end - start, so it cannot
+            # produce this. A clock that JUMPED mid-session can, and so can a
+            # session that was never really closed. Cap rather than discard:
+            # the session did happen, and silently contributing an implausible
+            # number of hours to a utilisation report is the failure mode being
+            # avoided here.
+            if duration is not None and duration > MAX_SESSION_HOURS * 3600:
+                duration = float(MAX_SESSION_HOURS * 3600)
+                duration_capped = True
+        spans.append({
+            "session_id": session_id,
+            "timestamp": start_row["timestamp"],
+            "hostname": start_row["hostname"] or "",
+            "nama": start_row["nama"] or "",
+            "nim": start_row["nim"] or "",
+            "username": start_row["username"] or "",
+            "tujuan": start_row["tujuan"] or "",
+            "session_type": start_row["session_type"] or "",
+            "duration_seconds": duration,
+            # Surfaced so the table can say so rather than showing a plain
+            # number the admin would read as a normal, observed session.
+            "auto_closed": bool(close_row and close_row["event"] == "AUTO_CLOSE"),
+            "duration_capped": duration_capped,
+            "identity_source": start_row["identity_source"] or "self_declared",
+            "person_role": start_row["person_role"] or "",
+        })
+    return spans
+
+
+# The three inline summary numbers on Riwayat. Deliberately derived from
+# _session_spans rather than a separate aggregation, so the sentence always
+# matches a manual count of the table below it.
+@app.get("/api/sessions/summary")
+def get_sessions_summary(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    email: str = Depends(require_permission("sessions_read")),
+):
+    conn = get_db()
+    try:
+        # Close abandoned sessions before counting, so the numbers are right on
+        # first read rather than only after somebody happens to open Alerts.
+        reconcile_open_sessions(conn)
+        spans = _session_spans(conn, start_date, end_date)
+    finally:
+        conn.close()
+    total_seconds = sum(s["duration_seconds"] or 0 for s in spans)
+    users = {s["nim"] or s["nama"] or s["username"] for s in spans}
+    users.discard("")
+    return {
+        "hours": round(total_seconds / 3600, 1),
+        "sessions": len(spans),
+        "users": len(users),
+        # `hours` sums `duration or 0`, so a session with no closing event
+        # contributes nothing while still being counted as a session. That is
+        # not wrong -- we genuinely do not know how long it ran -- but it is
+        # invisible, and invisible is how a utilisation report quietly
+        # under-reports. Counting them lets the UI say so out loud.
+        "open_sessions": sum(1 for s in spans if s["duration_seconds"] is None),
+        # Sessions the server closed on the device's behalf, using its last
+        # sign of life. Real hours, but inferred rather than observed.
+        "auto_closed_sessions": sum(1 for s in spans if s.get("auto_closed")),
+    }
+
+
+# Riwayat's "Log Sesi" table is one row PER SESSION with a real duration, not
+# one row per physical_log event -- /api/sessions below still returns the raw
+# event stream for anything that needs it (and for backward compatibility).
+@app.get("/api/sessions/spans")
+def get_session_spans(
+    limit: int = 25,
+    offset: int = 0,
+    hostname: Optional[str] = None,
+    username: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    email: str = Depends(require_permission("sessions_read")),
+):
+    conn = get_db()
+    try:
+        # Close abandoned sessions before counting, so the numbers are right on
+        # first read rather than only after somebody happens to open Alerts.
+        reconcile_open_sessions(conn)
+        spans = _session_spans(conn, start_date, end_date)
+    finally:
+        conn.close()
+
+    if hostname:
+        needle = hostname.lower()
+        spans = [s for s in spans if needle in s["hostname"].lower()]
+    if username:
+        needle = username.lower()
+        spans = [s for s in spans if needle in f"{s['nama']} {s['username']} {s['nim']}".lower()]
+
+    spans.sort(key=lambda s: s["timestamp"], reverse=True)
+    return {"total": len(spans), "sessions": spans[offset:offset + limit]}
+
+
 @app.get("/api/sessions")
 def get_sessions(
-    limit: int = 100, 
-    offset: int = 0, 
-    hostname: Optional[str] = None, 
+    limit: int = 100,
+    offset: int = 0,
+    hostname: Optional[str] = None,
     username: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     email: str = Depends(require_permission("sessions_read"))
 ):
     conn = get_db()
@@ -2071,7 +2779,7 @@ def get_sessions(
         query = "SELECT * FROM physical_log WHERE 1=1"
         count_query = "SELECT COUNT(*) FROM physical_log WHERE 1=1"
         args = []
-        
+
         if hostname:
             query += " AND hostname LIKE ?"
             count_query += " AND hostname LIKE ?"
@@ -2081,7 +2789,12 @@ def get_sessions(
             count_query += " AND (nama LIKE ? OR username LIKE ?)"
             args.append(f"%{username}%")
             args.append(f"%{username}%")
-            
+
+        date_clause, date_args = _date_range_clause("timestamp", start_date, end_date)
+        query += date_clause
+        count_query += date_clause
+        args.extend(date_args)
+
         total = conn.execute(count_query, args).fetchone()[0]
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         args.extend([limit, offset])
@@ -2101,6 +2814,8 @@ def get_audit_log(
     offset: int = 0,
     target_device: Optional[str] = None,
     status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     email: str = Depends(require_permission("audit_log_read"))
 ):
     conn = get_db()
@@ -2118,6 +2833,13 @@ def get_audit_log(
             query += " AND status = ?"
             count_query += " AND status = ?"
             args.append(status)
+
+        # Same period preset as the session log, so switching sub-tabs keeps
+        # the range the admin already chose.
+        date_clause, date_args = _date_range_clause("timestamp", start_date, end_date)
+        query += date_clause
+        count_query += date_clause
+        args.extend(date_args)
 
         total = conn.execute(count_query, args).fetchone()[0]
         query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
@@ -2213,6 +2935,7 @@ def download_report(
     full: bool = False,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    format: str = "xlsx",
     email: str = Depends(require_permission("reports_read")),
 ):
     # start_date/end_date map directly onto logbook_report.py's existing
@@ -2225,6 +2948,56 @@ def download_report(
                     datetime.strptime(value, "%Y-%m-%d")
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"Invalid {label}, expected YYYY-MM-DD")
+
+    if format not in ("xlsx", "csv", "per_user"):
+        raise HTTPException(status_code=400, detail="Invalid format, expected xlsx, csv or per_user")
+
+    # The two CSV shapes Riwayat's Unduh menu offers. Both are built from
+    # _session_spans -- the same pairing the summary sentence uses -- so an
+    # export can never disagree with the numbers on screen. The xlsx path
+    # below is untouched, keeping the existing report byte-identical.
+    if format in ("csv", "per_user"):
+        conn = get_db()
+        try:
+            reconcile_open_sessions(conn)
+            spans = _session_spans(conn, start_date, end_date)
+        finally:
+            conn.close()
+        spans.sort(key=lambda s: s["timestamp"], reverse=True)
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        if format == "csv":
+            writer.writerow(["Waktu", "Perangkat", "Pengguna", "NIM", "Tipe akses", "Tujuan", "Durasi (menit)"])
+            for s in spans:
+                writer.writerow([
+                    s["timestamp"], s["hostname"], s["nama"] or s["username"], s["nim"],
+                    s["session_type"], s["tujuan"],
+                    "" if s["duration_seconds"] is None else round(s["duration_seconds"] / 60),
+                ])
+            stem = "sesi"
+        else:
+            per_user: Dict[str, Dict[str, Any]] = {}
+            for s in spans:
+                key = s["nim"] or s["nama"] or s["username"] or "-"
+                entry = per_user.setdefault(key, {
+                    "nama": s["nama"] or s["username"], "nim": s["nim"], "sessions": 0, "seconds": 0.0,
+                })
+                entry["sessions"] += 1
+                entry["seconds"] += s["duration_seconds"] or 0
+            writer.writerow(["Nama", "NIM", "Jumlah sesi", "Total jam"])
+            for entry in sorted(per_user.values(), key=lambda e: e["seconds"], reverse=True):
+                writer.writerow([entry["nama"], entry["nim"], entry["sessions"], round(entry["seconds"] / 3600, 2)])
+            stem = "rekap-per-pengguna"
+
+        filename = f"{stem}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv"
+        # utf-8-sig: Excel on Windows needs the BOM to read the Indonesian
+        # names as UTF-8 rather than the system codepage.
+        return Response(
+            content=buffer.getvalue().encode("utf-8-sig"),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     out_file = REPORTS_DIR / f"report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
     cmd = [
@@ -2280,17 +3053,85 @@ def favicon():
 # falls back to the legacy vanilla-JS dashboard in server/static/ so a
 # checkout without Node still serves a working UI.
 _react_dist = BASE_DIR.parent / "frontend" / "dist"
-if (_react_dist / "index.html").exists():
+_react_dist_in_use = (_react_dist / "index.html").exists()
+if _react_dist_in_use:
     static_dir = _react_dist
+    logger.info("dashboard: serving the built React app from %s", _react_dist)
 else:
     static_dir = BASE_DIR / "static"
     static_dir.mkdir(exist_ok=True)
+    logger.info("dashboard: frontend/dist not found, serving the no-Node fallback UI")
+
+# App version, used to cache-bust the fallback dashboard's assets.
+try:
+    APP_VERSION = (BASE_DIR.parent / "VERSION").read_text(encoding="utf-8").strip() or "dev"
+except OSError:
+    APP_VERSION = "dev"
+
+
+# Cache policy for the dashboard.
+#
+# The React build emits content-hashed filenames (index-<hash>.js), so those are
+# safe to cache hard and forever. The fallback UI in server/static/ does NOT --
+# its app.js / style.css / js/*.js keep the same URL across releases, so a
+# browser that cached them will happily run last release's JavaScript against
+# this release's API after an upgrade. That was reproduced here: after editing
+# app.js the browser kept executing the previous copy straight from disk cache.
+#
+# `no-cache` alone does not fix it, because an entry cached BEFORE the header
+# existed still has heuristic freshness. So this does two things: `no-store` on
+# the fallback's assets stops any new entry being kept, and read_root() below
+# stamps the two entry points with ?v=<version>, which changes their URL on
+# every release and therefore cannot hit a stale entry at all.
+@app.middleware("http")
+async def set_static_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/api/"):
+        return response
+    if _react_dist_in_use and "/assets/" in path:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
+
 
 @app.get("/")
 def read_root():
     index_file = static_dir / "index.html"
-    if index_file.exists():
-        return FileResponse(str(index_file))
-    return JSONResponse({"message": "Logix Central Server Active. Static Dashboard missing."})
+    if not index_file.exists():
+        return JSONResponse({"message": "Logix Central Server Active. Static Dashboard missing."})
+
+    headers = {"Cache-Control": "no-store, must-revalidate"}
+    # The React build already hashes its filenames; only the fallback UI needs
+    # its entry points stamped.
+    if _react_dist_in_use:
+        return FileResponse(str(index_file), headers=headers)
+
+    html = index_file.read_text(encoding="utf-8")
+    html = html.replace('href="style.css"', f'href="style.css?v={APP_VERSION}"')
+    html = html.replace('src="app.js"', f'src="app.js?v={APP_VERSION}"')
+    return HTMLResponse(html, headers=headers)
+
+
+@app.get("/app.js", include_in_schema=False)
+def read_fallback_entry():
+    """Serve the fallback UI's entry module with its own imports version-stamped.
+
+    Stamping index.html alone is not enough: a fresh app.js still imports
+    "./js/api.js" etc. at their unversioned URLs, so an upgrade could pair new
+    entry code with modules left over from the previous release. Rewriting the
+    specifiers here means one version bump invalidates the whole module graph.
+    """
+    entry = BASE_DIR / "static" / "app.js"
+    if _react_dist_in_use or not entry.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    src = re.sub(r'(from\s+"\./js/[A-Za-z0-9_.-]+\.js)"', rf'\1?v={APP_VERSION}"',
+                 entry.read_text(encoding="utf-8"))
+    return Response(
+        content=src,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 app.mount("/", StaticFiles(directory=str(static_dir)), name="static")

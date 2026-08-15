@@ -19,11 +19,11 @@ if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and 
 }
 
 Ensure-LogbookDirs
-$cfg = Get-LogbookConfig
-# Combo dropdowns render as a light control (white surface, dark text) for
-# readability over the dark popup; the text uses the brand accent so it stays
-# on-theme when a lab re-brands. See Set-ReadableComboBox.
-$script:comboFg = (Get-LogbookTheme $cfg).accent
+# Cache-first: this is the login path, and a person is watching a blank screen
+# until it renders. The timer refreshes this cache once a minute for the whole
+# life of a session (see Get-LogbookCachedIdleLimit), so in practice it is
+# seconds old. Only a genuinely cold box pays for the round-trip.
+$cfg = Get-LogbookConfig -MaxCacheAgeSeconds 300
 Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
 
 try {
@@ -373,6 +373,14 @@ function Invoke-LogbookHandoffToTimer($win, [int]$MaxWaitMs = 1800) {
 $script:cachedBg = $null
 $script:cachedMascot = $null
 
+# Warm the whole START path NOW, while the form is still being built and the
+# user cannot have clicked anything yet. See Initialize-LogbookStartPathWarmup
+# for the measurements: it is not one slow operation, it is a stack of
+# first-call costs (ConvertTo-Json, Start-Process, Out-File, the config read)
+# that PowerShell only pays once per process -- and the sign-in popup is always
+# a fresh process, so it paid all of them inside the click handler.
+Initialize-LogbookStartPathWarmup
+
 $sessionInfo = Get-LogbookSessionType
 $detectedSessionType = [string]$sessionInfo[0]
 $detectedAnyDesk = [int]$sessionInfo[1]
@@ -418,8 +426,22 @@ function Invoke-LogbookStartSession {
     # nothing below this line affects it.
     Start-LogbookTimer -SessionId $sid | Out-Null
 
-    $logged = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan
-    if (-not $logged) { Write-LogbookError "START logging failed but continuing safely. sid=$sid" }
+    # -Async: this runs on the WPF UI thread inside the button's Click
+    # handler, and the synchronous bridge costs ~251ms here -- 82ms to start a
+    # Python interpreter, 135ms to import the module, and 6.6ms of actual
+    # SQLite work (measured on this machine against a copy of the real
+    # database). Blocking the UI thread for a quarter second at the exact
+    # moment the user pressed START is the lag; the database was never the
+    # problem.
+    #
+    # Safe here and NOT elsewhere: session.json is already written above and
+    # is the client's own source of truth, and a START row that never lands
+    # is reconstructed from it by repair_active_session_from_windows_state()
+    # -- which logbook_report.build() already calls on every report. A close
+    # (END) keeps the synchronous bridge on purpose, because that path has to
+    # know whether the row was really written before it locks the machine.
+    $dispatched = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan -Async
+    if (-not $dispatched) { Write-LogbookError "START logging failed to dispatch but continuing safely. sid=$sid" }
     return $true
 }
 
@@ -432,11 +454,18 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
         if ($fpProfile.nama -and $fpProfile.nim) {
             $fpWindow = [Windows.Markup.XamlReader]::Load(
                 (New-Object System.Xml.XmlNodeReader ([xml](Build-LogbookWelcomeBackXaml $cfg $fpProfile $detectedSessionType))))
-            $fpWindow.WindowState = 'Normal'
-            $fpWindow.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
-            $fpWindow.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
-            $fpWindow.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
-            $fpWindow.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+            # Covers every screen (kiosk), then puts the CARD on one of them.
+            # See Set-LogbookWindowToVirtualScreen / Set-LogbookCardOnScreen.
+            Set-LogbookWindowToVirtualScreen $fpWindow
+            $fpWindow.Add_Loaded({
+                # Re-applied here because the DIP scale is only knowable once
+                # the window has an HWND; before that a 150% display is sized
+                # in raw pixels and every coordinate inside it is off by half.
+                Set-LogbookWindowToVirtualScreen $fpWindow
+                # No picker on the resume card: it is a one-tap confirmation,
+                # not a form, and it is on screen for a couple of seconds.
+                [void](Set-LogbookPopupMonitorPlacement -Window $fpWindow -Card $fpWindow.FindName('MainCard') -Panel $null -cfg $cfg)
+            })
             $fpWindow.Topmost = $true
             $fpBg = New-BlurredBackgroundImage
             if ($fpBg) { $fpWindow.FindName('BgImage').Source = $fpBg; $script:cachedBg = $fpBg }
@@ -494,21 +523,23 @@ $xaml = Build-LogbookPopupXaml $cfg
 $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-# Override WindowState to normal and span all connected screens (multi-monitor coverage)
-$window.WindowState = 'Normal'
-$window.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
-$window.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
-$window.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
-$window.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
+# The window still spans every connected screen, and must: this is a kiosk
+# lock, and an uncovered second monitor is a way around it. What changed is
+# that the CARD inside it is no longer centred on the combined desktop -- on an
+# extended pair that centre is the seam between two panels, which is where the
+# sign-in dialog used to appear, split across a bezel.
+Set-LogbookWindowToVirtualScreen $window
 
 $window.Add_StateChanged({
-    if ($window.WindowState -ne 'Normal') {
-        $window.WindowState = 'Normal'
-        $window.Left = [System.Windows.Forms.SystemInformation]::VirtualScreen.Left
-        $window.Top = [System.Windows.Forms.SystemInformation]::VirtualScreen.Top
-        $window.Width = [System.Windows.Forms.SystemInformation]::VirtualScreen.Width
-        $window.Height = [System.Windows.Forms.SystemInformation]::VirtualScreen.Height
-    }
+    if ($window.WindowState -ne 'Normal') { Set-LogbookWindowToVirtualScreen $window }
+})
+
+$window.Add_Loaded({
+    # Both of these need an HWND: the DIP scale to size the window truthfully,
+    # and the card's measured height to centre it vertically on its display.
+    Set-LogbookWindowToVirtualScreen $window
+    [void](Set-LogbookPopupMonitorPlacement -Window $window -Card $window.FindName('MainCard') `
+            -Panel $window.FindName('MonitorPicker') -cfg $cfg)
 })
 
 $window.Topmost = $true
@@ -561,71 +592,13 @@ $btn = $window.FindName('SubmitBtn')
 
 $hint = $window.FindName('HintText')
 
-# Force ComboBox readability. Some WPF themes ignore XAML setters for the
-# non-editable selection box and render white text on a white drop-down.
-function Set-ComboVisualTreeReadable($root, $fg, $bg) {
-    try {
-        if ($root -is [System.Windows.Controls.TextBox]) {
-            $root.Foreground = $fg
-            $root.Background = $bg
-            $root.CaretBrush = $fg
-        } elseif ($root -is [System.Windows.Controls.TextBlock]) {
-            $root.Foreground = $fg
-        }
-        $count = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($root)
-        for ($i = 0; $i -lt $count; $i++) {
-            Set-ComboVisualTreeReadable ([System.Windows.Media.VisualTreeHelper]::GetChild($root, $i)) $fg $bg
-        }
-    } catch {}
-}
-
-function Set-ReadableComboBox($combo) {
-    try {
-        $brushConverter = New-Object System.Windows.Media.BrushConverter
-        $fg = $brushConverter.ConvertFromString($script:comboFg)
-        $bg = $brushConverter.ConvertFromString('#FFFFFF')
-        $border = $brushConverter.ConvertFromString('#C0C0C0')
-        $combo.IsEnabled = $true
-        $combo.Background = $bg
-        $combo.Foreground = $fg
-        $combo.BorderBrush = $border
-        [System.Windows.Documents.TextElement]::SetForeground($combo, $fg)
-        foreach ($item in $combo.Items) {
-            try {
-                $item.Background = $bg
-                $item.Foreground = $fg
-                [System.Windows.Documents.TextElement]::SetForeground($item, $fg)
-            } catch {}
-        }
-        $combo.ApplyTemplate() | Out-Null
-        Set-ComboVisualTreeReadable $combo $fg $bg
-        $combo.Add_Loaded({
-            param($sender, $eventArgs)
-            try {
-                $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
-            } catch {}
-        })
-        $combo.Add_DropDownOpened({
-            param($sender, $eventArgs)
-            try {
-                $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
-            } catch {}
-        })
-        $combo.Add_DropDownClosed({
-            param($sender, $eventArgs)
-            try {
-                $bc = New-Object System.Windows.Media.BrushConverter
-                Set-ComboVisualTreeReadable $sender ($bc.ConvertFromString($script:comboFg)) ($bc.ConvertFromString('#FFFFFF'))
-            } catch {}
-        })
-    } catch {
-        Write-LogbookError "Combo readable patch failed: $($_.Exception.Message)"
-    }
-}
-Set-ReadableComboBox $access
-Set-ReadableComboBox $tujuan
+# NOTE: a legacy Set-ReadableComboBox lived here. It forced both dropdowns to
+# a white background with brand-accent text and walked the visual tree to make
+# it stick -- a workaround from before the client had its own dark ComboBox
+# ControlTemplate. Once LxCombo landed (logbook_common.ps1) the workaround was
+# no longer merely redundant, it WAS the bug: a white box with red text sitting
+# in the middle of a dark sign-in card. Style the dropdown in LxCombo, never
+# imperatively here.
 $script:submitted = $false
 
 if ($detectedSessionType -eq 'AnyDesk') { $access.SelectedIndex = 1 } else { $access.SelectedIndex = 0 }
@@ -731,6 +704,26 @@ try {
     if (-not $TestMode) { Enable-LogbookKeyboardLockdown }
     $nama.Focus() | Out-Null
     [void]$window.ShowDialog()
+} catch {
+    # FAIL OPEN, ON THE RECORD.
+    #
+    # This is the gate to a lab workstation. If it throws, the two bad outcomes
+    # are (a) a student stuck at a machine they cannot use, staring at a
+    # PowerShell stack trace, and (b) the machine's usage vanishing from the
+    # logbook because nothing recorded it. The second is what used to happen
+    # silently. Neither is acceptable, so: let them work, register the session
+    # as identity_source='unverified' so the hours are still counted and
+    # visibly attributed to nobody, and say so in words a student can act on.
+    #
+    # The finally below still runs, so Task Manager and the keyboard are
+    # released no matter which way this goes -- a crashed popup must never
+    # leave a workstation locked down.
+    $reason = $_.Exception.Message
+    Write-LogbookError "Sign-in popup failed: $reason"
+    if (-not $TestMode) {
+        Register-LogbookUnverifiedSession -Reason $reason | Out-Null
+        Show-LogbookSignInFailureNotice -Reason $reason
+    }
 } finally {
     Disable-LogbookKeyboardLockdown
     Set-TaskManagerDisabled -Disabled $false

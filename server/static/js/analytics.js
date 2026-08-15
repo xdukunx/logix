@@ -1,6 +1,6 @@
 // Analytics tab: the 3 charts, the session-logs table, and the Control
 // audit-log table. Logic moved as-is from the pre-redesign app.js.
-import { fetchWithAuth, escapeHtml, renderError } from "./api.js";
+import { fetchWithAuth, escapeHtml } from "./api.js";
 
 const logsTbody = document.getElementById("logs-tbody");
 const auditLogTbody = document.getElementById("audit-log-tbody");
@@ -15,111 +15,25 @@ const itemsPerPage = 15;
 let searchQuery = "";
 let totalLogs = 0;
 
-// Fetch & Render SVG Analytics Graphs
+// Riwayat summary. v3 removed every chart from this screen; what replaces
+// them is three numbers inline in a sentence. Sourced from
+// /api/sessions/summary, the same endpoint the React dashboard reads, so the
+// two surfaces can never disagree about the totals.
 export const fetchAnalytics = async () => {
+    const hoursEl = document.getElementById("val-total-hours");
+    const sessionsEl = document.getElementById("val-total-logs");
+    const usersEl = document.getElementById("val-total-users");
+    if (!hoursEl && !sessionsEl && !usersEl) return;
     try {
-        const res = await fetchWithAuth("/api/analytics");
-        if (!res.ok) throw new Error("Gagal memuat analitik");
+        const res = await fetchWithAuth("/api/sessions/summary");
+        if (!res.ok) throw new Error("Gagal memuat ringkasan");
         const data = await res.json();
-
-        // 1. Render Workstation Utilization (Total Hours)
-        const workContainer = document.getElementById("chart-utilization");
-        if (data.by_workstation.length === 0) {
-            workContainer.innerHTML = '<p class="text-secondary">Tidak ada data stasiun.</p>';
-        } else {
-            const maxHours = Math.max(...data.by_workstation.map(w => w.hours)) || 1;
-            workContainer.innerHTML = `
-                <div class="utilization-bar-list">
-                    ${data.by_workstation.map(w => {
-                        const pct = (w.hours / maxHours) * 100;
-                        return `
-                            <div class="util-bar-item">
-                                <div class="util-bar-labels">
-                                    <strong>${escapeHtml(w.hostname)}</strong>
-                                    <span class="text-secondary">${w.hours} jam</span>
-                                </div>
-                                <div class="util-bar-bg">
-                                    <div class="util-bar-fill" style="width: ${pct}%"></div>
-                                </div>
-                            </div>
-                        `;
-                    }).join("")}
-                </div>
-            `;
-        }
-
-        // 2. Render Purposes Breakdown
-        const purposeContainer = document.getElementById("chart-purposes");
-        if (data.by_purpose.length === 0) {
-            purposeContainer.innerHTML = '<p class="text-secondary">Tidak ada data tujuan.</p>';
-        } else {
-            const maxCount = Math.max(...data.by_purpose.map(p => p.count)) || 1;
-            purposeContainer.innerHTML = `
-                <div class="utilization-bar-list">
-                    ${data.by_purpose.map(p => {
-                        const pct = (p.count / maxCount) * 100;
-                        return `
-                            <div class="util-bar-item">
-                                <div class="util-bar-labels">
-                                    <strong>${escapeHtml(p.purpose)}</strong>
-                                    <span class="text-secondary">${p.count} sesi</span>
-                                </div>
-                                <div class="util-bar-bg">
-                                    <div class="util-bar-fill" style="width: ${pct}%; background: linear-gradient(90deg, var(--accent-color), var(--success-color))"></div>
-                                </div>
-                            </div>
-                        `;
-                    }).join("")}
-                </div>
-            `;
-        }
-
-        // 3. Render SVG Hourly bar graph
-        const hourlyContainer = document.getElementById("chart-hourly");
-        const maxHourVal = Math.max(...data.by_hour.map(h => h.count)) || 1;
-
-        const width = 360;
-        const height = 180;
-        const padding = 20;
-        const chartWidth = width - padding * 2;
-        const chartHeight = height - padding * 2;
-        const barWidth = chartWidth / 24 - 2;
-
-        let svgContent = `
-            <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: 100%">
-                <line x1="${padding}" y1="${padding}" x2="${width - padding}" y2="${padding}" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
-                <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="rgba(255,255,255,0.1)" stroke-width="1.5" />
-        `;
-
-        data.by_hour.forEach((h, index) => {
-            const barHeight = (h.count / maxHourVal) * chartHeight;
-            const x = padding + index * (chartWidth / 24);
-            const y = height - padding - barHeight;
-
-            svgContent += `
-                <rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="var(--primary-color)" opacity="0.8" rx="2">
-                    <title>Pukul ${h.hour}: ${h.count} sesi</title>
-                </rect>
-            `;
-
-            if (index % 4 === 0) {
-                svgContent += `
-                    <text x="${x + barWidth/2}" y="${height - 4}" fill="var(--text-secondary)" font-size="8" text-anchor="middle">
-                        ${index}
-                    </text>
-                `;
-            }
-        });
-
-        svgContent += `</svg>`;
-        hourlyContainer.innerHTML = svgContent;
-
+        if (hoursEl) hoursEl.textContent = `${data.hours} j`;
+        if (sessionsEl) sessionsEl.textContent = data.sessions;
+        if (usersEl) usersEl.textContent = data.users;
     } catch (err) {
         console.error(err);
-        ["chart-utilization", "chart-purposes", "chart-hourly"].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) renderError(el, "Gagal memuat grafik.");
-        });
+        [hoursEl, sessionsEl, usersEl].forEach(el => { if (el) el.textContent = "-"; });
     }
 };
 
@@ -182,7 +96,7 @@ export const fetchSessionLogs = async () => {
         logsTbody.innerHTML = `
             <tr>
                 <td colspan="8" class="text-center" style="color: var(--danger-color)">
-                    <i class="fa-solid fa-triangle-exclamation"></i> Gagal memuat data dari server.
+                    Gagal memuat data dari server.
                 </td>
             </tr>
         `;
@@ -239,7 +153,7 @@ export const fetchAuditLog = async () => {
         auditLogTbody.innerHTML = `
             <tr>
                 <td colspan="7" class="text-center" style="color: var(--danger-color)">
-                    <i class="fa-solid fa-triangle-exclamation"></i> Gagal memuat audit log dari server.
+                    Gagal memuat audit log dari server.
                 </td>
             </tr>
         `;

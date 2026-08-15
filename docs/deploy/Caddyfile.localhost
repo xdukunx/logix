@@ -1,0 +1,13 @@
+localhost {
+	tls internal
+	reverse_proxy 127.0.0.1:8791
+	request_body {
+		max_size 20MB
+	}
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+}

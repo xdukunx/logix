@@ -81,7 +81,6 @@ export const fetchDevices = async () => {
             devicesTbody.innerHTML = `
                 <tr><td colspan="6">
                     <div class="empty-state">
-                        <i class="fa-solid fa-server"></i>
                         <p class="empty-title">No Devices Yet</p>
                         <p class="empty-helper">Devices will appear here once they send their first heartbeat.</p>
                     </div>
@@ -108,7 +107,6 @@ export const fetchDevices = async () => {
         devicesTbody.innerHTML = `
             <tr><td colspan="6">
                 <div class="empty-state">
-                    <i class="fa-solid fa-triangle-exclamation" style="color: var(--danger-color)"></i>
                     <p class="empty-title">Terjadi Kesalahan</p>
                     <p class="empty-helper">Gagal memuat data devices.</p>
                 </div>
@@ -199,7 +197,7 @@ const loadScreenshot = async (deviceId) => {
         const shot = await res.json();
         container.innerHTML = `
             <div class="section-header" style="border-bottom: none;">
-                <h2 style="font-size: 14px;"><i class="fa-solid fa-camera"></i> Tangkapan Layar Terakhir</h2>
+                <h2 style="font-size: 14px;">Tangkapan Layar Terakhir</h2>
             </div>
             <div class="screenshot-preview">
                 <img src="data:${escapeHtml(shot.content_type || "image/jpeg")};base64,${shot.image_base64}" alt="Screenshot ${escapeHtml(shot.hostname)}">
@@ -236,7 +234,6 @@ export const openDeviceDetail = async (deviceId) => {
     modalTitle.textContent = "Device Detail";
     modalBody.innerHTML = `
         <div class="loading-placeholder">
-            <i class="fa-solid fa-circle-notch fa-spin"></i>
             <p>Memuat detail device...</p>
         </div>
     `;
@@ -254,7 +251,7 @@ export const openDeviceDetail = async (deviceId) => {
                 const retryNote = a.retry_count > 0
                     ? `<br><small class="text-secondary">Percobaan ke-${a.retry_count}</small>` : "";
                 const retryBtn = a.retryable
-                    ? `<button class="btn-action btn-sm btn-retry-action" data-action-id="${a.action_id}"><i class="fa-solid fa-rotate-right"></i> Retry</button>`
+                    ? `<button class="btn-action btn-sm btn-retry-action" data-action-id="${a.action_id}">Retry</button>`
                     : "";
                 return `
                     <tr>
@@ -278,7 +275,7 @@ export const openDeviceDetail = async (deviceId) => {
             </div>
 
             <div class="section-header" style="margin-top: 20px; border-bottom: none;">
-                <h2 style="font-size: 14px;"><i class="fa-solid fa-heart-pulse"></i> Sync Health</h2>
+                <h2 style="font-size: 14px;">Sync Health</h2>
             </div>
             <div class="sync-health-badges">
                 ${statusBadge(COMMAND_STATUS_BADGES, "queued")} ${sync_health.queued}
@@ -288,7 +285,7 @@ export const openDeviceDetail = async (deviceId) => {
             </div>
 
             <div class="section-header" style="margin-top: 20px; border-bottom: none;">
-                <h2 style="font-size: 14px;"><i class="fa-solid fa-clock-rotate-left"></i> Recent Commands</h2>
+                <h2 style="font-size: 14px;">Recent Commands</h2>
             </div>
             <div class="table-wrapper">
                 <table class="logs-table">
@@ -300,9 +297,9 @@ export const openDeviceDetail = async (deviceId) => {
             <div id="device-screenshot-section"></div>
 
             <div class="message-card-footer" style="margin-top: 20px;">
-                <button class="btn-action btn-sm" id="btn-detail-rename"><i class="fa-solid fa-pen"></i> Rename</button>
-                <button class="btn-action btn-sm" id="btn-detail-screenshot"><i class="fa-solid fa-camera"></i> Ambil Screenshot</button>
-                <button class="btn-action btn-sm btn-danger" id="btn-detail-revoke"><i class="fa-solid fa-ban"></i> Revoke API Key</button>
+                <button class="btn-action btn-sm" id="btn-detail-rename">Rename</button>
+                <button class="btn-action btn-sm" id="btn-detail-screenshot">Ambil Screenshot</button>
+                <button class="btn-action btn-sm btn-danger" id="btn-detail-revoke">Revoke API Key</button>
             </div>
         `;
 
