@@ -220,6 +220,174 @@ Which is the *default* is **open**.
 - Refresh is quiet: telemetry updates in place with no flash, no skeleton,
   no layout shift.
 
+---
+
+# Reference intake
+
+One section per reference. Principles, not components.
+
+## Reference 01 — light editorial CRM
+
+**Source:** light dashboard, cream banded header, kanban board below.
+
+**Transferable principles**
+- A **tinted band** can group the current-state row so it reads as one
+  object instead of four floating cards.
+- Generous whitespace and a short type scale carry hierarchy without boxes.
+- Hairline borders; surfaces separated by lightness, not shadow.
+- Compact left nav with grouped sections and quiet selection treatment.
+- A dense header strip can hold several unrelated readings if the type is
+  disciplined.
+
+**Not transferable**
+- Kanban columns — sessions are not a pipeline.
+- Bar chart of "new customers per weekday" — Logix has no comparable series
+  on the Overview.
+- Radial "68% successful deals" — no success/failure ratio exists.
+- Member list with avatars and roles — Logix knows one person at a time.
+- "Add customer" as the primary action — the dashboard is read-only; the
+  primary action lives in the WPF client.
+
+**Potential Logix application**
+- Health band grouping CPU / memory / GPU / storage.
+- Nav shape and selection treatment.
+- Header strip carrying workstation identity plus sync state.
+
+## Reference 02 — dark technical console
+
+**Source:** dark dashboard, restrained blue accent, metric cards with
+sparklines, activity list.
+
+**Transferable principles**
+- One accent doing all the colour work against a near-monochrome surface.
+- Compact metric cards on a strict grid; label above, value dominant.
+- An **activity list with right-aligned timestamps** is the correct shape
+  for recent sessions.
+- Status as a small dot beside a word.
+- Persistent nav with a pinned identity chip at the bottom.
+- Dark surfaces with their own contrast logic — proof that dark is a real
+  design, not a filter over light.
+
+**Not transferable**
+- Sparkline under every metric — telemetry is instantaneous and nothing is
+  persisted.
+- `+8.6%` / `-2.42%` deltas — no previous period exists.
+- Segmented donut at "26%" — no part-to-whole for that number.
+- "Bonus earned" promo card with a CTA and a glowing 3D card render.
+- Glow, gradient and star-field decoration.
+
+**Potential Logix application**
+- Dark theme structure and accent discipline.
+- Recent-logs list composition.
+- Pinned identity chip — but pinning the **workstation**, not the person.
+
+## Reference 03 — sage property dashboard
+
+**Source:** light neutral page, white cards, icon-rail nav, muted green
+accent.
+
+**Transferable principles**
+- **Icon rail navigation**: very narrow, leaves the width to content. A
+  credible option for a product with three or four destinations.
+- **One card inverted to the accent** to mark the primary object on the
+  page — the single strongest idea in this reference for Logix, because
+  Logix has exactly one genuinely primary object: the active session.
+- Neutral page background with white cards; elevation by lightness rather
+  than shadow.
+- Uniform card geometry and gutters across a mixed grid.
+
+**Not transferable**
+- Radial gauge at "80%" framed as a goal — Logix has no targets.
+- Sparkline inside every stat card — no history.
+- 3D credit-card render, avatar, follower/following counts.
+- "Keep you safe!" security-promo card with a CTA.
+- A coloured circular icon badge per card — icon soup by another name.
+
+**Potential Logix application**
+- Inverted accent surface for the **current usage** card, so the answer to
+  the page's question is unmistakable at a glance.
+- Light-theme structure: neutral page, white cards.
+- Icon rail as a candidate nav shape (still open).
+
+## Reference 04 — warm CRM dashboard
+
+**Source:** orange gradient page, pill filters, very large numerals,
+gauge, dot-density series.
+
+**Transferable principles**
+- **Segmented control for time range** (Today / Yesterday / Weekly /
+  Monthly) is more legible and more direct than a dropdown, and it is
+  purely structural — it implies no data.
+- **Numeral-first metric composition**: very large figure, small labelled
+  caption beneath.
+- A search field with a visible **keyboard hint** is a cheap, honest
+  affordance.
+
+**Not transferable**
+- Warm gradient page background — conflicts directly with a restrained
+  technical console.
+- "Goals: $7580 out of 7000" gauge — no goal concept in Logix.
+- Dot-density series per lead source — no historical telemetry.
+- A distinct coloured icon per metric card.
+- "See All" rendered as decorative accent text.
+
+**Potential Logix application**
+- Replace the Logs range `<select>` with a segmented control.
+- Numeral-first treatment for the four telemetry readings.
+- Keyboard hint on the Logs search field.
+
+## Reference 05 — vitals monitor
+
+**Source:** health dashboard with live readings, waveform traces, 3D organ
+renders, glass surfaces.
+
+This is the closest **conceptual** analogue in the whole set. It answers
+the same shape of question Logix asks: *what is this system doing right
+now?* Its composition is therefore worth more than its styling.
+
+**Transferable principles**
+- The **vitals row**: label, current value, and a trace — several related
+  readings grouped in one panel rather than scattered as separate cards.
+  This is Reference 01's band idea arriving from a different direction, and
+  the agreement between them is a signal.
+- **Current value held in a chip at the end of the trace**, separating "the
+  reading now" from "the reading over time".
+- Status as **word plus dot** ("Heart · Normal") — never colour alone,
+  which is exactly the accessibility rule this project already committed to.
+- Readings that are simply unavailable are omitted, not zeroed.
+
+**Not transferable**
+- 3D anatomical renders — decorative and heavy.
+- Glassmorphism throughout — explicitly excluded.
+- "7,425 of 10,000 steps" gauge — a target, which Logix does not have.
+- The waveform traces themselves, **unless** the in-memory ring buffer
+  (§11) is approved. Without it they would be invented data.
+
+**Potential Logix application**
+- Group the four telemetry readings into one health panel.
+- Word-plus-dot status treatment throughout.
+- If the ring buffer is approved, the value-chip-plus-trace composition is
+  the right shape for it — and would be honest, because the trace would be
+  real samples taken while the page was open.
+
+## Cross-cutting observation
+
+Four of the five references center a **gauge or donut**, and none of them
+transfer — every one encodes a goal, a target, or a success ratio, and
+Logix has none of those.
+
+But the distinction needs to be precise, because it decides real UI:
+
+- **Legitimate part-to-whole**: CPU load, memory used of total, storage
+  used of total. These are genuinely fractions of a known whole, so a bar
+  or an arc is truthful.
+- **Not legitimate**: any dial implying a target, a score, or progress
+  toward a goal. Logix has no goals, and a gauge invents one by implication.
+
+So the shape may be borrowed; the meaning may not.
+
+---
+
 ## 14. Deliberately NOT decided yet
 
 Waiting on the further references:
@@ -240,6 +408,11 @@ Waiting on the further references:
    reference layout.
 9. **Whether Overview and Logs share one shell** or Logs gets its own
    header treatment.
+10. **Whether the current-usage card is inverted to the accent** (Ref 03)
+    or merely larger and quieter than its neighbours.
+11. **Segmented control versus dropdown** for the Logs range (Ref 04).
+12. **Whether telemetry is four cards or one grouped panel** (Refs 01, 05
+    independently suggest the panel).
 
 ## 15. What changes in the current implementation
 
