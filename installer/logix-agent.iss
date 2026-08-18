@@ -110,6 +110,15 @@ en.CfgNeedKey=Please enter the server API key (the ingest key from your Logix se
 id.CfgNeedKey=Masukkan kunci API server (ingest key dari server Logix kamu).
 en.PyMissing=Logix installed. Note: Python 3 was not found on PATH. The agent runs fine, but local session logging (log_physical.py) needs Python 3 - install it from python.org to enable it.
 id.PyMissing=Logix terpasang. Catatan: Python 3 tidak ditemukan di PATH. Agen tetap berjalan, tapi pencatatan sesi lokal (log_physical.py) butuh Python 3 - pasang dari python.org untuk mengaktifkannya.
+; The YASB task (see [Tasks] below) is offered ONLY when YasbConfigDetected
+; finds an existing ~\.config\yasb\config.yaml -- so this copy always speaks
+; to someone who already runs YASB, never introduces it as something new.
+en.TaskYasbGroup=Optional
+id.TaskYasbGroup=Opsional
+en.TaskYasb=Integrate with YASB (detected on this PC) - moves the session timer into your status bar instead of the floating pill
+id.TaskYasb=Integrasikan dengan YASB (terdeteksi di PC ini) - memindahkan timer sesi ke status bar, bukan pil mengambang
+en.YasbDone=YASB integration is set up. Logix will show a compact widget in your bar; the pill is hidden. One manual step remains: paste the widget snippet into config.yaml.%n%nThe snippet was written to:%n%1
+id.YasbDone=Integrasi YASB sudah siap. Logix akan tampil sebagai widget ringkas di bar kamu; pil mengambang disembunyikan. Masih ada satu langkah manual: tempel potongan widget ke config.yaml.%n%nPotongannya sudah ditulis ke:%n%1
 
 [Files]
 ; Agent scripts -> C:\Program Files\Logix. Exclude the dev/test harnesses and
@@ -131,6 +140,22 @@ Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ig
 ; report_server.py drives logbook_report.py for both the table and the export.
 Source: "{#SrcRoot}\logix\logbook_report.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
 Source: "{#SrcRoot}\logix\report_server.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+; Workstation telemetry (CPU/memory/GPU/storage) for the dashboard's health
+; panel. Optional in behaviour -- report_server.py imports it in a try/except
+; and the panel renders "Unavailable" without it -- but not shipping the file
+; at all means the panel is ALWAYS unavailable on a fresh install, which is a
+; deployment gap, not the graceful degradation the module is designed for.
+Source: "{#SrcRoot}\logix\workstation.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+
+[Tasks]
+; Shown ONLY when YasbConfigDetected finds an existing YASB config on this
+; machine (see [Code]) -- Inno hides a [Tasks] entry entirely when Check:
+; returns False, so someone who has never heard of YASB never sees this.
+; Checked by default: detection means YASB is already how this person works,
+; so integrating is the expected choice, not a change being pushed on them.
+; It stays a real checkbox they can clear, per the product rule that YASB is
+; an optional resource Logix must work perfectly without.
+Name: "yasbintegrate"; Description: "{cm:TaskYasb}"; GroupDescription: "{cm:TaskYasbGroup}"; Check: YasbConfigDetected
 
 [Icons]
 ; The two things a device owner does outside a session. Both were reachable
@@ -156,6 +181,19 @@ Filename: "{sys}\conhost.exe"; \
   Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -InviteCode ""{code:GetInviteCode}"" -ServerCertPath ""{code:GetServerCert}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
   StatusMsg: "Registering Logix agent, installing AnyDesk, starting monitor..."; \
   Flags: runhidden waituntilterminated
+
+; Only runs when the yasbintegrate task is checked (see [Tasks]), which itself
+; only appears when YASB was already detected. -Enable switches the widget to
+; 'bar' posture (floating pill draws nothing) and writes the paste-in widget
+; snippet to %TEMP%\logix-yasb-snippet.txt -- it deliberately does NOT edit
+; config.yaml itself (see logix_yasb.ps1's header comment: that file is
+; hand-tuned and no YAML library round-trips it cleanly), so this step alone
+; does not finish the job. The CurStepChanged handler below points the
+; operator at that file once this has run.
+Filename: "{sys}\conhost.exe"; \
+  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\logix_yasb.ps1"" -Enable"; \
+  StatusMsg: "Integrating with YASB..."; \
+  Flags: runhidden waituntilterminated; Tasks: yasbintegrate
 
 [UninstallRun]
 ; Best-effort teardown: stop the monitor, unregister the task, and drop the
@@ -186,6 +224,23 @@ begin
   if v = '' then
     v := Fallback;
   Result := v;
+end;
+
+// Gate for the yasbintegrate [Tasks] entry. YASB (Reborn) has no registry
+// footprint and may not be running at install time, so a process check would
+// miss the common case of "installed but not launched yet". config.yaml is
+// the one artifact YASB always creates before it can run at all, and it is
+// the exact path logix_yasb.ps1 itself already treats as the install marker
+// (see its own $yasbConfig) -- one definition of "YASB is here", not two.
+//
+// %USERPROFILE%, not {userappdata}: .config lives directly under the profile
+// root, not under Roaming AppData. This installer runs elevated via a normal
+// UAC prompt (not a different-user launch), so the token's own environment
+// still resolves to the operator's own profile -- the same assumption
+// install_logbook_tasks.ps1 already makes for the invoking user's SID.
+function YasbConfigDetected(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{%USERPROFILE}') + '\.config\yasb\config.yaml');
 end;
 
 procedure InitializeWizard;
@@ -266,10 +321,26 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
+  SnippetPath: string;
 begin
   if CurStep = ssPostInstall then
   begin
     if not Exec('cmd.exe', '/c where python || where py', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox(ExpandConstant('{cm:PyMissing}'), mbInformation, MB_OK);
+
+    // The [Run] step for yasbintegrate runs hidden, so its own Write-Host
+    // instructions are never seen -- this is the one place left to tell the
+    // operator that the widget snippet still needs a manual paste into their
+    // (deliberately untouched) config.yaml.
+    //
+    // The snippet path is built into its own array first rather than inline
+    // in the FmtMessage call: a continuation line whose first non-blank
+    // character is '[' gets misread as a section header by Inno's own
+    // line scanner, even here inside [Code].
+    if WizardIsTaskSelected('yasbintegrate') then
+    begin
+      SnippetPath := ExpandConstant('{%TEMP}') + '\logix-yasb-snippet.txt';
+      MsgBox(FmtMessage(ExpandConstant('{cm:YasbDone}'), [SnippetPath]), mbInformation, MB_OK);
+    end;
   end;
 end;

@@ -77,7 +77,7 @@ $scripts = @(
 # resolves report_server.py out of there, and a redeploy that refreshed the
 # PowerShell half only is exactly how a mixed-version install happens -- the
 # thing this script exists to prevent.
-$coreFiles = @('log_physical.py', 'paths.py', 'logbook_report.py', 'report_server.py')
+$coreFiles = @('log_physical.py', 'paths.py', 'logbook_report.py', 'report_server.py', 'workstation.py')
 $coreDir = Join-Path $env:ProgramData 'Logix'
 
 # ---- stop the agent so nothing is mid-read while files change ---------------
