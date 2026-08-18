@@ -86,7 +86,7 @@ def dash(monkeypatch, tmp_path):
     con = lp.connect(db)
     lp.migrate(con)
     _seed(lp, con, "START", "s1", "2026-08-18T08:41:00+07:00",
-          nama="Dhana", nim="000000000", tujuan="DFTB Parameterization",
+          nama="Rani", nim="000000000", tujuan="DFTB Parameterization",
           job_type="Simulation", job_id="258026",
           keterangan="Slater-Koster parameter validation.")
     _seed(lp, con, "END", "s1", "2026-08-18T11:15:00+07:00")

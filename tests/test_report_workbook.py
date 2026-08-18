@@ -57,7 +57,7 @@ def book(monkeypatch, tmp_path):
         payload["timestamp"] = ts
         lp.insert_event(con, payload)
 
-    ev("START", "s1", "2026-08-18T08:41:00", nama="Dhana", nim="000000000",
+    ev("START", "s1", "2026-08-18T08:41:00", nama="Rani", nim="000000000",
        tujuan="DFTB Parameterization", job_type="Simulation", job_id="258026",
        keterangan="Slater-Koster parameter validation.", session_type="Physical")
     ev("END", "s1", "2026-08-18T11:15:00")
@@ -112,7 +112,7 @@ def test_job_values_are_exported(book):
     rows = {ws.cell(r, h.index("Nama / User") + 1).value:
             (ws.cell(r, jt).value, ws.cell(r, jid).value)
             for r in range(5, 5 + 2)}
-    assert rows["Dhana"] == ("Simulation", "258026")
+    assert rows["Rani"] == ("Simulation", "258026")
 
 
 def test_absent_job_is_blank_not_a_placeholder(book):

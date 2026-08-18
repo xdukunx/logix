@@ -207,7 +207,7 @@ it is not.
 
   ┌──────────────────┐
   │ LAB-03           │   pinned bottom
-  │ Asus · Local only│
+  │ GPU-A100 · Local only│
   └──────────────────┘
 ```
 
@@ -227,7 +227,7 @@ Persistent across every view, in the page header:
 ```
   YOU ARE USING WORKSTATION            ● Local only
   LAB-03
-  Asus
+  GPU-A100
 ```
 
 - Eyebrow `--text-xs` `--text-faint`; name `--display`; subtitle
@@ -557,7 +557,7 @@ no accent panel.
 ┌────────────┬──────────────────────────────────────────────────────────┐
 │ LOGIX      │  YOU ARE USING WORKSTATION            ● Local only       │
 │            │  LAB-03                                                  │
-│ Overview   │  Asus                                                    │
+│ Overview   │  GPU-A100                                                    │
 │ Logs       │ ─────────────────────────────────────────────────────────│
 │ Server     │                                                          │
 │ ───────    │  WORKSTATION HEALTH                    refreshed 2s ago  │
@@ -581,7 +581,7 @@ no accent panel.
 │            │  05:12   Alya     Molecular Dynamics           1j 48m    │
 │ ┌────────┐ │  ─────────────────────────────────────────────────────   │
 │ │ LAB-03 │ │                                    [ View all logs ]     │
-│ │ Asus   │ │                                                          │
+│ │ GPU-A100 │ │                                                          │
 │ └────────┘ │                                                          │
 └────────────┴──────────────────────────────────────────────────────────┘
 ```
