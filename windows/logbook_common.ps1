@@ -692,13 +692,26 @@ function Invoke-WSLLogbook {
         # START uses this. See Invoke-NativeBridge's async branch for why it
         # is safe there and why it is NOT the default: a close/END must know
         # whether the row was really written before the workstation locks.
-        [switch]$Async
+        [switch]$Async,
+        # When the event happened, if that is NOT now.
+        #
+        # Duration is not stored anywhere -- logbook_report.py derives it by
+        # subtracting the START row's timestamp from the END row's. So an END
+        # written at the moment we NOTICE a session should have closed dates
+        # the session to that moment, and a machine locked overnight produces
+        # a 25-hour row for an 8-hour cap. Only the automatic closers pass
+        # this; a human pressing SELESAI really is ending it now.
+        #
+        # payload_from_args already prefers a timestamp present in the JSON
+        # payload over now_iso(), so this needs nothing on the Python side.
+        [datetime]$Timestamp = [datetime]::MinValue
     )
     Ensure-LogbookDirs
     $winUser = "$env:USERDOMAIN\$env:USERNAME"
     $payloadPath = Join-Path $Global:StateDir ("payload-{0}.json" -f ([guid]::NewGuid().ToString('N')))
+    $eventTime = if ($Timestamp -eq [datetime]::MinValue) { Get-Date } else { $Timestamp }
     $payload = [ordered]@{
-        timestamp = (Get-Date).ToString('o')
+        timestamp = $eventTime.ToString('o')
         event = $Event
         username = $env:USERNAME
         windows_user = $winUser
@@ -3256,7 +3269,14 @@ function Get-ActiveLogbookSessionAgeSeconds {
 }
 
 function Close-ActiveLogbookSession {
-    param([string]$Reason = 'END')
+    param(
+        [string]$Reason = 'END',
+        # Only the automatic closers pass this -- see Invoke-WSLLogbook's
+        # -Timestamp. A user pressing SELESAI is ending the session now, so
+        # the default is right for them and wrong for a session being closed
+        # hours after whatever really ended it.
+        [datetime]$EndTime = [datetime]::MinValue
+    )
     Ensure-LogbookDirs
     # Marks the ENDING state for any other process that asks (see
     # Get-LogbookSessionState). Best-effort in both directions: failing to
@@ -3269,7 +3289,29 @@ function Close-ActiveLogbookSession {
     try {
         if (Test-Path $Global:SessionFile) {
             $session = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
-            [void](Invoke-WSLLogbook -Event $Reason -SessionType $session.session_type -AnyDeskDetected ([int]$session.anydesk_detected) -SessionId $session.session_id -Nama $session.nama -Nim $session.nim -Tujuan $session.tujuan -Keterangan $session.keterangan)
+            $bridge = @{
+                Event = $Reason; SessionType = $session.session_type
+                AnyDeskDetected = [int]$session.anydesk_detected
+                SessionId = $session.session_id; Nama = $session.nama
+                Nim = $session.nim; Tujuan = $session.tujuan
+                Keterangan = $session.keterangan
+            }
+            if ($EndTime -ne [datetime]::MinValue) {
+                # Never date the close BEFORE the session started: a clock
+                # change, or a caller doing its own arithmetic, must not be
+                # able to produce a negative duration. Falling back to the
+                # start time yields a zero-length session, which is visibly
+                # odd but arithmetically sound.
+                $startedAt = [datetime]::MinValue
+                try { $startedAt = [datetime]$session.start_time } catch { }
+                if ($startedAt -ne [datetime]::MinValue -and $EndTime -lt $startedAt) {
+                    Write-LogbookError "Close end time $($EndTime.ToString('o')) precedes start $($session.start_time) for sid=$($session.session_id); clamping to start."
+                    $EndTime = $startedAt
+                }
+                $bridge['Timestamp'] = $EndTime
+                Write-LogbookInfo "Closing sid=$($session.session_id) reason=$Reason dated $($EndTime.ToString('o')) rather than now."
+            }
+            [void](Invoke-WSLLogbook @bridge)
             Remove-Item $Global:SessionFile -Force -ErrorAction SilentlyContinue
             if (Test-Path $Global:SessionFile) {
                 # Removing session.json is what actually ends the session; if it
@@ -3326,7 +3368,14 @@ function Close-StaleLogbookSessionIfAny {
         if ($null -eq $bootTime) { return $false }
         if ($bootTime -gt $start) {
             Write-LogbookInfo "Stale session detected sid=$($session.session_id) started=$($session.start_time) boot=$($bootTime.ToString('o')); auto-closing instead of resuming."
-            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+            # Dated at the boot, not at now. The machine was OFF between the
+            # real end of this session and this moment, and the session
+            # certainly did not continue through a shutdown -- closing it at
+            # "now" would bill every hour the workstation spent powered down
+            # to whoever last used it. The boot is the tightest upper bound
+            # available: we cannot know the shutdown time, but we know the
+            # session was over by the time the machine came back.
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' -EndTime $bootTime | Out-Null
             return $true
         }
     } catch { Write-LogbookError "Stale session check failed: $($_.Exception.Message)" }
@@ -3364,7 +3413,18 @@ function Close-OverAgeLogbookSessionIfAny {
     if ($maxSec -le 0) { return $false }
     if ($ageSec -ge $maxSec) {
         Write-LogbookInfo "Session age ${ageSec}s exceeds cap ${maxSec}s; auto-closing instead of resuming."
-        Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+        # Dated at start + cap, which is what the cap MEANS: this session is
+        # allowed to have lasted eight hours, and no part of the time after
+        # that is evidence of anything. Closing at "now" instead recorded the
+        # full wall-clock gap -- a machine locked overnight produced a
+        # 25-hour row from an 8-hour rule.
+        $endAt = [datetime]::MinValue
+        try { $endAt = ([datetime](Get-ActiveLogbookSession).start_time).AddSeconds($maxSec) } catch { }
+        if ($endAt -eq [datetime]::MinValue) {
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+        } else {
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' -EndTime $endAt | Out-Null
+        }
         return $true
     }
     return $false

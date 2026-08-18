@@ -1062,9 +1062,49 @@ Assert ($bridgeFn -match 'if \(-not \$Async\) \{ Remove-Item \$payloadPath') `
     "and the synchronous path still deletes its own payload immediately"
 # A close must NOT be async: it has to know the row was really written before
 # the workstation locks behind it.
-Assert ($commonSrc -match "(?s)function Close-ActiveLogbookSession.*?Invoke-WSLLogbook -Event \`$Reason(?![^
-]*-Async)") `
+#
+# Asserted against the whole function body rather than one call line. The
+# original form pinned the literal `Invoke-WSLLogbook -Event $Reason`, which
+# made it a test of the CALL SYNTAX -- switching to splatting (to pass an
+# optional -Timestamp) broke it while the property it guards was untouched.
+# Absence of -Async anywhere in the closer is the actual invariant, and it
+# survives however the arguments are passed.
+# \r?\n, not \n: .gitattributes normalises these files to CRLF on checkout,
+# so a bare \n matches only in a working copy that tooling left as LF.
+$closeFn = [regex]::Match($commonSrc,
+    '(?s)function Close-ActiveLogbookSession \{.*?\r?\n\}\r?\n').Value
+Assert ($closeFn.Length -gt 0) `
+    "Close-ActiveLogbookSession is still a top-level function"
+Assert ($closeFn -match 'Invoke-WSLLogbook') `
+    "the close path still goes through the logging bridge"
+Assert ($closeFn -notmatch 'Async') `
     "ending a session still waits for its write (only START is fire-and-forget)"
+
+# AUTO_CLOSE end-time semantics. Duration is derived by subtracting the START
+# row's timestamp from the END row's (logbook_report.fmt_duration), so an END
+# dated "now" charges the user for every hour between the real end of the
+# session and the moment anything noticed. tests/test_auto_close_duration.py
+# proves the arithmetic; these prove the closers actually supply the bound.
+Assert ($bridgeFn -match '\[datetime\]\$Timestamp') `
+    "the bridge accepts an explicit event time, so a close can be back-dated"
+Assert ($bridgeFn -match '\$eventTime\s*=.*Get-Date') `
+    "and still defaults to now when nobody supplies one"
+Assert ($closeFn -match '\[datetime\]\$EndTime') `
+    "the closer accepts an end time"
+Assert ($closeFn -match '\$EndTime -lt \$startedAt') `
+    "and refuses to date a close before its own start (no negative durations)"
+
+$staleFn = [regex]::Match($commonSrc,
+    '(?s)function Close-StaleLogbookSessionIfAny \{.*?\r?\n\}\r?\n').Value
+Assert ($staleFn -match "-EndTime \`$bootTime") `
+    "a session orphaned by a reboot is dated at the boot, not at discovery"
+
+$overAgeFn = [regex]::Match($commonSrc,
+    '(?s)function Close-OverAgeLogbookSessionIfAny \{.*?\r?\n\}\r?\n').Value
+Assert ($overAgeFn -match 'AddSeconds\(\$maxSec\)') `
+    "an over-age session is dated at start plus the cap, which is what the cap means"
+Assert ($overAgeFn -match "-EndTime \`$endAt") `
+    "and that bound is actually passed to the closer"
 
 Write-Host "START latency: the first-call costs are paid before the user can click"
 # PowerShell loads cmdlets and .NET types lazily, so the FIRST ConvertTo-Json

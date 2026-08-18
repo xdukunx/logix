@@ -114,7 +114,7 @@ def device(monkeypatch, tmp_path, live_server):
     monkeypatch.setenv("LOGIX_DB", str(db_path))
 
     if "log_physical" in sys.modules:
-        lp = importlib.reload(sys.modules["log_physical"])
+        lp = importlib.reload(sys.modules["log_physical"]) if "log_physical" in sys.modules else importlib.import_module("log_physical")
     else:
         lp = importlib.import_module("log_physical")
 
@@ -277,7 +277,7 @@ def test_d_401_bad_key_fails_fast_without_retry_and_keeps_data(device, live_serv
     client would handle a 401 if it occurred."""
     lp, con, _ = device
     monkeypatch.setenv("LOGIX_SERVER_API_KEY", "not-the-right-key")
-    lp2 = importlib.reload(sys.modules["log_physical"])
+    lp2 = importlib.reload(sys.modules["log_physical"]) if "log_physical" in sys.modules else importlib.import_module("log_physical")
     _seed(lp2, con, n=1)
 
     sleeps = []
@@ -311,7 +311,7 @@ def test_d_403_device_key_scoped_to_wrong_hostname_fails_fast(device, live_serve
         conn.close()
 
     monkeypatch.setenv("LOGIX_SERVER_API_KEY", "device-specific-key")
-    lp2 = importlib.reload(sys.modules["log_physical"])
+    lp2 = importlib.reload(sys.modules["log_physical"]) if "log_physical" in sys.modules else importlib.import_module("log_physical")
     _seed(lp2, con, n=1, hostname="SOMEONE-ELSES-PC")
 
     result = lp2.sync_unsynced_logs(con, max_attempts=1)
@@ -505,7 +505,7 @@ def test_i_server_restart_mid_campaign_loses_nothing_and_creates_no_duplicate(mo
     monkeypatch.setenv("LOGIX_SERVER_API_KEY", "dev-test-key")
     db_path = tmp_path / "device.db"
     monkeypatch.setenv("LOGIX_DB", str(db_path))
-    lp = importlib.reload(sys.modules["log_physical"])
+    lp = importlib.reload(sys.modules["log_physical"]) if "log_physical" in sys.modules else importlib.import_module("log_physical")
     con = lp.connect(db_path)
     lp.migrate(con)
     try:
