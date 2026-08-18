@@ -1098,24 +1098,87 @@ function Get-LogbookStatusFile {
 # YASB's custom widget with return_format: json reads {"text", "alt", "tooltip"}.
 # Written whole via a temp file + move so a bar polling mid-write never reads a
 # half-flushed file and renders a blank slot.
+# How long a consumer may treat this file as describing the present. The
+# widget writes a beacon well inside it (see BAR_BEACON_SECONDS), so a file
+# older than this means the process that was writing it is gone -- not that
+# the session is still running.
+$Global:BAR_STALE_SECONDS = 150
+# The one periodic write. Everything else is change-driven. Without a beacon a
+# killed widget leaves the bar reading "active" forever, and Clear-LogbookBarStatus
+# cannot run from a process that no longer exists.
+$Global:BAR_BEACON_SECONDS = 60
+
 function Write-LogbookBarStatus {
     param(
         [string]$Text = '',
         [string]$Alt = '',
         [string]$Tooltip = '',
-        [string]$State = 'idle'
+        [string]$State = 'idle',
+        # ---- schema v1: STATE, not a rendered timer --------------------------
+        # The bar computes elapsed itself from started_at, which is what removes
+        # the reason to rewrite this file every second.
+        [string]$SessionId = '',
+        [string]$StartedAt = '',
+        [string]$Title = '',
+        [string]$Station = '',
+        [string]$SyncState = '',
+        [int]$PendingEvents = 0,
+        # Beacons and genuine changes both write; an unchanged tick does not.
+        [switch]$Force
     )
     try {
         $path = Get-LogbookStatusFile
         $payload = [ordered]@{
-            text    = $Text
-            alt     = $Alt
-            tooltip = $Tooltip
-            # Not read by YASB itself -- it is there so a stylesheet or another
-            # bar can colour the slot by session state without parsing the text.
-            state   = $State
-            updated = (Get-Date).ToString('o')
+            schema_version = 1
+            state          = $State
+            session_id     = $SessionId
+            started_at     = $StartedAt
+            title          = $Title
+            station        = $Station
+            sync_state     = $SyncState
+            pending_events = $PendingEvents
+            # PRIVACY, binding: no nim and no nama, ever. A third-party bar
+            # renders this file onto a shared workstation's taskbar, where
+            # anyone walking past reads it. station and title are the most
+            # this may carry.
+            #
+            # ---- legacy keys, one release only ----------------------------
+            # An installed YASB config still reads {data[text]}. Dropping these
+            # the same day the schema changes would blank the bar on every
+            # machine that has not been reconfigured yet; schema_version is how
+            # a consumer tells which contract it is holding.
+            text           = $Text
+            alt            = $Alt
+            tooltip        = $Tooltip
+            updated_at     = (Get-Date).ToString('o')
+            updated        = (Get-Date).ToString('o')
         }
+
+        # Everything except the timestamps and the second-granularity legacy
+        # strings. Two ticks that differ only in when they happened are not a
+        # change, and rewriting the file for them is the 3600-writes-an-hour
+        # this schema exists to stop.
+        #
+        # alt and tooltip carry HH:MM:SS, so leaving them in the signature
+        # would make every single tick a "change" and the gate would do
+        # nothing at all. They are legacy tooltip text; being up to a minute
+        # stale costs nothing. text carries HH:MM and stays in, which lands
+        # the write rate on the minute -- the same cadence as the beacon, and
+        # the finest granularity the legacy bar slot actually renders.
+        $sig = ($payload.GetEnumerator() |
+            Where-Object { $_.Key -notin @('updated_at', 'updated', 'alt', 'tooltip') } |
+            ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '|'
+        $now = Get-Date
+        $age = $Global:BAR_BEACON_SECONDS + 1
+        if ($Global:LogbookBarLastWrite) {
+            $age = ($now - $Global:LogbookBarLastWrite).TotalSeconds
+        }
+        if (-not $Force -and $sig -eq $Global:LogbookBarLastSig -and
+            $age -lt $Global:BAR_BEACON_SECONDS) {
+            return
+        }
+        $Global:LogbookBarLastSig = $sig
+        $Global:LogbookBarLastWrite = $now
         $tmp = "$path.tmp"
         # NOT Out-File -Encoding UTF8: in Windows PowerShell 5.1 that always
         # writes a UTF-8 BOM, and YASB's CustomWidget reads this file's output
@@ -1136,7 +1199,11 @@ function Write-LogbookBarStatus {
 # session is running when the agent may have died. Called when the timer exits.
 function Clear-LogbookBarStatus {
     try {
-        Write-LogbookBarStatus -Text '' -Alt '' -Tooltip 'Tidak ada sesi aktif' -State 'none'
+        # -Force: a session ending is exactly the transition a consumer must
+        # never miss, and it must not be swallowed by the change gate on the
+        # off chance the previous write carried the same fields.
+        Write-LogbookBarStatus -Text '' -Alt '' -Tooltip 'Tidak ada sesi aktif' `
+            -State 'none' -SyncState '' -PendingEvents 0 -Force
     } catch { }
 }
 
