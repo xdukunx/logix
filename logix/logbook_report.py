@@ -320,6 +320,29 @@ def fmt_ts(s: str | None) -> str:
     return str(s or "")
 
 
+def _session_seconds(row) -> int:
+    """Elapsed seconds for one session, or 0 if it cannot be determined.
+
+    Deliberately recomputed from the two timestamps rather than parsed back
+    out of the rendered duration string -- the string is for humans and its
+    format has changed before."""
+    try:
+        start = parse_ts(row.get("start_ts"))
+        end = parse_ts(row.get("end_ts"))
+        if not start or not end:
+            return 0
+        delta = int((end - start).total_seconds())
+        return delta if delta > 0 else 0
+    except Exception:
+        return 0
+
+
+def fmt_seconds(total: int) -> str:
+    h, rem = divmod(int(total), 3600)
+    m = rem // 60
+    return f"{h}j {m}m"
+
+
 def fmt_duration(start_s: str | None, end_s: str | None, active: bool = False) -> str:
     start = parse_ts(start_s)
     end = parse_ts(end_s) if end_s else None
@@ -402,6 +425,11 @@ def build_sessions(rows):
             # event of the session still surfaces.
             "job_type": first_nonempty(display_rows, "job_type"),
             "job_id": first_nonempty(display_rows, "job_id"),
+            # Which machine recorded this. Not shown in the session table --
+            # a device report is all one workstation -- but the summary sheet
+            # has to name it, because a file that leaves this machine is
+            # useless if it does not say which machine it describes.
+            "hostname": first_nonempty(display_rows, "hostname"),
             "kategori": kategori,
             "session_id": sid,
             "_active": not bool(end),
@@ -486,7 +514,12 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     ws["A3"].fill = PatternFill("solid", fgColor="F0FDFA")
     ws["A3"].alignment = Alignment(horizontal="center")
 
-    headers = ["No", "Waktu Mulai", "Waktu Selesai", "Nama / User", "NIM / ID", "Tujuan", "Tipe Akses", "Status", "Durasi", "Keterangan", "Kategori"]
+    # Job Type / Job ID sit next to Tujuan because they describe the same
+    # thing: what this session was for. Optional and usually blank, which
+    # is why they are exported as empty cells rather than a placeholder --
+    # a spreadsheet reader can filter on blank, but not on an em dash.
+    headers = ["No", "Waktu Mulai", "Waktu Selesai", "Nama / User", "NIM / ID", "Tujuan",
+               "Job Type", "Job ID", "Tipe Akses", "Status", "Durasi", "Keterangan", "Kategori"]
     for col, h in enumerate(headers, 1):
         c = ws.cell(4, col, h)
         c.font = Font(color="111827", bold=True)
@@ -503,6 +536,8 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
             row["nama"],
             row["nim"],
             row["tujuan"],
+            row.get("job_type", ""),
+            row.get("job_id", ""),
             row["tipe"],
             row["status"],
             row["durasi"],
@@ -514,11 +549,11 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
             c.fill = white
             c.border = border
             c.alignment = Alignment(vertical="top", wrap_text=True)
-            if col == 7:
+            if col == 9:
                 access = str(val).upper()
                 c.fill = {"ANYDESK": anydesk_fill, "PHYSICAL": physical_fill, "SSH": remote_fill}.get(access, white)
                 c.font = Font(bold=True, color="111827")
-            if col == 8:
+            if col == 10:
                 status = str(val).upper()
                 if "AKTIF" in status:
                     c.fill = active_fill
@@ -529,8 +564,8 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
                 c.font = Font(bold=True, color="111827")
 
     last = max(5, 4 + len(sessions))
-    ws.auto_filter.ref = f"A4:K{last}"
-    widths = [6, 21, 21, 26, 16, 34, 14, 16, 14, 46, 16]
+    ws.auto_filter.ref = f"A4:M{last}"
+    widths = [6, 21, 21, 26, 16, 34, 16, 14, 14, 16, 14, 46, 16]
     for idx, width in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
@@ -545,7 +580,26 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     ssh = sum(1 for r in sessions if str(r["tipe"]).upper() == "SSH")
     anydesk = sum(1 for r in sessions if str(r["tipe"]).upper() == "ANYDESK")
     physical = sum(1 for r in sessions if str(r["tipe"]).upper() == "PHYSICAL")
+    # Who and where and when, before how many. A report that reaches someone
+    # else is useless if it does not say which workstation and which period it
+    # describes -- and the export timestamp is what distinguishes two files
+    # generated from the same range on different days.
+    stations = sorted({str(r.get("hostname") or "").strip()
+                       for r in sessions if str(r.get("hostname") or "").strip()})
+    users = sorted({str(r.get("nama") or "").strip()
+                    for r in sessions if str(r.get("nama") or "").strip()})
+    total_seconds = 0
+    for r in sessions:
+        secs = _session_seconds(r)
+        if secs:
+            total_seconds += secs
+
     for item in [
+        ("Workstation", ", ".join(stations) if stations else "-"),
+        ("Periode laporan", period_label),
+        ("Diekspor", datetime.now().strftime("%d %b %Y %H:%M")),
+        ("Pengguna unik", len(users)),
+        ("Total durasi", fmt_seconds(total_seconds) if total_seconds else "-"),
         ("Total sesi/event logbook", len(sessions)),
         ("Sesi aktif", active),
         ("Selesai / Finish", finished),
