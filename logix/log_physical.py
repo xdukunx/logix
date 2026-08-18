@@ -40,6 +40,14 @@ BASE_COLUMNS = {
     "client_ip": "TEXT",
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
+    # Optional, contextual session metadata. Logix is still
+    # person + workstation + purpose + session; a job is something a session
+    # MAY be associated with, not a new first-class object -- which is why
+    # these are two nullable columns rather than a jobs table with a
+    # taxonomy nobody has agreed on yet. Old rows are NULL and stay valid,
+    # and neither field participates in event_uid or dedup.
+    "job_type": "TEXT",
+    "job_id": "TEXT",
     # Stable per-event identity, generated once in payload_from_args() and
     # carried through to the server's dedup check -- makes a retried sync
     # (clock drift or a retry hours later, either of which would defeat the
@@ -178,6 +186,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--nim", default="")
     p.add_argument("--tujuan", default="")
     p.add_argument("--keterangan", default="")
+    # Optional session metadata. Empty is the normal case: most
+    # workstation use is not a formal job, and nothing may require these.
+    p.add_argument("--job-type", default="", dest="job_type")
+    p.add_argument("--job-id", default="", dest="job_id")
     p.add_argument("--session-type", default=os.environ.get("COMPCHEM_SESSION_TYPE", ""))
     p.add_argument("--source", default="")
     p.add_argument("--session-id", default="")
@@ -207,6 +219,8 @@ def payload_from_args(ns: argparse.Namespace) -> dict[str, Any]:
         "nim": norm(data.get("nim"), norm(ns.nim)),
         "tujuan": norm(data.get("tujuan"), norm(ns.tujuan)),
         "keterangan": norm(data.get("keterangan"), norm(ns.keterangan)),
+        "job_type": norm(data.get("job_type"), norm(getattr(ns, "job_type", ""))),
+        "job_id": norm(data.get("job_id"), norm(getattr(ns, "job_id", ""))),
         "session_type": norm(data.get("session_type"), norm(ns.session_type)),
         "source": norm(data.get("source"), norm(ns.source)),
         "session_id": norm(data.get("session_id"), norm(ns.session_id)),

@@ -32,6 +32,14 @@ BASE_COLUMNS = {
     "client_ip": "TEXT",
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
+    # Optional, contextual session metadata. Logix is still
+    # person + workstation + purpose + session; a job is something a session
+    # MAY be associated with, not a new first-class object -- which is why
+    # these are two nullable columns rather than a jobs table with a
+    # taxonomy nobody has agreed on yet. Old rows are NULL and stay valid,
+    # and neither field participates in event_uid or dedup.
+    "job_type": "TEXT",
+    "job_id": "TEXT",
 }
 
 CLOSE_EVENTS = {"END", "LOCK", "AUTO_FINISH", "AUTO_CLOSE", "DISCONNECT", "LOGOFF"}
