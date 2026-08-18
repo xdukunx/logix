@@ -133,3 +133,41 @@ def test_start_still_works_with_no_job_arguments_at_all(db):
     lp.insert_event(con, lp.payload_from_args(ns))
     assert con.execute(
         "SELECT count(*) FROM physical_log WHERE session_id='plain'").fetchone()[0] == 1
+
+
+# ---- a BOM must not make an enrolled device look unenrolled -------------
+
+def test_device_identity_survives_a_utf8_bom(monkeypatch, tmp_path):
+    """Anything that rewrites device.json from PowerShell adds a BOM by
+    default, and json.loads rejects a leading BOM outright. Because the
+    reader swallows ValueError and returns {}, the visible symptom was every
+    sync failing 401 with a valid per-device key sitting right there on disk
+    -- and nothing in any log connecting the two.
+    """
+    import importlib
+    identity = tmp_path / "device.json"
+    identity.write_text(
+        '\ufeff{"device_id": "abc-123", "api_key": "k" * 1, "category": ""}'.replace(
+            '"k" * 1', '"secret-key"'),
+        encoding="utf-8")
+    monkeypatch.setenv("LOGIX_HOME", str(tmp_path))
+    monkeypatch.setenv("LOGIX_DEVICE_IDENTITY", str(identity))
+    paths = importlib.reload(importlib.import_module("paths"))
+    if paths.device_identity_path() != identity:
+        pytest.skip("this build resolves device.json by a path this test cannot set")
+    assert paths.device_api_key() == "secret-key"
+    assert paths.device_id() == "abc-123"
+
+
+def test_config_env_survives_a_utf8_bom(monkeypatch, tmp_path):
+    """A BOM lands on the FIRST key name, so the first setting in the file
+    silently stops resolving while every one below it works -- worse than an
+    outright failure, because nothing looks broken until that key matters."""
+    import importlib
+    cfg = tmp_path / "config.env"
+    cfg.write_text("\ufeffLOGIX_SERVER_URL=http://example.test\nLOGIX_USE_WSL=0\n",
+                   encoding="utf-8")
+    monkeypatch.setenv("LOGIX_CONFIG", str(cfg))
+    monkeypatch.delenv("LOGIX_SERVER_URL", raising=False)
+    paths = importlib.reload(importlib.import_module("paths"))
+    assert paths.server_url() == "http://example.test"

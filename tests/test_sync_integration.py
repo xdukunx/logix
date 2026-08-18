@@ -109,6 +109,14 @@ def device(monkeypatch, tmp_path, live_server):
     must be set before the first import) plus an open connection."""
     monkeypatch.setenv("LOGIX_SERVER_URL", live_server.base_url)
     monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+    # This developer machine has a REAL enrolled device.json, and
+    # device_api_key() takes priority over the shared key these tests
+    # set -- so without this the suite authenticates as this laptop
+    # against a throwaway server that has never heard of it, and every
+    # sync 401s. It passed before only because a BOM was making
+    # device.json unreadable; fixing that exposed the leak.
+    monkeypatch.setenv("LOGIX_DEVICE_IDENTITY_FILE",
+                       str(tmp_path / "no-such-device.json"))
     monkeypatch.setenv("LOGIX_SERVER_API_KEY", "dev-test-key")
     db_path = tmp_path / "device.db"
     monkeypatch.setenv("LOGIX_DB", str(db_path))
@@ -194,6 +202,14 @@ def test_b_server_offline_keeps_local_data_and_leaves_it_retryable(monkeypatch, 
     the way it would be if the server process were down."""
     monkeypatch.setenv("LOGIX_SERVER_URL", "http://127.0.0.1:1")  # port 1: never listens
     monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+    # This developer machine has a REAL enrolled device.json, and
+    # device_api_key() takes priority over the shared key these tests
+    # set -- so without this the suite authenticates as this laptop
+    # against a throwaway server that has never heard of it, and every
+    # sync 401s. It passed before only because a BOM was making
+    # device.json unreadable; fixing that exposed the leak.
+    monkeypatch.setenv("LOGIX_DEVICE_IDENTITY_FILE",
+                       str(tmp_path / "no-such-device.json"))
     db_path = tmp_path / "device.db"
     monkeypatch.setenv("LOGIX_DB", str(db_path))
     lp = importlib.reload(sys.modules["log_physical"]) if "log_physical" in sys.modules else importlib.import_module("log_physical")
@@ -502,6 +518,14 @@ def test_i_server_restart_mid_campaign_loses_nothing_and_creates_no_duplicate(mo
     Test B already covers a request that never gets a response at all)."""
     monkeypatch.setenv("LOGIX_SERVER_URL", live_server.base_url)
     monkeypatch.setenv("LOGIX_PRIVACY_MODE", "admin_full_sync")
+    # This developer machine has a REAL enrolled device.json, and
+    # device_api_key() takes priority over the shared key these tests
+    # set -- so without this the suite authenticates as this laptop
+    # against a throwaway server that has never heard of it, and every
+    # sync 401s. It passed before only because a BOM was making
+    # device.json unreadable; fixing that exposed the leak.
+    monkeypatch.setenv("LOGIX_DEVICE_IDENTITY_FILE",
+                       str(tmp_path / "no-such-device.json"))
     monkeypatch.setenv("LOGIX_SERVER_API_KEY", "dev-test-key")
     db_path = tmp_path / "device.db"
     monkeypatch.setenv("LOGIX_DB", str(db_path))

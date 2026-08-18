@@ -54,7 +54,13 @@ def _config_values() -> dict[str, str]:
     values: dict[str, str] = {}
     path = _config_path()
     if path:
-        for raw in path.read_text(encoding="utf-8").splitlines():
+        # utf-8-sig for the same reason device.json uses it: this file is
+        # routinely written from PowerShell, which adds a BOM by default, and
+        # a BOM lands on the FIRST key name -- so the first setting in the
+        # file silently stops resolving while every one below it works. That
+        # is worse than an outright parse failure, because nothing looks
+        # broken until the one key that happened to be on line 1 matters.
+        for raw in path.read_text(encoding="utf-8-sig").splitlines():
             line = raw.strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
@@ -148,7 +154,14 @@ def _read_device_identity() -> dict:
     if not path.is_file():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-SIG, not utf-8: a BOM here is not hypothetical. Anything that
+        # rewrites this file from PowerShell picks one up by default, and
+        # json.loads rejects a leading BOM outright -- which this except
+        # swallows, returning {} and making an ENROLLED device look like it
+        # never enrolled. The visible symptom is every sync failing 401 with
+        # a per-device key sitting right there on disk, and nothing in any
+        # log connecting the two. utf-8-sig reads BOM and no-BOM identically.
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return {}
 

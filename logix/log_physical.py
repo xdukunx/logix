@@ -528,7 +528,7 @@ def _record_sync_attempt(
         state = {}
         if path.exists():
             try:
-                state = json.loads(path.read_text(encoding="utf-8"))
+                state = json.loads(path.read_text(encoding="utf-8-sig"))
             except Exception:
                 state = {}
         state["last_attempt"] = now
@@ -585,7 +585,7 @@ def sync_status(con: sqlite3.Connection) -> dict:
     p = _sync_state_path(con)
     if p.exists():
         try:
-            state = json.loads(p.read_text(encoding="utf-8"))
+            state = json.loads(p.read_text(encoding="utf-8-sig"))
         except Exception:
             state = {}
 
