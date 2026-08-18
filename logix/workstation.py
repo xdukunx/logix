@@ -35,6 +35,35 @@ except Exception:          # ImportError, and anything a broken install raises
 
 HAVE_PSUTIL = psutil is not None
 
+# psutil.cpu_percent(interval=0) reports load since the PREVIOUS call, and
+# the first call in a process has no previous -- it returns exactly 0.0.
+# On a dashboard whose stated rule is that it never shows a fake zero, the
+# first paint was showing one. Priming here establishes the baseline at
+# import, so the first real reading a page asks for is a measurement rather
+# than an artefact of process startup.
+if HAVE_PSUTIL:
+    try:
+        psutil.cpu_percent(interval=None)
+    except Exception:
+        pass
+
+_cpu_last_call = 0.0
+_cpu_last_value: dict[str, Any] | None = None
+# A short BLOCKING sample, cached. The non-blocking form reports load since
+# the previous call, which sounds free and mostly is -- but the window is
+# then whatever the gap between callers happened to be, and Windows accounts
+# CPU time in ~15.6 ms ticks spread across every logical processor. Measured
+# against the running server, that produced occasional exact 0.0 readings on
+# a machine sitting at 30-60%, which is the fake zero this module exists to
+# prevent, arriving by a different route.
+#
+# So: sample for 100 ms, which is a window Windows can actually measure, and
+# reuse the answer for 2 seconds. The dashboard polls every 2.5 s, so it pays
+# 100 ms per poll while someone is looking at the page and nothing at all
+# otherwise. No sample is ever taken on the START path.
+_CPU_SAMPLE_SECONDS = 0.1
+_CPU_CACHE_SECONDS = 2.0
+
 # nvidia-smi is a PROCESS SPAWN, unlike everything else here, so it is not on
 # the same refresh path. The dashboard polls CPU/memory in-process every few
 # seconds; doing that to the GPU would spawn ~1200 processes an hour, which is
@@ -44,20 +73,31 @@ _GPU_MIN_INTERVAL = 15.0
 _gpu_cache: dict[str, Any] = {"at": 0.0, "value": None}
 
 
-def cpu(interval: float = 0.0) -> dict[str, Any] | None:
-    """interval=0 returns the load since the previous call rather than
-    blocking. The dashboard calls this on a timer, so consecutive calls give
-    a real figure without any sample ever holding up a response."""
+def cpu(interval: float | None = None) -> dict[str, Any] | None:
+    """Current system-wide CPU load, or None if it cannot be read.
+
+    Cached for _CPU_CACHE_SECONDS so that two callers on different timers do
+    not each pay for a sample, and so that a burst of requests cannot turn
+    into a burst of measurement windows too short to mean anything.
+    """
+    global _cpu_last_call, _cpu_last_value
     if not HAVE_PSUTIL:
         return None
+    if interval is None:
+        if _cpu_last_value is not None and (time.monotonic() - _cpu_last_call) < _CPU_CACHE_SECONDS:
+            return dict(_cpu_last_value)
+        interval = _CPU_SAMPLE_SECONDS
     try:
-        return {
+        _cpu_last_value = {
             "percent": psutil.cpu_percent(interval=interval),
             "cores_logical": psutil.cpu_count(logical=True),
             "cores_physical": psutil.cpu_count(logical=False),
         }
+        _cpu_last_call = time.monotonic()
+        return dict(_cpu_last_value)
     except Exception:
         return None
+
 
 
 def memory() -> dict[str, Any] | None:

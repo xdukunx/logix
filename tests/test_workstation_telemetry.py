@@ -9,11 +9,18 @@ device, and there is no way for anyone looking at the screen to tell.
 Measured on the development workstation, and the reason GPU is not on the
 same refresh path as everything else:
 
-    cpu()        0.73 ms
-    memory()     0.06 ms
-    storage()    0.06 ms
-    gpu(force)  92.91 ms      <- a process spawn
-    gpu(cached)  0.00 ms
+    cpu()       101 ms     a deliberate 100 ms sample, then cached 2 s
+    memory()      0.06 ms
+    storage()     0.06 ms
+    gpu(force)   92.91 ms   <- a process spawn
+    gpu(cached)   0.00 ms
+
+CPU is sampled rather than read non-blockingly because the non-blocking
+form measures whatever gap happened to elapse between callers, and Windows
+accounts CPU time in ~15.6 ms ticks across every logical processor. Against
+the running server that produced occasional exact 0.0 readings on a machine
+sitting at 30-60% -- the fake zero this module exists to prevent, arriving
+by a different route.
 """
 from __future__ import annotations
 
@@ -87,6 +94,9 @@ def test_telemetry_failure_never_propagates(monkeypatch):
     """A snapshot is taken while rendering a page. It may return nothing
     useful; it may not throw."""
     monkeypatch.setattr(w, "HAVE_PSUTIL", True)
+    # Clear the reading cache first, otherwise this exercises the cache
+    # rather than the failure path it is named for.
+    monkeypatch.setattr(w, "_cpu_last_value", None)
 
     class Exploding:
         def __getattr__(self, _):

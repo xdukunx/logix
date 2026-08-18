@@ -160,112 +160,479 @@ def load_sessions(db_path: Path, range_name: str):
     return sessions, label
 
 
+
+
+def _export_csv(db_path, start_d, end_d):
+    """Fallback when openpyxl is absent. Same rows, same columns, same
+    source -- build_sessions -- so the CSV cannot disagree with the xlsx."""
+    import csv
+    con = report.connect(db_path)
+    try:
+        rows = report.fetch_physical(con, start_d, end_d)
+    finally:
+        con.close()
+    sessions = report.build_sessions(rows)
+    outdir = Path(report.DEFAULT_OUTDIR)
+    outdir.mkdir(parents=True, exist_ok=True)
+    out = outdir / f"logix-sessions-{time.strftime('%Y%m%d-%H%M%S')}.csv"
+    cols = ["start_ts", "end_ts", "nama", "nim", "tujuan", "job_type",
+            "job_id", "durasi", "tipe", "status", "keterangan"]
+    with out.open("w", newline="", encoding="utf-8-sig") as fh:
+        wr = csv.writer(fh)
+        wr.writerow(["Start", "End", "Name", "NIM", "Purpose", "Job Type",
+                     "Job ID", "Duration", "Type", "Status", "Description"])
+        for s in sessions:
+            wr.writerow([s.get(c, "") for c in cols])
+    return out
+
+# ---- Overview -----------------------------------------------------------
+#
+# Everything here comes from a source that already existed. Nothing on this
+# page is computed twice or invented: identity and history come from
+# logbook_report's own queries, sync state from log_physical.sync_status,
+# and telemetry from workstation.py -- which returns None, never a zero,
+# for anything this machine cannot actually report.
+
+def _sync_snapshot(db_path):
+    """Sync state for the seven-state indicator in the UX contract. Returns
+    the raw connection_state plus the failure class, and lets the browser do
+    the mapping -- the contract's table lives in one place, not two."""
+    try:
+        import log_physical as lp
+        con = lp.connect(db_path)
+        try:
+            return lp.sync_status(con)
+        finally:
+            con.close()
+    except Exception as exc:
+        return {"connection_state": "unknown", "error": str(exc),
+                "pending_count": None, "last_error_class": None}
+
+
+def _active_session(sessions):
+    for s in sessions:
+        if s.get("_active"):
+            return s
+    return None
+
+
+def _overview(state):
+    try:
+        sessions, _label = load_sessions(state.db, "today")
+    except Exception:
+        sessions = []
+    active = _active_session(sessions)
+
+    try:
+        import workstation
+        telemetry = workstation.snapshot()
+    except Exception:
+        # The module is optional in the same sense psutil is: a dashboard
+        # that cannot read a sensor still has a logbook to show.
+        telemetry = {"cpu": None, "memory": None, "storage": None,
+                     "gpu": None, "psutil_available": False}
+
+    recent = [
+        {
+            "start": report.fmt_ts(s.get("start_ts")),
+            "nama": s.get("nama") or "",
+            "nim": s.get("nim") or "",
+            "tujuan": s.get("tujuan") or "",
+            "durasi": s.get("durasi") or "-",
+            "active": bool(s.get("_active")),
+        }
+        for s in sessions[:5]
+    ]
+
+    return {
+        "workstation": {
+            "hostname": socket.gethostname(),
+            "display": state.device or socket.gethostname(),
+        },
+        "telemetry": telemetry,
+        "active": None if not active else {
+            "nama": active.get("nama") or "",
+            "nim": active.get("nim") or "",
+            "tujuan": active.get("tujuan") or "",
+            "keterangan": active.get("keterangan") or "",
+            "job_type": active.get("job_type") or "",
+            "job_id": active.get("job_id") or "",
+            "tipe": active.get("tipe") or "",
+            "start": report.fmt_ts(active.get("start_ts")),
+            "start_iso": str(active.get("start_ts") or ""),
+            "durasi": active.get("durasi") or "-",
+        },
+        "recent": recent,
+        "sync": _sync_snapshot(state.db),
+    }
+
+
 PAGE = """<!doctype html>
-<html lang="id"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Logix - Laporan</title>
+<meta charset="utf-8">
+<title>Logix</title>
 <style>
 :root{
-  --surface:#070C15; --elevated:#0E1626; --widget:#0B1017; --hairline:#223451;
-  --text:#EEF3FB; --muted:#93A1B8; --accent:#2563EB; --active:#22C55E;
+  --bg:#F7F6F3; --surface:#FFFFFF; --ink:#17161C; --ink-2:#55525E;
+  --ink-3:#8B8896; --line:#E4E2DC; --line-2:#EFEDE8;
+  --accent:#2F5BEA; --ok:#2E7D5B; --warn:#9A6B12; --err:#B4442E;
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
 }
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--surface);color:var(--text);
-  font-family:"Segoe UI",system-ui,-apple-system,sans-serif;font-size:14px;
-  padding:28px 22px 60px;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1040px;margin:0 auto}
-header{display:flex;align-items:baseline;gap:12px;margin-bottom:22px}
-h1{font-size:19px;font-weight:600;letter-spacing:-0.01em}
-.device{font-family:Consolas,monospace;font-size:12px;color:var(--muted)}
-.tabs{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
-.tab{padding:7px 15px;border-radius:999px;border:1px solid var(--hairline);
-  background:var(--widget);color:var(--muted);cursor:pointer;font-size:12.5px}
-.tab:hover{border-color:#2E4468;color:var(--text)}
-.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
-  gap:10px;margin-bottom:18px}
-.stat{background:var(--elevated);border:1px solid var(--hairline);
-  border-radius:14px;padding:14px 16px}
-.stat .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
-.stat .v{font-family:Consolas,monospace;font-size:23px;margin-top:5px}
-.card{background:var(--elevated);border:1px solid var(--hairline);
-  border-radius:16px;overflow:hidden}
-.tablewrap{overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;font-weight:500;font-size:11px;color:var(--muted);
-  text-transform:uppercase;letter-spacing:.05em;padding:12px 14px;
-  border-bottom:1px solid var(--hairline);white-space:nowrap}
-td{padding:11px 14px;border-bottom:1px solid rgba(34,52,81,.5);vertical-align:top}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.app{display:grid;grid-template-columns:196px 1fr;min-height:100vh}
+nav{border-right:1px solid var(--line);padding:22px 14px;position:sticky;top:0;height:100vh}
+.brand{font-size:13px;font-weight:680;letter-spacing:.14em;padding:0 10px 20px}
+nav a{display:block;padding:8px 10px;margin-bottom:2px;border-radius:6px;
+  color:var(--ink-2);text-decoration:none;font-size:13px;cursor:pointer}
+nav a:hover{background:var(--line-2);color:var(--ink)}
+nav a.on{background:var(--ink);color:#fff}
+nav a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px}
+main{padding:30px 34px 60px;max-width:1180px}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;
+  gap:20px;padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:26px}
+.eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+h1{margin:4px 0 2px;font-size:27px;font-weight:640;letter-spacing:-.02em}
+.sub{color:var(--ink-2);font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface);
+  font-size:12px;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3);flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)}
+.dot.err{background:var(--err)}
+h2{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+  margin:32px 0 12px;font-weight:600}
+h2:first-of-type{margin-top:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:15px 16px}
+.metric{font-size:25px;font-weight:620;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.metric.na{font-size:15px;font-weight:500;color:var(--ink-3)}
+.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:9px}
+.foot{font-size:12px;color:var(--ink-2);margin-top:5px;font-variant-numeric:tabular-nums}
+.bar{height:3px;background:var(--line-2);border-radius:2px;margin-top:11px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ink);border-radius:2px}
+.usage{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:20px 22px}
+.usage .who{font-size:17px;font-weight:620}
+.usage .what{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:12px 0 4px}
+.usage .meta{color:var(--ink-2);font-size:13px}
+.clock{font-family:var(--mono);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums}
+.row{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:9px;
+  padding:30px;text-align:center;color:var(--ink-2)}
+.empty b{display:block;color:var(--ink);font-weight:600;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;background:var(--surface);
+  border:1px solid var(--line);border-radius:9px;overflow:hidden}
+th{text-align:left;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600;padding:11px 13px;border-bottom:1px solid var(--line)}
+td{padding:11px 13px;border-bottom:1px solid var(--line-2);font-size:13px;vertical-align:top}
 tr:last-child td{border-bottom:0}
-.mono{font-family:Consolas,monospace;font-size:12.5px}
-.dot{display:inline-block;width:7px;height:7px;border-radius:50%;
-  background:var(--muted);margin-right:7px;vertical-align:middle}
-.dot.on{background:var(--active)}
-.muted{color:var(--muted)}
-.empty{padding:46px 20px;text-align:center;color:var(--muted)}
-.bar{display:flex;justify-content:space-between;align-items:center;
-  gap:12px;margin:20px 0 0;flex-wrap:wrap}
-button.exp{padding:9px 17px;border-radius:999px;border:1px solid var(--accent);
-  background:var(--accent);color:#fff;font-size:12.5px;cursor:pointer;font-family:inherit}
-button.exp:hover{filter:brightness(1.1)}
-button.exp:disabled{opacity:.55;cursor:default}
-footer{margin-top:26px;font-size:11.5px;color:var(--muted);line-height:1.7}
-</style></head>
-<body><div class="wrap">
-<header><h1>Laporan Logix</h1><span class="device" id="dev"></span></header>
-<div class="tabs" id="tabs"></div>
-<div class="stats" id="stats"></div>
-<div class="card"><div class="tablewrap"><table>
-<thead><tr><th>Mulai</th><th>Selesai</th><th>Durasi</th><th>Nama</th><th>NIM</th>
-<th>Tujuan</th><th>Akses</th><th>Status</th></tr></thead>
-<tbody id="rows"></tbody></table></div></div>
-<div class="bar"><span class="muted" id="period"></span>
-<button class="exp" id="exp">Export .xlsx</button></div>
-<footer id="foot"></footer>
-</div><script>
+tbody tr{cursor:pointer}
+tbody tr:hover{background:#FBFAF8}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.mut{color:var(--ink-3)}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px}
+input,select{font:inherit;padding:7px 10px;border:1px solid var(--line);
+  border-radius:6px;background:var(--surface);color:var(--ink)}
+input[type=search]{min-width:220px}
+button{font:inherit;font-size:13px;padding:7px 13px;border:1px solid var(--line);
+  border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button:hover{background:var(--line-2)}
+button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+.sheet{position:fixed;inset:0;background:rgba(23,22,28,.28);display:none;z-index:9}
+.sheet.open{display:block}
+.sheet .panel{position:absolute;right:0;top:0;bottom:0;width:min(430px,94vw);
+  background:var(--surface);border-left:1px solid var(--line);
+  padding:26px 26px 40px;overflow:auto}
+.sheet h3{margin:0 0 18px;font-size:17px;font-weight:640}
+.kv{display:grid;grid-template-columns:112px 1fr;gap:7px 14px;font-size:13px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0}
+.close{position:absolute;top:18px;right:20px;border:0;background:none;font-size:20px;
+  line-height:1;color:var(--ink-3);padding:4px 8px}
+.note{font-size:12px;color:var(--ink-2);margin-top:6px}
+.hide{display:none}
+@media(max-width:820px){
+  .app{grid-template-columns:1fr}
+  nav{position:static;height:auto;display:flex;gap:4px;overflow-x:auto;
+    border-right:0;border-bottom:1px solid var(--line);padding:12px}
+  .brand{padding:0 8px 0 4px;align-self:center}
+  main{padding:20px 16px 50px}
+}
+</style>
+
+<div class="app">
+<nav>
+  <div class="brand">LOGIX</div>
+  <a id="nav-overview" class="on" onclick="go('overview')" tabindex="0">Overview</a>
+  <a id="nav-logs" onclick="go('logs')" tabindex="0">Logs</a>
+  <a id="nav-server" onclick="go('server')" tabindex="0">Server</a>
+</nav>
+
+<main>
+  <header class="top">
+    <div>
+      <div class="eyebrow">You are using workstation</div>
+      <h1 id="station">&mdash;</h1>
+      <div class="sub" id="stationSub"></div>
+    </div>
+    <span class="pill"><span class="dot" id="syncDot"></span><span id="syncPill">Checking</span></span>
+  </header>
+
+  <section id="v-overview">
+    <h2>Current workstation</h2>
+    <div class="grid" id="tele"></div>
+    <h2>Current usage</h2>
+    <div id="usage"></div>
+    <h2>Recent logs</h2>
+    <div id="recent"></div>
+    <div style="margin-top:12px"><button onclick="go('logs')">View all logs</button></div>
+  </section>
+
+  <section id="v-logs" class="hide">
+    <h2>Logs</h2>
+    <div class="tools">
+      <input type="search" id="q" placeholder="Search name, NIM, purpose" oninput="renderLogs()">
+      <select id="range" onchange="loadLogs()">
+        <option value="today">Today</option>
+        <option value="7">Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="all" selected>All time</option>
+      </select>
+      <select id="fstate" onchange="renderLogs()">
+        <option value="">All states</option>
+        <option value="Aktif">Active</option>
+        <option value="Selesai / Finish">Finished</option>
+        <option value="Auto Finish">Auto finish</option>
+      </select>
+      <button class="primary" onclick="doExport()">Export</button>
+    </div>
+    <div id="exportNote" class="note"></div>
+    <div id="logs"></div>
+  </section>
+
+  <section id="v-server" class="hide">
+    <h2>Central server</h2>
+    <div class="card" id="serverCard"></div>
+  </section>
+</main>
+</div>
+
+<div class="sheet" id="sheet" onclick="if(event.target.id==='sheet')closeSheet()">
+  <div class="panel" role="dialog" aria-label="Session details">
+    <button class="close" onclick="closeSheet()" aria-label="Close">&times;</button>
+    <h3 id="sheetTitle">Session</h3>
+    <dl class="kv" id="sheetBody"></dl>
+  </div>
+</div>
+
+<script>
 var TOKEN=new URLSearchParams(location.search).get("t")||"";
-var cur="today";
-var LABELS={today:"Hari ini",week:"Minggu ini",month:"Bulan ini",all:"Semua"};
-function esc(s){var d=document.createElement("span");d.textContent=s==null?"":String(s);return d.innerHTML}
-function tabs(){
-  var h="";for(var k in LABELS){h+='<div class="tab'+(k===cur?" on":"")+'" data-r="'+k+'">'+LABELS[k]+'</div>'}
-  document.getElementById("tabs").innerHTML=h;
-  Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){
-    t.onclick=function(){cur=t.getAttribute("data-r");tabs();load()}})}
-function load(){
-  fetch("/api/sessions?range="+cur+"&t="+encodeURIComponent(TOKEN))
-   .then(function(r){return r.json()}).then(function(d){
-    document.getElementById("dev").textContent=d.device||"";
-    document.getElementById("period").textContent=d.label+" \\u00b7 "+d.summary.sessions+" sesi";
-    var s=d.summary,st="";
-    st+='<div class="stat"><div class="k">Sesi</div><div class="v">'+s.sessions+'</div></div>';
-    st+='<div class="stat"><div class="k">Berjalan</div><div class="v">'+s.active+'</div></div>';
-    st+='<div class="stat"><div class="k">Pengguna</div><div class="v">'+s.people+'</div></div>';
-    st+='<div class="stat"><div class="k">Total durasi</div><div class="v">'+esc(s.duration)+'</div></div>';
-    document.getElementById("stats").innerHTML=st;
-    var b="";
-    d.sessions.forEach(function(r){
-      b+="<tr><td class='mono'>"+esc(r.start)+"</td><td class='mono'>"+esc(r.end||"-")+"</td>"+
-         "<td class='mono'>"+esc(r.durasi)+"</td><td>"+esc(r.nama)+"</td>"+
-         "<td class='mono'>"+esc(r.nim)+"</td><td>"+esc(r.tujuan)+"</td>"+
-         "<td class='muted'>"+esc(r.tipe)+"</td><td><span class='dot"+(r.active?" on":"")+
-         "'></span>"+esc(r.status)+"</td></tr>"});
-    document.getElementById("rows").innerHTML=b||
-      "<tr><td colspan='8' class='empty'>Belum ada sesi pada periode ini.</td></tr>";
-    document.getElementById("foot").innerHTML=
-      "Data dibaca langsung dari basis data lokal perangkat ini: <span class='mono'>"+esc(d.db)+
-      "</span><br>Halaman ini hanya dapat diakses dari komputer ini dan akan berhenti sendiri saat tidak dipakai.";
-  })}
-document.getElementById("exp").onclick=function(){
-  var b=this;b.disabled=true;b.textContent="Menyiapkan...";
-  fetch("/api/export?range="+cur+"&t="+encodeURIComponent(TOKEN))
-   .then(function(r){return r.json()}).then(function(d){
-    b.disabled=false;b.textContent="Export .xlsx";
-    if(d.ok){window.location="/download?t="+encodeURIComponent(TOKEN)+"&f="+encodeURIComponent(d.name)}
-    else{alert("Export gagal: "+(d.error||"tidak diketahui"))}})
-   .catch(function(e){b.disabled=false;b.textContent="Export .xlsx";alert("Export gagal: "+e)})};
-tabs();load();
-</script></body></html>
+var OV=null, ROWS=[], SHOWN=[], VIEW="overview";
+function t(u){return u+(u.indexOf("?")<0?"?":"&")+"t="+encodeURIComponent(TOKEN)}
+var ENT={"&":"&amp;","<":"&lt;",">":"&gt;"};
+function esc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return ENT[c]})}
+function fgb(n){if(n==null)return "—";var v=n/1073741824;
+  return (v>=100?v.toFixed(0):v.toFixed(1))+" GB"}
+
+function go(v){
+  VIEW=v;
+  ["overview","logs","server"].forEach(function(k){
+    document.getElementById("v-"+k).classList.toggle("hide",k!==v);
+    document.getElementById("nav-"+k).classList.toggle("on",k===v);
+  });
+  if(v==="logs"&&!ROWS.length)loadLogs();
+}
+
+/* The seven states the UX contract defines, never collapsed into "offline".
+   local_only and sync_blocked are calm and successful: nothing is waiting. */
+function syncView(s){
+  if(!s)return{dot:"",txt:"Unknown",line:"Sync state could not be read."};
+  var st=s.connection_state, n=s.pending_count, cls=s.last_error_class;
+  if(st==="disabled")return{k:"local",dot:"ok",txt:"Local only",
+    line:"Stored on this workstation. Nothing needs to be uploaded."};
+  if(st==="blocked")return{k:"blocked",dot:"",txt:"Local only",
+    line:"Synchronization is disabled by policy. Data is stored complete on this workstation."};
+  if(st==="offline"&&cls==="network")return{k:"unavail",dot:"warn",txt:"Server unavailable",
+    line:(n?n+" change(s) ":"")+"stored safely on this workstation."};
+  if(st==="offline")return{k:"error",dot:"err",txt:"Sync failed",
+    line:"The server rejected the last attempt. Local data is safe."};
+  if(n>0)return{k:"pending",dot:"warn",txt:n+" pending",
+    line:n+" change(s) waiting to synchronize. Local data is safe."};
+  if(st==="connected")return{k:"synced",dot:"ok",txt:"Synced",line:"All changes synchronized."};
+  return{k:"pending",dot:"",txt:"Not yet synced",
+    line:"No synchronization has run on this workstation yet."};
+}
+
+function card(label,value,foot,pct,title){
+  return '<div class="card"'+(title?' title="'+esc(title)+'"':'')+'>'
+    +'<div class="label">'+esc(label)+'</div>'
+    +(value==null?'<div class="metric na">Unavailable</div>'
+                 :'<div class="metric">'+esc(value)+'</div>')
+    +'<div class="foot">'+esc(foot)+'</div>'
+    +(pct==null?'':'<div class="bar"><i style="width:'+Math.max(0,Math.min(100,pct))+'%"></i></div>')
+    +'</div>';
+}
+function paintTele(tl){
+  if(!tl)return;
+  var c=tl.cpu,m=tl.memory,g=tl.gpu,st=tl.storage,h="";
+  h+=card("CPU", c?Math.round(c.percent)+"%":null,
+      c?(c.cores_physical?c.cores_physical+" cores · "+c.cores_logical+" threads"
+                         :c.cores_logical+" threads")
+       :"psutil not installed", c?c.percent:null);
+  h+=card("Memory", m?fgb(m.used_bytes):null,
+      m?"of "+fgb(m.total_bytes):"psutil not installed", m?m.percent:null);
+  h+=card("GPU", g?Math.round(g.percent)+"%":null,
+      g?fgb(g.vram_used_bytes)+" / "+fgb(g.vram_total_bytes)+" VRAM":"No GPU detected",
+      g?g.percent:null, g?g.name:"");
+  h+=card("Storage", st?fgb(st.free_bytes)+" free":null,
+      st?"of "+fgb(st.total_bytes):"Unavailable", st?st.percent:null);
+  document.getElementById("tele").innerHTML=h;
+}
+
+function paintUsage(a){
+  var el=document.getElementById("usage");
+  if(!a){el.innerHTML='<div class="empty"><b>No active usage</b>'
+    +'This workstation is currently idle.</div>';return}
+  var job=[a.job_type,a.job_id?"Job "+a.job_id:""].filter(Boolean).join(" · ")||"—";
+  el.innerHTML='<div class="usage"><div class="row">'
+   +'<div><div class="who">'+esc(a.nama||"Unknown")
+   +(a.nim?' <span class="mut">· '+esc(a.nim)+'</span>':'')+'</div>'
+   +'<div class="what">'+esc(a.tujuan||"—")+'</div>'
+   +'<div class="meta">'+esc(job)+'</div></div>'
+   +'<div style="text-align:right"><div class="clock">'+esc(a.durasi)+'</div>'
+   +'<div class="meta">started '+esc(a.start)+'</div></div></div>'
+   +'<div style="margin-top:16px"><button onclick="detailActive()">Details</button></div></div>';
+}
+
+function paintRecent(list){
+  var el=document.getElementById("recent");
+  if(!list||!list.length){el.innerHTML='<div class="empty"><b>No sessions yet</b>'
+    +'No sessions recorded on this workstation yet.</div>';return}
+  var h='<table><tbody>';
+  list.forEach(function(r,i){
+    h+='<tr onclick="detailRecent('+i+')">'
+      +'<td class="num mut" style="width:78px">'+esc(r.start)+'</td>'
+      +'<td style="width:160px">'+esc(r.nama)+'</td>'
+      +'<td>'+esc(r.tujuan||"—")+'</td>'
+      +'<td class="num" style="text-align:right">'+esc(r.durasi)+'</td></tr>';
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+
+function paintServer(s){
+  var v=syncView(s);
+  var quiet=(v.k==="local"||v.k==="blocked");
+  document.getElementById("serverCard").innerHTML=
+    '<div class="row" style="align-items:center"><div>'
+   +'<div class="metric" style="font-size:19px">'+esc(v.txt)+'</div>'
+   +'<div class="foot">'+esc(v.line)+'</div></div>'
+   +'<span class="pill"><span class="dot '+v.dot+'"></span>'+esc(v.txt)+'</span></div>'
+   +'<div class="kv" style="margin-top:20px">'
+   +'<dt>Server</dt><dd>'+((s&&s.server_configured)?"configured":"not configured")+'</dd>'
+   +'<dt>Privacy mode</dt><dd>'+esc((s&&s.privacy_mode)||"—")+'</dd>'
+   +'<dt>Pending</dt><dd>'+(quiet?"—":esc(s&&s.pending_count!=null?s.pending_count:"—"))+'</dd>'
+   +'<dt>Last success</dt><dd>'+esc((s&&s.last_success)||"—")+'</dd>'
+   +'<dt>Last error</dt><dd>'+esc((s&&s.last_error)||"—")+'</dd></div>';
+}
+
+function loadOverview(){
+  fetch(t("/api/overview")).then(function(r){return r.json()}).then(function(d){
+    OV=d;
+    document.getElementById("station").textContent=d.workstation.display;
+    document.getElementById("stationSub").textContent=
+      (d.workstation.display!==d.workstation.hostname)?d.workstation.hostname:"";
+    var v=syncView(d.sync);
+    document.getElementById("syncPill").textContent=v.txt;
+    document.getElementById("syncDot").className="dot "+v.dot;
+    paintTele(d.telemetry); paintUsage(d.active); paintRecent(d.recent); paintServer(d.sync);
+  }).catch(function(){});
+}
+function loadTelemetry(){
+  fetch(t("/api/telemetry")).then(function(r){return r.json()}).then(paintTele).catch(function(){});
+}
+function loadLogs(){
+  var r=document.getElementById("range").value;
+  fetch(t("/api/sessions?range="+encodeURIComponent(r))).then(function(x){return x.json()})
+    .then(function(d){ROWS=d.sessions||[];renderLogs()}).catch(function(){});
+}
+function renderLogs(){
+  var q=(document.getElementById("q").value||"").toLowerCase();
+  var fs=document.getElementById("fstate").value;
+  SHOWN=ROWS.filter(function(r){
+    if(fs&&r.status!==fs)return false;
+    if(!q)return true;
+    return [r.nama,r.nim,r.tujuan,r.job_type,r.job_id].join(" ").toLowerCase().indexOf(q)>=0;
+  });
+  var el=document.getElementById("logs");
+  if(!SHOWN.length){el.innerHTML='<div class="empty"><b>No matching sessions</b>'
+    +'Nothing recorded for this filter.</div>';return}
+  var h='<table><thead><tr><th>Start</th><th>End</th><th>Name</th><th>NIM</th>'
+   +'<th>Purpose</th><th>Job</th><th style="text-align:right">Duration</th>'
+   +'<th>State</th></tr></thead><tbody>';
+  SHOWN.forEach(function(r,i){
+    var job=[r.job_type,r.job_id].filter(Boolean).join(" · ")||"—";
+    h+='<tr onclick="detailRow('+i+')">'
+     +'<td class="num">'+esc(r.start)+'</td>'
+     +'<td class="num mut">'+esc(r.end||"—")+'</td>'
+     +'<td>'+esc(r.nama)+'</td><td class="num mut">'+esc(r.nim)+'</td>'
+     +'<td>'+esc(r.tujuan||"—")+'</td><td class="mut">'+esc(job)+'</td>'
+     +'<td class="num" style="text-align:right">'+esc(r.durasi)+'</td>'
+     +'<td class="mut">'+esc(r.status)+'</td></tr>';
+  });
+  el.innerHTML=h+'</tbody></table>';
+}
+
+function sheet(title,pairs){
+  document.getElementById("sheetTitle").textContent=title;
+  document.getElementById("sheetBody").innerHTML=pairs.map(function(p){
+    return "<dt>"+esc(p[0])+"</dt><dd>"+esc(p[1]||"—")+"</dd>"}).join("");
+  document.getElementById("sheet").classList.add("open");
+}
+function closeSheet(){document.getElementById("sheet").classList.remove("open")}
+document.addEventListener("keydown",function(e){if(e.key==="Escape")closeSheet()});
+
+function detailActive(){
+  var a=OV&&OV.active; if(!a)return;
+  sheet("Current session",[
+    ["Name",a.nama],["NIM",a.nim],["Workstation",OV.workstation.display],
+    ["Purpose",a.tujuan],["Job type",a.job_type],["Job ID",a.job_id],
+    ["Access",a.tipe],["Started",a.start],["Duration",a.durasi],
+    ["Description",a.keterangan],["Local status","Stored on this workstation"],
+    ["Sync",syncView(OV.sync).txt]]);
+}
+function detailRow(i){
+  var r=SHOWN[i]; if(!r)return;
+  sheet("Session",[
+    ["Name",r.nama],["NIM",r.nim],["Workstation",OV?OV.workstation.display:""],
+    ["Purpose",r.tujuan],["Job type",r.job_type],["Job ID",r.job_id],
+    ["Access",r.tipe],["Start",r.start],["End",r.end],["Duration",r.durasi],
+    ["Description",r.keterangan],["State",r.status]]);
+}
+function detailRecent(i){
+  var r=(OV&&OV.recent||[])[i]; if(!r)return;
+  sheet("Session",[["Name",r.nama],["NIM",r.nim],["Purpose",r.tujuan],
+    ["Start",r.start],["Duration",r.durasi]]);
+}
+
+function doExport(){
+  var note=document.getElementById("exportNote");
+  note.textContent="Preparing export…";
+  var r=document.getElementById("range").value;
+  fetch(t("/api/export?range="+encodeURIComponent(r))).then(function(x){return x.json()})
+   .then(function(d){
+     if(d.ok){note.textContent=d.note||("Exported "+d.name);
+              window.location=t("/download?f="+encodeURIComponent(d.name))}
+     else{note.textContent="Export failed: "+d.error}
+   }).catch(function(){note.textContent="Export failed."});
+}
+
+loadOverview();
+/* Telemetry refreshes on its own timer; the session queries deliberately do
+   not re-run with it -- redrawing a CPU number must not re-query the day. */
+setInterval(function(){if(VIEW==="overview")loadTelemetry()},2500);
+setInterval(loadOverview,30000);
+</script>
 """
 
 
@@ -326,6 +693,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
             return
 
+        if route == "/api/overview":
+            try:
+                self._send(200, json.dumps(_overview(self.state)).encode("utf-8"))
+            except Exception as exc:
+                self._send(500, json.dumps({"error": str(exc)}).encode("utf-8"))
+            return
+
+        if route == "/api/telemetry":
+            # Split from /api/overview on purpose. The cards refresh every
+            # couple of seconds; re-running the day's session queries at that
+            # rate to redraw a CPU number would be pure waste.
+            try:
+                import workstation
+                force = (qs.get("gpu") or [""])[0] == "force"
+                self._send(200, json.dumps(
+                    workstation.snapshot(force_gpu=force)).encode("utf-8"))
+            except Exception as exc:
+                self._send(200, json.dumps({"error": str(exc), "cpu": None,
+                                            "memory": None, "storage": None,
+                                            "gpu": None}).encode("utf-8"))
+            return
+
         if route == "/api/sessions":
             name = (qs.get("range") or ["today"])[0]
             if name not in RANGES:
@@ -350,6 +739,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "tujuan": s.get("tujuan") or "",
                         "tipe": s.get("tipe") or "",
                         "status": s.get("status") or "",
+                        # Carried for the details sheet and the job column.
+                        # Empty is the ordinary case and must stay empty --
+                        # the page renders an em dash rather than a value.
+                        "keterangan": s.get("keterangan") or "",
+                        "job_type": s.get("job_type") or "",
+                        "job_id": s.get("job_id") or "",
                         "active": bool(s.get("_active")),
                     }
                     for s in sessions
@@ -370,7 +765,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                    full=(start_d is None), db=self.state.db)
                 p = Path(out)
                 self.state.exports[p.name] = p
-                self._send(200, json.dumps({"ok": True, "name": p.name}).encode("utf-8"))
+                self._send(200, json.dumps({"ok": True, "name": p.name,
+                                            "format": "xlsx"}).encode("utf-8"))
+            except SystemExit as exc:
+                # openpyxl is an OPTIONAL dependency, and logbook_report
+                # signals its absence with SystemExit -- which is a
+                # BaseException, so the general handler below never saw it and
+                # the request died without a reply. Export degrades to CSV
+                # rather than the page appearing to hang.
+                try:
+                    p = _export_csv(self.state.db, start_d, end_d)
+                    self.state.exports[p.name] = p
+                    self._send(200, json.dumps({
+                        "ok": True, "name": p.name, "format": "csv",
+                        "note": "openpyxl is not installed; exported CSV instead.",
+                    }).encode("utf-8"))
+                except Exception as inner:
+                    self._send(200, json.dumps(
+                        {"ok": False, "error": f"{exc} / {inner}"}).encode("utf-8"))
             except Exception as exc:
                 self._send(200, json.dumps({"ok": False, "error": str(exc)}).encode("utf-8"))
             return

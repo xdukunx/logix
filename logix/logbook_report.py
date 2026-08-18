@@ -397,6 +397,11 @@ def build_sessions(rows):
             "status": status,
             "durasi": fmt_duration(safe_get(start, "timestamp"), safe_get(end, "timestamp") if end else None, active=(not end)),
             "keterangan": first_nonempty(display_rows, "keterangan"),
+            # Optional and usually empty. first_nonempty over the whole
+            # session, not just the START row, so a value supplied on any
+            # event of the session still surfaces.
+            "job_type": first_nonempty(display_rows, "job_type"),
+            "job_id": first_nonempty(display_rows, "job_id"),
             "kategori": kategori,
             "session_id": sid,
             "_active": not bool(end),
