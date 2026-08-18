@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -199,3 +200,63 @@ def test_per_core_readings_are_independent(monkeypatch):
     c = w.cpu(interval=0)
     assert c["per_core"] == [10.0, 90.0, 0.0, 45.5]
     assert c["percent"] == 36.4
+
+
+# ---- rates and history: real samples only, never a fabricated zero ------
+
+def test_first_io_reading_is_none_because_a_rate_needs_two_points(monkeypatch):
+    """Throughput only exists between two counter readings. The first call
+    after import has nothing to difference against, and must say so rather
+    than report 0 B/s -- which would read as a genuinely idle disk."""
+    monkeypatch.setattr(w, "_io_prev", {"at": 0.0, "disk": None, "net": None})
+    assert w.io_rates() is None
+
+
+def test_io_rates_are_non_negative(monkeypatch):
+    """Counters can reset (a driver reload, a counter wrap). A negative rate
+    would render as a nonsense reading, so the difference is floored."""
+    if not w.HAVE_PSUTIL:
+        pytest.skip("psutil not installed")
+    w.io_rates()
+    time.sleep(0.3)
+    r = w.io_rates()
+    if r is None:
+        pytest.skip("window too short on this machine")
+    assert all(v >= 0 for v in r.values())
+
+
+def test_history_records_real_samples_and_is_bounded():
+    before = len(w.history())
+    w.snapshot(include_gpu=False)
+    w.snapshot(include_gpu=False)
+    after = w.history()
+    assert len(after) >= before
+    assert len(after) <= w._HISTORY_LEN, "the buffer is capped, not unbounded"
+    assert "t" in after[-1] and "cpu" in after[-1]
+
+
+def test_history_does_not_survive_a_restart():
+    """Telemetry is not a logbook event, and a history that outlived the
+    process would start implying it means something. Asserted by actually
+    reloading the module rather than by reading its source: what matters is
+    that nothing reconstitutes the buffer, not that a particular call is
+    absent from the file."""
+    import importlib
+    w.snapshot(include_gpu=False)
+    assert len(w.history()) > 0
+    fresh = importlib.reload(w)
+    assert fresh.history() == [], "a reloaded module must start with no samples"
+
+
+def test_gpu_absent_sensor_is_omitted_not_zeroed(monkeypatch):
+    """nvidia-smi answers [N/A] for anything the card does not expose (fan
+    speed on a laptop GPU). An [N/A] must arrive as a missing key, never as
+    a 0 that reads like a cold idle card."""
+    class R:
+        returncode = 0
+        stdout = "NVIDIA Test,10,1024,24576,[N/A],[N/A],[N/A]\n"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+    w._gpu_cache["at"] = 0.0
+    g = w.gpu(force=True)
+    assert g["percent"] == 10.0
+    assert "temp_c" not in g and "power_w" not in g and "clock_mhz" not in g

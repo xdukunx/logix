@@ -160,19 +160,37 @@ def gpu(force: bool = False) -> dict[str, Any] | None:
     try:
         out = subprocess.run(
             ["nvidia-smi",
-             "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+             "--query-gpu=name,utilization.gpu,memory.used,memory.total,"
+             "temperature.gpu,power.draw,clocks.sm",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=4,
             creationflags=(subprocess.CREATE_NO_WINDOW
                            if sys.platform == "win32" else 0),
         )
         if out.returncode == 0 and out.stdout.strip():
-            name, util, used, total = [
-                p.strip() for p in out.stdout.strip().splitlines()[0].split(",")]
+            parts = [p.strip() for p in out.stdout.strip().splitlines()[0].split(",")]
+            name, util, used, total = parts[0], parts[1], parts[2], parts[3]
             value = {"name": name,
                      "percent": float(util),
                      "vram_used_bytes": int(float(used) * 1024 * 1024),
                      "vram_total_bytes": int(float(total) * 1024 * 1024)}
+            # Temperature, power and clock are queried in the SAME nvidia-smi
+            # call rather than a second one -- the process spawn is the whole
+            # cost of this function, so extra columns are free while a second
+            # invocation would double it.
+            #
+            # Each is optional and parsed defensively: nvidia-smi answers
+            # "[N/A]" for anything the card or driver does not expose (fan
+            # speed on this laptop GPU, for instance), and an [N/A] must
+            # arrive as an absent key, never as a zero that reads like a cold
+            # idle card.
+            for key, raw in (("temp_c", parts[4] if len(parts) > 4 else ""),
+                             ("power_w", parts[5] if len(parts) > 5 else ""),
+                             ("clock_mhz", parts[6] if len(parts) > 6 else "")):
+                try:
+                    value[key] = float(raw)
+                except (TypeError, ValueError):
+                    pass
     except Exception:
         value = None
 
@@ -181,18 +199,95 @@ def gpu(force: bool = False) -> dict[str, Any] | None:
     return value
 
 
-def snapshot(include_gpu: bool = True, force_gpu: bool = False) -> dict[str, Any]:
+# Throughput is a RATE, so it only exists between two readings -- there is no
+# such thing as an instantaneous byte/s. These hold the previous counter
+# snapshot so the next call can difference against it; the first call after
+# import therefore has nothing to compare to and reports None rather than a
+# fabricated zero.
+_io_prev: dict[str, Any] = {"at": 0.0, "disk": None, "net": None}
+
+
+def io_rates() -> dict[str, Any] | None:
+    """Disk and network throughput since the previous call, in bytes/second."""
+    global _io_prev
+    if not HAVE_PSUTIL:
+        return None
+    try:
+        now = time.monotonic()
+        disk = psutil.disk_io_counters()
+        net = psutil.net_io_counters()
+        prev_at, prev_disk, prev_net = _io_prev["at"], _io_prev["disk"], _io_prev["net"]
+        _io_prev = {"at": now, "disk": disk, "net": net}
+
+        elapsed = now - prev_at
+        # Under ~0.2s the counters have barely moved and the quotient is
+        # mostly rounding noise -- the same short-window problem the CPU
+        # sampler has, and the same answer: say nothing rather than something
+        # invented.
+        if not prev_disk or not prev_net or elapsed < 0.2:
+            return None
+        return {
+            "disk_read_bps": max(0, (disk.read_bytes - prev_disk.read_bytes)) / elapsed,
+            "disk_write_bps": max(0, (disk.write_bytes - prev_disk.write_bytes)) / elapsed,
+            "net_recv_bps": max(0, (net.bytes_recv - prev_net.bytes_recv)) / elapsed,
+            "net_sent_bps": max(0, (net.bytes_sent - prev_net.bytes_sent)) / elapsed,
+        }
+    except Exception:
+        return None
+
+
+# A short window of real samples, held in memory and never written anywhere.
+# This is what lets the dashboard draw a moving line instead of a single
+# number -- and every point in it is a measurement this process actually
+# took while the page was open, not a synthesised trend. It is deliberately
+# NOT persisted: telemetry is not a logbook event, and a history that
+# survives a restart would start implying it means something.
+_HISTORY_LEN = 60
+_history: list[dict[str, Any]] = []
+
+
+def history() -> list[dict[str, Any]]:
+    """The samples taken so far this process, oldest first. Short by design:
+    at the dashboard's poll rate this is a couple of minutes, which is the
+    span over which "what is this machine doing right now" is still the
+    question being asked."""
+    return list(_history)
+
+
+def _record(sample: dict[str, Any]) -> None:
+    cpu_v = (sample.get("cpu") or {}).get("percent")
+    mem_v = (sample.get("memory") or {}).get("percent")
+    gpu_d = sample.get("gpu") or {}
+    io = sample.get("io") or {}
+    _history.append({
+        "t": sample.get("sampled_at"),
+        "cpu": cpu_v,
+        "memory": mem_v,
+        "gpu": gpu_d.get("percent"),
+        "gpu_temp_c": gpu_d.get("temp_c"),
+        "disk_bps": (io.get("disk_read_bps", 0) + io.get("disk_write_bps", 0)) if io else None,
+        "net_bps": (io.get("net_recv_bps", 0) + io.get("net_sent_bps", 0)) if io else None,
+    })
+    del _history[:-_HISTORY_LEN]
+
+
+def snapshot(include_gpu: bool = True, force_gpu: bool = False,
+             record: bool = True) -> dict[str, Any]:
     """One reading of everything. Keys are always present; a value of None
     is the honest answer for a metric this machine cannot report, and every
     consumer must render it as unavailable rather than as zero."""
-    return {
+    sample = {
         "cpu": cpu(),
         "memory": memory(),
         "storage": storage(),
         "gpu": gpu(force=force_gpu) if include_gpu else None,
+        "io": io_rates(),
         "psutil_available": HAVE_PSUTIL,
         "sampled_at": time.time(),
     }
+    if record:
+        _record(sample)
+    return sample
 
 
 def human_bytes(n: int | float | None) -> str:

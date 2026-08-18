@@ -403,6 +403,24 @@ h2.sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:upperc
   margin-top:var(--space-3);overflow:hidden}
 .bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
 
+/* A moving line over the samples this process has actually taken while the
+   page was open. Not a trend, not a forecast, and not persisted -- if the
+   page has only been open ten seconds the line is ten seconds long, which
+   is the honest thing for it to be. */
+.spark{margin-top:var(--space-3);height:34px;position:relative}
+.spark svg{width:100%;height:100%;display:block;overflow:visible}
+.spark .fill{fill:var(--accent);opacity:.10}
+.spark .line{fill:none;stroke:var(--accent);stroke-width:1.5;
+  stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.spark .warming{position:absolute;inset:0;display:flex;align-items:center;
+  font-size:11px;color:var(--text-faint)}
+
+/* Secondary readings that only exist for some hardware -- shown when the
+   machine reports them, absent otherwise, never zero-filled. */
+.aux{display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-2);
+  font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums}
+.aux b{font-weight:600;color:var(--text)}
+
 /* One utilisation percentage, one dial. */
 .gauge{position:relative;width:64px;height:64px;flex:none;margin-top:var(--space-2)}
 .gauge svg{width:100%;height:100%;display:block}
@@ -700,6 +718,38 @@ function syncView(s){
 /* ── telemetry: absent is smaller, quieter, and has NO meter ─────────── */
 function clamp(p){return Math.max(0,Math.min(100,p))}
 
+/* A polyline over real samples. maxV lets a rate series (bytes/sec, which
+   has no ceiling) scale to its own peak, while a percentage series is
+   pinned to 0-100 so the line does not appear to rescale itself every
+   time the machine goes quiet.
+
+   Under two points there is nothing to draw a line between, and saying so
+   beats drawing a flat line that looks like a measured idle. */
+function sparkline(series,maxV){
+  var pts=series.filter(function(v){return typeof v==="number"});
+  if(pts.length<2)
+    return '<div class="spark"><div class="warming">collecting…</div></div>';
+  var top=maxV||Math.max.apply(null,pts)||1;
+  var W=100,H=30,n=pts.length;
+  var xy=pts.map(function(v,i){
+    var x=(n===1)?W:(i/(n-1)*W);
+    var y=H-(clampTo(v,top)/top*H);
+    return x.toFixed(2)+","+y.toFixed(2);
+  });
+  var area="0,"+H+" "+xy.join(" ")+" "+W+","+H;
+  return '<div class="spark"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+    +'<polygon class="fill" points="'+area+'"/>'
+    +'<polyline class="line" points="'+xy.join(" ")+'"/></svg></div>';
+}
+function clampTo(v,top){return Math.max(0,Math.min(top,v))}
+
+function rate(bps){
+  if(bps==null)return null;
+  if(bps>=1048576)return (bps/1048576).toFixed(1)+" MB/s";
+  if(bps>=1024)return Math.round(bps/1024)+" KB/s";
+  return Math.round(bps)+" B/s";
+}
+
 /* One block per REAL logical CPU, each filled by that core's own load. The
    count is len(per_core), never a round number chosen for looks: a block
    IS a core, so 16 cores draw 16 blocks and 32 draw 32. */
@@ -724,23 +774,35 @@ function gaugeTicks(p){
 }
 
 /* shape: "cores" | "bar" | "gauge" | null. null renders no indicator at
-   all -- absence is never drawn as a measurement, in any of the three. */
-function metric(label,value,sub,shape,data){
+   all -- absence is never drawn as a measurement, in any of the three.
+   opts.spark adds the moving line; opts.aux adds secondary readings the
+   hardware may or may not report. */
+function metric(label,value,sub,shape,data,opts){
+  opts=opts||{};
   var body='<div class="lbl">'+esc(label)+'</div>'
    +(value==null
       ? '<div class="val na">Unavailable</div><div class="sub">'+esc(sub)+'</div>'
       : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>');
 
+  var aux="";
+  if(opts.aux && opts.aux.length){
+    aux='<div class="aux">'+opts.aux.map(function(a){
+      return esc(a[0])+" <b>"+esc(a[1])+"</b>";
+    }).join("")+'</div>';
+  }
+  var spark=opts.spark ? sparkline(opts.spark,opts.sparkMax) : "";
+
   if(shape==="cores" && data && data.length)
-    return '<div class="metric">'+body+'<div class="cores">'+coreRow(data)+'</div></div>';
+    return '<div class="metric">'+body+'<div class="cores">'+coreRow(data)+'</div>'
+      +spark+aux+'</div>';
   if(shape==="bar" && data!=null)
     return '<div class="metric">'+body
-      +'<div class="bar"><i style="width:'+clamp(data)+'%"></i></div></div>';
+      +'<div class="bar"><i style="width:'+clamp(data)+'%"></i></div>'+spark+aux+'</div>';
   if(shape==="gauge" && data!=null)
-    return '<div class="metric has-gauge"><div>'+body+'</div>'
+    return '<div class="metric has-gauge"><div style="flex:1;min-width:0">'+body+spark+aux+'</div>'
       +'<div class="gauge"><svg viewBox="0 0 100 100">'+gaugeTicks(clamp(data))+'</svg>'
       +'<div class="gv">'+Math.round(clamp(data))+'%</div></div></div>';
-  return '<div class="metric">'+body+'</div>';
+  return '<div class="metric">'+body+aux+'</div>';
 }
 function paintHealth(tl){
   if(!tl)return;
@@ -755,17 +817,44 @@ function paintHealth(tl){
       ? c.cores_logical+" threads on "+c.cores_physical+" cores"
       : (c.cores_logical||0)+" cores";
   }
+  var h=tl.history||[];
+  function series(key){return h.map(function(x){return x[key]})}
+
+  /* Only what this hardware actually reported. nvidia-smi answers [N/A]
+     for anything the card does not expose, and workstation.py drops those
+     keys rather than zero-filling -- so an absent sensor shows no chip at
+     all instead of a convincing 0. */
+  var gpuAux=[];
+  if(g&&g.temp_c!=null)   gpuAux.push(["temp", Math.round(g.temp_c)+"°C"]);
+  if(g&&g.power_w!=null)  gpuAux.push(["power", g.power_w.toFixed(1)+" W"]);
+  if(g&&g.clock_mhz!=null)gpuAux.push(["clock", Math.round(g.clock_mhz)+" MHz"]);
+
+  var io=tl.io||null;
+  var diskAux=[], memAux=[];
+  if(io){
+    diskAux.push(["read", rate(io.disk_read_bps)]);
+    diskAux.push(["write", rate(io.disk_write_bps)]);
+    memAux.push(["net", rate(io.net_recv_bps+io.net_sent_bps)]);
+  }
+
   document.getElementById("health").innerHTML=
-     metric("CPU", c?pct(c.percent):null, cpuSub, "cores", c?c.per_core:null)
+     metric("CPU", c?pct(c.percent):null, cpuSub, "cores", c?c.per_core:null,
+            {spark:series("cpu"), sparkMax:100})
    + metric("Memory", m?gb(m.used_bytes):null,
             m?"of "+gb(m.total_bytes):"psutil not installed",
-            "bar", m?m.percent:null)
+            "bar", m?m.percent:null,
+            {spark:series("memory"), sparkMax:100, aux:memAux})
    + metric("GPU", g?pct(g.percent):null,
             g?gb(g.vram_used_bytes)+" / "+gb(g.vram_total_bytes)+" VRAM":"No supported GPU was detected.",
-            "gauge", g?g.percent:null)
+            "gauge", g?g.percent:null,
+            {spark:series("gpu"), sparkMax:100, aux:gpuAux})
    + metric("Storage", s?gb(s.free_bytes)+" free":null,
             s?"of "+gb(s.total_bytes):"Unavailable",
-            "bar", s?s.percent:null);
+            "bar", s?s.percent:null,
+            /* Throughput, not capacity -- a disk that is 90% full is not
+               a disk that is busy, and the line has to answer the second
+               question since the bar already answers the first. */
+            {spark:series("disk_bps"), aux:diskAux});
   document.getElementById("stamp").textContent="refreshed just now";
 }
 
@@ -1060,8 +1149,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 import workstation
                 force = (qs.get("gpu") or [""])[0] == "force"
-                self._send(200, json.dumps(
-                    workstation.snapshot(force_gpu=force)).encode("utf-8"))
+                payload = workstation.snapshot(force_gpu=force)
+                # The samples this process has taken so far, so the page can
+                # draw a moving line rather than re-deriving one client-side
+                # from readings it would have to remember itself. In memory
+                # only -- see workstation.history().
+                payload["history"] = workstation.history()
+                self._send(200, json.dumps(payload).encode("utf-8"))
             except Exception as exc:
                 self._send(200, json.dumps({"error": str(exc), "cpu": None,
                                             "memory": None, "storage": None,
