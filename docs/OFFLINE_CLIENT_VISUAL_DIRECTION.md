@@ -388,45 +388,25 @@ So the shape may be borrowed; the meaning may not.
 
 ---
 
-## 14. Deliberately NOT decided yet
+## 14. Resolved
 
-Waiting on the further references:
+All references are in. Every question this document held open is now
+decided, and the decisions live in
+[OFFLINE_CLIENT_UI_SPEC.md](OFFLINE_CLIENT_UI_SPEC.md). Recorded here so
+the reasoning stays with the research that produced it.
 
-1. **Default theme** — light or dark.
-2. **The accent** — whether Logix keeps a blue, and which one. Current
-   `#2F5BEA` is provisional and sits close to Reference 02.
-3. **Exact palette and surface levels** for both themes.
-4. **Density scale** — comfortable versus compact, and whether it is a
-   user setting.
-5. **Icons at all** — currently none. Both references use them in nav;
-   Logix may not need any, and every one added is inlined weight.
-6. **Sparklines from an in-memory buffer** (§11) — real data, but a
-   functional change.
-7. **Whether the workstation subtitle is surfaced** given it has no local
-   source (§9).
-8. **Nav shape** — full sidebar versus the icon rail of the third style of
-   reference layout.
-9. **Whether Overview and Logs share one shell** or Logs gets its own
-   header treatment.
-10. **Whether the current-usage card is inverted to the accent** (Ref 03)
-    or merely larger and quieter than its neighbours.
-11. **Segmented control versus dropdown** for the Logs range (Ref 04).
-12. **Whether telemetry is four cards or one grouped panel** (Refs 01, 05
-    independently suggest the panel).
-
-## 15. What changes in the current implementation
-
-Recorded for when work resumes — not to be acted on yet:
-
-| Now | Direction |
-|---|---|
-| Station name is a plain heading | First-class identity, present on every view, pinned in nav |
-| Current usage is a peer card | Visually dominant, distinct from the metric row |
-| Health row is four loose cards | One grouped band, per Reference 01 |
-| Light only, colours hard-coded | Tokenised palette, dark theme possible |
-| Utilization bars | Open: bars, or true sparklines from an in-memory buffer |
-| Table is serviceable | Density, tabular figures and alignment tuned |
-| No empty-state design beyond text | Idle and no-data states designed as states |
-
-Nothing in this table justifies touching the API, the data model, the
-server, YASB, or the tests.
+| Was open | Decided | Why |
+|---|---|---|
+| Default theme | **Light**, dark opt-in | A shared lab machine is used briefly, by many people, in a lit room. Dark loses contrast under overhead light and haloes for astigmatic readers. Dark still ships because compute labs run dim at night. |
+| Accent | **`#1A5D6E`** petrol | `#2F5BEA` sat within a few degrees of Reference 02 and reads as generic SaaS indigo. Petrol reads as instrumentation, is distinct from all five references, and carries white text at ~7:1. |
+| Nav shape | **Sidebar, 208px, text-only** | Four destinations. An icon rail needs icons to be legible; icons need a package or hand-drawn SVG, and neither buys clarity here. |
+| Icons | **Text + 3 CSS shapes + 1 inline SVG** | Smallest thing that works and adds no dependency. |
+| Telemetry shape | **One grouped panel** | References 01 and 05 reached this independently from opposite directions. Four boxes imply four subjects; this is one machine. |
+| Bars vs arcs vs rings | **3px horizontal bars** | Least decorative form that still shows proportion. Two divs, no SVG, legible at 3px. |
+| Current usage treatment | **Tint + 2px accent left edge** | Reference 03 inverts a whole card; at this size that becomes a coloured slab. Important, not loud. |
+| Range control | **Segmented** | Four options, used constantly, current value readable without opening anything. |
+| Table density | **Compact, 36px rows** | A full lab day should fit without scrolling. |
+| Details | **Side sheet** | Keeps the row visible behind it and returns the reader to their place. |
+| Page order | Health above usage, **usage accented** | Order follows the requested composition; emphasis follows the product hierarchy. Set independently, on purpose. |
+| Sparklines from a ring buffer | **No** | Reference 05 makes the strongest case for it, but it is a functional change to satisfy a visual want. Revisit only if someone asks to watch a load over time. |
+| Workstation subtitle | **Hostname, or nothing** | `location` and `category` are server-side only. The block closes up cleanly when absent rather than inviting invented text. |
