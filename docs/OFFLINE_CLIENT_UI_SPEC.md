@@ -700,3 +700,146 @@ Not to be added, at any point, for any reason:
 - A pending count on a device that does not sync
 - React, Vue, Tailwind, Bootstrap, any framework
 - A build step, a CDN, a runtime webfont, a chart library, Electron
+
+---
+
+# Logs and Server — resolved design
+
+Added after the Overview work settled. Every number below was measured
+against a seeded 10,000-session database (20,000 event rows, 7.4 MB), which
+is roughly seven years of a workstation logging four sessions a day.
+
+## L1. Why Logs needed an architecture change, not a restyle
+
+The original Logs page fetched every session in the range and filtered in
+the browser. At 10,000 sessions that is:
+
+```
+  fetch_physical (SQL)      99 ms
+  build_sessions (pairing) 183 ms      <- the majority
+  ------------------------------
+  total                    290 ms
+  JSON to the browser     2.01 MB      plus 10,000 DOM rows
+```
+
+The pairing dominates because it walks every event to match STARTs with
+ENDs. But a session-level query is nearly free, because the indexes for it
+already exist:
+
+```
+  newest 50 session ids     12 ms
+  COUNT(DISTINCT sid)        1 ms
+```
+
+So the page is fetched at the SESSION level first, and only those
+sessions' rows are read and paired:
+
+```
+  no search      ids 14 ms | rows 1 ms | pair 1 ms |  16 ms total
+  search "dftb"  ids 39 ms | rows 1 ms | pair 1 ms |  41 ms total
+  search "user7" ids 28 ms | rows 1 ms | pair 1 ms |  29 ms total
+```
+
+18x faster, and the payload drops from 2.01 MB to about 10 KB.
+
+**Search moves to SQL as a consequence, not as a preference.** Once the
+browser holds one page instead of the whole history, a client-side filter
+would only search the page — which looks like it works and quietly is not
+a search at all. That coupling is the real reason for the change.
+
+## L2. Pagination
+
+**LIMIT/OFFSET over session ids, 50 per page, with an explicit "Load more".**
+
+Not cursor-based: OFFSET's weakness is drift when rows are inserted
+mid-scroll, and here the only writer is this workstation appending its own
+sessions at the newest end while the reader is paging backwards through
+older ones. Not infinite scroll: a person auditing history needs to know
+whether they have reached the end, and an explicit control says so.
+
+## L3. Table
+
+Density **compact**, rows 36px, cells `--space-3`, text `--text-md`.
+Columns, in weight order:
+
+```
+DATE      START     USER            PURPOSE          JOB        DURATION  SYNC
+18 Aug    08:41     Rani            DFTB Parameter…  Simulation 02:34:17  ● Synced
+                    000000000                        258026
+```
+
+NIM sits under the name in `--text-sm --text-faint`: present for audit,
+never competing with the name. Job type and id stack the same way. Row
+hover `--surface-subtle`, whole row focusable, Enter opens details.
+
+## L4. Active session in the table
+
+`End` renders an em dash — never a fabricated timestamp — `Duration` runs
+live, and the state cell reads `● ACTIVE` in `--accent`. No row tinting: a
+coloured row in a table of 50 reads as an alert, and this is just the one
+that has not finished yet.
+
+## L5. Toolbar
+
+One row, in this order:
+
+```
+[ Search sessions        Ctrl+K ]  [Today][7 days][30 days][All]  [User ▾] [Job ▾] [Sync ▾]  [ Export ]
+```
+
+Segmented control for the range (four options, constantly used, current
+value readable without opening anything). Three dropdowns, populated from
+what the database actually contains — a filter listing job types nobody has
+ever used is noise. **No Custom range control**: it would be a fifth
+segment plus two date pickers to serve a case the four presets already
+cover, and Export carries whatever range is selected anyway.
+
+## L6. Export respects the view
+
+Export sends the **current range, search and filters**. Exporting the whole
+database while the screen shows a filtered subset is the kind of quiet
+mismatch that makes a report untrustworthy. XLSX when openpyxl is present,
+CSV otherwise, and the note names the file that was saved.
+
+## S1. Server page
+
+Three groups, quieter than Overview, no telemetry:
+
+```
+  CONNECTION       url · state · last successful contact
+  SYNCHRONIZATION  privacy mode · state · pending · last sync · last error
+  ACTIONS          only the ones that can do something
+```
+
+## S2. Actions are conditional, not disabled
+
+`Sync now` appears only when sync is permitted and rows are pending.
+`Retry` only after a failure. `Test connection` only when a server is
+configured. Local-only shows none, because there is nothing to fix — a
+greyed-out button still invites a click and still implies the feature
+half-applies.
+
+## S3. Error text comes from the failure class
+
+The structured classification added earlier is what the UI branches on;
+no string is parsed:
+
+| class | user-facing |
+|---|---|
+| `network` | Server could not be reached. |
+| `auth` | The server rejected this workstation's credentials. |
+| `rejected` | The server rejected the data sent. |
+| `server` | The server reported an internal error. |
+| `unknown` | Synchronization failed. |
+
+The raw `last_error` stays visible in a diagnostics line beneath, because
+the person debugging is often the same person reading the page.
+
+## S4. This changes one stated invariant
+
+`report_server.py` has always documented itself as read-only. `Sync now`
+and `Retry` break that: they trigger the real sync, which marks rows
+synced locally and posts them. The change is deliberate and narrow — the
+endpoints take no parameters and can only run the existing sync path, so
+there is still no way to write arbitrary data through this server — but
+the docstring is updated rather than left to mislead.
