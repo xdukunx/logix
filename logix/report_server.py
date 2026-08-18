@@ -269,291 +269,490 @@ def _overview(state):
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Logix</title>
 <style>
+/* ── tokens ─────────────────────────────────────────────────────────────
+   Light is the default. A shared lab workstation is used briefly, by many
+   people, in a room lit for working. Dark is opt-in and gets its own
+   contrast ladder with a re-picked accent -- it is not a filter. */
 :root{
-  --bg:#F7F6F3; --surface:#FFFFFF; --ink:#17161C; --ink-2:#55525E;
-  --ink-3:#8B8896; --line:#E4E2DC; --line-2:#EFEDE8;
-  --accent:#2F5BEA; --ok:#2E7D5B; --warn:#9A6B12; --err:#B4442E;
+  --bg:#F6F5F2; --surface:#FFFFFF; --surface-subtle:#FBFAF8;
+  --surface-accent:#EEF4F6; --border:#E3E0DA; --border-strong:#CFCBC3;
+  --text:#14161A; --text-muted:#565C63; --text-faint:#8A9098;
+  --accent:#1A5D6E; --accent-hover:#144A58; --accent-ink:#FFFFFF;
+  --ok:#2E6F4E; --warn:#8A5A12; --err:#A33A2A;
+
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
   --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-5:24px; --space-6:32px; --space-7:48px;
+  --radius-sm:4px; --radius-md:8px; --radius-lg:12px;
+  --duration-fast:120ms; --duration-normal:180ms;
+  --ease:cubic-bezier(.2,.6,.2,1);
 }
+:root[data-theme="dark"]{
+  --bg:#0F1113; --surface:#16191C; --surface-subtle:#1B1F23;
+  --surface-accent:#12272E; --border:#262B30; --border-strong:#373D44;
+  --text:#E8EAEC; --text-muted:#9AA1A9; --text-faint:#6B727A;
+  --accent:#4FB3C9; --accent-hover:#6BC6D9; --accent-ink:#0F1113;
+  --ok:#5FB98A; --warn:#D4A257; --err:#E0796A;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F1113; --surface:#16191C; --surface-subtle:#1B1F23;
+    --surface-accent:#12272E; --border:#262B30; --border-strong:#373D44;
+    --text:#E8EAEC; --text-muted:#9AA1A9; --text-faint:#6B727A;
+    --accent:#4FB3C9; --accent-hover:#6BC6D9; --accent-ink:#0F1113;
+    --ok:#5FB98A; --warn:#D4A257; --err:#E0796A;
+  }
+}
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
-  -webkit-font-smoothing:antialiased}
-.app{display:grid;grid-template-columns:196px 1fr;min-height:100vh}
-nav{border-right:1px solid var(--line);padding:22px 14px;position:sticky;top:0;height:100vh}
-.brand{font-size:13px;font-weight:680;letter-spacing:.14em;padding:0 10px 20px}
-nav a{display:block;padding:8px 10px;margin-bottom:2px;border-radius:6px;
-  color:var(--ink-2);text-decoration:none;font-size:13px;cursor:pointer}
-nav a:hover{background:var(--line-2);color:var(--ink)}
-nav a.on{background:var(--ink);color:#fff}
-nav a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{
-  outline:2px solid var(--accent);outline-offset:2px}
-main{padding:30px 34px 60px;max-width:1180px}
-header.top{display:flex;justify-content:space-between;align-items:flex-end;
-  gap:20px;padding-bottom:22px;border-bottom:1px solid var(--line);margin-bottom:26px}
-.eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
-h1{margin:4px 0 2px;font-size:27px;font-weight:640;letter-spacing:-.02em}
-.sub{color:var(--ink-2);font-size:13px}
-.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;
-  border:1px solid var(--line);border-radius:999px;background:var(--surface);
-  font-size:12px;white-space:nowrap}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3);flex:none}
-.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)}
-.dot.err{background:var(--err)}
-h2{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
-  margin:32px 0 12px;font-weight:600}
-h2:first-of-type{margin-top:0}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:12px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:15px 16px}
-.metric{font-size:25px;font-weight:620;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.metric.na{font-size:15px;font-weight:500;color:var(--ink-3)}
-.label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:9px}
-.foot{font-size:12px;color:var(--ink-2);margin-top:5px;font-variant-numeric:tabular-nums}
-.bar{height:3px;background:var(--line-2);border-radius:2px;margin-top:11px;overflow:hidden}
-.bar i{display:block;height:100%;background:var(--ink);border-radius:2px}
-.usage{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:20px 22px}
-.usage .who{font-size:17px;font-weight:620}
-.usage .what{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:12px 0 4px}
-.usage .meta{color:var(--ink-2);font-size:13px}
-.clock{font-family:var(--mono);font-size:30px;font-weight:600;font-variant-numeric:tabular-nums}
-.row{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}
-.empty{background:var(--surface);border:1px dashed var(--line);border-radius:9px;
-  padding:30px;text-align:center;color:var(--ink-2)}
-.empty b{display:block;color:var(--ink);font-weight:600;margin-bottom:4px}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:400 13px/1.55 var(--font);
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+/* ── shell ───────────────────────────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:208px 1fr;min-height:100vh}
+.side{border-right:1px solid var(--border);padding:var(--space-5) var(--space-3);
+  display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.mark{font-size:12px;font-weight:700;letter-spacing:.16em;color:var(--text);
+  padding:0 var(--space-2) var(--space-6)}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav a{display:block;padding:var(--space-2) var(--space-3);color:var(--text-muted);
+  text-decoration:none;border-radius:var(--radius-sm);cursor:pointer;
+  border-left:2px solid transparent;transition:background var(--duration-fast) var(--ease)}
+.nav a:hover{background:var(--surface-subtle);color:var(--text)}
+.nav a[aria-current="page"]{background:var(--surface-accent);color:var(--text);
+  border-left-color:var(--accent)}
+.nav-rule{height:1px;background:var(--border);margin:var(--space-3) var(--space-2)}
+.side-foot{margin-top:auto;padding-top:var(--space-4)}
+.chip{border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:var(--space-2) var(--space-3);background:var(--surface)}
+.chip b{display:block;font-size:13px;font-weight:600;letter-spacing:-.01em}
+.chip span{font-size:11px;color:var(--text-faint)}
+
+main{padding:var(--space-7) var(--space-6) var(--space-7);max-width:1180px;width:100%}
+
+/* ── workstation context ─────────────────────────────────────────────── */
+.ctx{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-5);
+  padding-bottom:var(--space-5);border-bottom:1px solid var(--border);margin-bottom:var(--space-6)}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint)}
+.station{font-size:26px;font-weight:640;letter-spacing:-.02em;margin:var(--space-1) 0 0}
+.station-sub{font-size:12px;color:var(--text-muted)}
+.station-sub:empty{display:none}
+
+/* ── status: mark + words, never colour alone ────────────────────────── */
+.st{display:inline-flex;align-items:center;gap:var(--space-1);font-size:12px;
+  color:var(--text-muted);white-space:nowrap}
+.st .mk{width:7px;height:7px;border-radius:50%;background:var(--text-faint);flex:none}
+.st.ok .mk{background:var(--ok)} .st.warn .mk{background:var(--warn)}
+.st.err .mk{background:var(--err)} .st.act .mk{background:var(--accent)}
+.st.hollow .mk{background:transparent;border:1.5px solid var(--warn)}
+
+h2.sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint);margin:0 0 var(--space-3)}
+.sec-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-3)}
+.sec-row h2{margin:0}
+.stamp{font-size:11px;color:var(--text-faint)}
+
+/* ── health: ONE panel, four readings of one machine ─────────────────── */
+.health{border:1px solid var(--border);border-radius:var(--radius-md);
+  background:var(--surface);display:grid;grid-template-columns:repeat(4,1fr);
+  margin-bottom:var(--space-5)}
+.metric{padding:var(--space-4);border-left:1px solid var(--border)}
+.metric:first-child{border-left:0}
+.metric .lbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:var(--space-2)}
+.metric .val{font-size:26px;font-weight:640;letter-spacing:-.02em;line-height:1.15}
+.metric .val.na{font-size:13px;font-weight:400;color:var(--text-faint);line-height:1.55;
+  padding:6px 0 5px}
+.metric .sub{font-size:12px;color:var(--text-muted);margin-top:2px}
+.bar{height:3px;background:var(--border);border-radius:2px;margin-top:var(--space-3);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--text);border-radius:2px}
+
+/* ── current usage: the one accented object ──────────────────────────── */
+.usage{background:var(--surface-accent);border:1px solid var(--border);
+  border-left:2px solid var(--accent);border-radius:var(--radius-md);
+  padding:var(--space-4) var(--space-5);margin-bottom:var(--space-6)}
+.usage-top{display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:var(--space-4)}
+.usage-body{display:flex;justify-content:space-between;align-items:flex-start;
+  gap:var(--space-5);flex-wrap:wrap}
+.purpose{font-size:20px;font-weight:600;letter-spacing:-.01em;margin:0 0 var(--space-1)}
+.who{font-size:15px;font-weight:600}
+.who span{color:var(--text-muted);font-weight:400}
+.meta{font-size:12px;color:var(--text-muted);margin-top:var(--space-1)}
+.clock{font-family:var(--mono);font-size:34px;font-weight:600;letter-spacing:-.01em;
+  line-height:1.05}
+.usage-foot{display:flex;justify-content:space-between;align-items:center;
+  margin-top:var(--space-4);gap:var(--space-3);flex-wrap:wrap}
+
+/* ── recent: rows on the page, not a card ────────────────────────────── */
+.recent{border-top:1px solid var(--border)}
+.rrow{display:grid;grid-template-columns:74px 1fr auto;gap:var(--space-3);
+  padding:var(--space-3) var(--space-2);border-bottom:1px solid var(--border);
+  cursor:pointer;align-items:baseline;transition:background var(--duration-fast) var(--ease)}
+.rrow:hover{background:var(--surface-subtle)}
+.rrow .t{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
+.rrow .n{font-weight:600}
+.rrow .p{color:var(--text-muted)}
+.rrow .d{font-family:var(--mono);font-size:12px;text-align:right}
+.after{display:flex;justify-content:flex-end;margin-top:var(--space-4)}
+
+/* ── controls ────────────────────────────────────────────────────────── */
+button{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);background:var(--surface);color:var(--text);cursor:pointer;
+  transition:background var(--duration-fast) var(--ease)}
+button:hover{background:var(--surface-subtle)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.primary:hover{background:var(--accent-hover)}
+button.quiet{border-color:transparent;background:none;color:var(--text-muted)}
+button.quiet:hover{background:var(--surface-subtle);color:var(--text)}
+
+.toolbar{display:flex;gap:var(--space-3);align-items:center;flex-wrap:wrap;
+  margin-bottom:var(--space-4)}
+.field{position:relative;width:260px}
+.field input{width:100%;font:inherit;font-size:13px;padding:6px 62px 6px 10px;
+  border:1px solid var(--border);border-radius:var(--radius-sm);
+  background:var(--surface);color:var(--text)}
+.field kbd{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  font:inherit;font-size:11px;color:var(--text-faint);border:1px solid var(--border);
+  border-radius:3px;padding:1px 5px;background:var(--surface-subtle);pointer-events:none}
+select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid var(--border);
+  border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
+
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-sm);
+  overflow:hidden}
+.seg button{border:0;border-left:1px solid var(--border);border-radius:0;
+  padding:5px 11px;font-size:12px;background:var(--surface);color:var(--text-muted)}
+.seg button:first-child{border-left:0}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.spacer{flex:1}
+
+/* ── table ───────────────────────────────────────────────────────────── */
 table{width:100%;border-collapse:collapse;background:var(--surface);
-  border:1px solid var(--line);border-radius:9px;overflow:hidden}
-th{text-align:left;font-size:11px;letter-spacing:.07em;text-transform:uppercase;
-  color:var(--ink-3);font-weight:600;padding:11px 13px;border-bottom:1px solid var(--line)}
-td{padding:11px 13px;border-bottom:1px solid var(--line-2);font-size:13px;vertical-align:top}
-tr:last-child td{border-bottom:0}
-tbody tr{cursor:pointer}
-tbody tr:hover{background:#FBFAF8}
-.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-.mut{color:var(--ink-3)}
-.tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:13px}
-input,select{font:inherit;padding:7px 10px;border:1px solid var(--line);
-  border-radius:6px;background:var(--surface);color:var(--ink)}
-input[type=search]{min-width:220px}
-button{font:inherit;font-size:13px;padding:7px 13px;border:1px solid var(--line);
-  border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
-button:hover{background:var(--line-2)}
-button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
-.sheet{position:fixed;inset:0;background:rgba(23,22,28,.28);display:none;z-index:9}
-.sheet.open{display:block}
-.sheet .panel{position:absolute;right:0;top:0;bottom:0;width:min(430px,94vw);
-  background:var(--surface);border-left:1px solid var(--line);
-  padding:26px 26px 40px;overflow:auto}
-.sheet h3{margin:0 0 18px;font-size:17px;font-weight:640}
-.kv{display:grid;grid-template-columns:112px 1fr;gap:7px 14px;font-size:13px}
-.kv dt{color:var(--ink-3)} .kv dd{margin:0}
-.close{position:absolute;top:18px;right:20px;border:0;background:none;font-size:20px;
-  line-height:1;color:var(--ink-3);padding:4px 8px}
-.note{font-size:12px;color:var(--ink-2);margin-top:6px}
-.hide{display:none}
-@media(max-width:820px){
-  .app{grid-template-columns:1fr}
-  nav{position:static;height:auto;display:flex;gap:4px;overflow-x:auto;
-    border-right:0;border-bottom:1px solid var(--line);padding:12px}
-  .brand{padding:0 8px 0 4px;align-self:center}
-  main{padding:20px 16px 50px}
+  border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden}
+th{text-align:left;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint);padding:var(--space-3);border-bottom:1px solid var(--border-strong);
+  white-space:nowrap}
+td{padding:var(--space-3);border-bottom:1px solid var(--border);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tbody tr{cursor:pointer;transition:background var(--duration-fast) var(--ease)}
+tbody tr:hover{background:var(--surface-subtle)}
+tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.num{font-family:var(--mono);font-size:12px;white-space:nowrap}
+.r{text-align:right}
+.mut{color:var(--text-muted)}
+.faint{color:var(--text-faint)}
+.tally{margin-top:var(--space-3);font-size:12px;color:var(--text-muted)}
+
+/* ── server ──────────────────────────────────────────────────────────── */
+.card{border:1px solid var(--border);border-radius:var(--radius-md);
+  background:var(--surface);padding:var(--space-5);max-width:560px}
+.card .head{font-size:15px;font-weight:600;margin-bottom:2px}
+.card .line{font-size:13px;color:var(--text-muted)}
+.kv{display:grid;grid-template-columns:132px 1fr;gap:var(--space-2) var(--space-4);
+  font-size:13px;margin-top:var(--space-5)}
+.kv dt{color:var(--text-faint)} .kv dd{margin:0;word-break:break-word}
+.actions{display:flex;gap:var(--space-2);margin-top:var(--space-5)}
+.actions:empty{display:none}
+
+/* ── empty ───────────────────────────────────────────────────────────── */
+.empty{border:1px dashed var(--border);border-radius:var(--radius-md);
+  background:var(--surface);padding:var(--space-7) var(--space-5);text-align:center}
+.empty b{display:block;font-size:15px;font-weight:600;margin-bottom:var(--space-1)}
+.empty span{font-size:13px;color:var(--text-muted)}
+
+/* ── details sheet: the only shadow in the product ───────────────────── */
+.scrim{position:fixed;inset:0;background:rgba(20,22,26,.28);display:none;z-index:20}
+.scrim.open{display:block}
+.sheet{position:absolute;right:0;top:0;bottom:0;width:min(420px,100vw);
+  background:var(--surface);border-left:1px solid var(--border);
+  border-radius:var(--radius-lg) 0 0 var(--radius-lg);
+  box-shadow:-16px 0 40px rgba(20,22,26,.16);
+  padding:var(--space-5);overflow:auto;
+  animation:slide var(--duration-normal) var(--ease)}
+@keyframes slide{from{transform:translateX(16px);opacity:.6}to{transform:none;opacity:1}}
+.sheet h3{margin:0 0 var(--space-5);font-size:15px;font-weight:600}
+.grp{margin-bottom:var(--space-5)}
+.grp h4{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint);margin:0 0 var(--space-2)}
+.grp dl{display:grid;grid-template-columns:112px 1fr;gap:var(--space-2) var(--space-3);
+  margin:0;font-size:13px}
+.grp dt{color:var(--text-faint)} .grp dd{margin:0;word-break:break-word}
+.prose{font-size:13px;color:var(--text);white-space:pre-wrap}
+.x{position:absolute;top:var(--space-4);right:var(--space-4);border:0;background:none;
+  padding:4px;color:var(--text-faint);line-height:0}
+.x:hover{background:var(--surface-subtle);color:var(--text)}
+.note{font-size:12px;color:var(--text-muted);margin-top:var(--space-2)}
+.hide{display:none!important}
+
+/* ── responsive ──────────────────────────────────────────────────────── */
+@media(max-width:1100px){
+  .health{grid-template-columns:repeat(2,1fr)}
+  .metric:nth-child(3){border-left:0}
+  .metric:nth-child(n+3){border-top:1px solid var(--border)}
+}
+@media(max-width:900px){
+  .shell{grid-template-columns:1fr}
+  .side{position:static;height:auto;flex-direction:row;align-items:center;gap:var(--space-3);
+    border-right:0;border-bottom:1px solid var(--border);padding:var(--space-3) var(--space-4)}
+  .mark{padding:0 var(--space-2) 0 0}
+  .nav{flex-direction:row;gap:var(--space-1)}
+  .nav a{border-left:0;border-bottom:2px solid transparent}
+  .nav a[aria-current="page"]{border-left-color:transparent;border-bottom-color:var(--accent)}
+  .nav-rule,.side-foot{display:none}
+  main{padding:var(--space-5) var(--space-4) var(--space-7)}
+  th.opt,td.opt{display:none}
+}
+@media(max-width:560px){
+  .health{grid-template-columns:1fr}
+  .metric{border-left:0;border-top:1px solid var(--border)}
+  .metric:first-child{border-top:0}
+  .field{width:100%}
+  .rrow{grid-template-columns:64px 1fr auto}
+  .rrow .p{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
 }
 </style>
 
-<div class="app">
-<nav>
-  <div class="brand">LOGIX</div>
-  <a id="nav-overview" class="on" onclick="go('overview')" tabindex="0">Overview</a>
-  <a id="nav-logs" onclick="go('logs')" tabindex="0">Logs</a>
-  <a id="nav-server" onclick="go('server')" tabindex="0">Server</a>
-</nav>
-
-<main>
-  <header class="top">
-    <div>
-      <div class="eyebrow">You are using workstation</div>
-      <h1 id="station">&mdash;</h1>
-      <div class="sub" id="stationSub"></div>
+<div class="shell">
+  <aside class="side">
+    <div class="mark">LOGIX</div>
+    <nav class="nav" aria-label="Sections">
+      <a id="nav-overview" aria-current="page" onclick="go('overview')" tabindex="0">Overview</a>
+      <a id="nav-logs" onclick="go('logs')" tabindex="0">Logs</a>
+      <a id="nav-server" onclick="go('server')" tabindex="0">Server</a>
+    </nav>
+    <div class="side-foot">
+      <div class="chip"><b id="chipName">&mdash;</b><span id="chipSub"></span></div>
     </div>
-    <span class="pill"><span class="dot" id="syncDot"></span><span id="syncPill">Checking</span></span>
-  </header>
+  </aside>
 
-  <section id="v-overview">
-    <h2>Current workstation</h2>
-    <div class="grid" id="tele"></div>
-    <h2>Current usage</h2>
-    <div id="usage"></div>
-    <h2>Recent logs</h2>
-    <div id="recent"></div>
-    <div style="margin-top:12px"><button onclick="go('logs')">View all logs</button></div>
-  </section>
+  <main>
+    <header class="ctx">
+      <div>
+        <div class="eyebrow">You are using workstation</div>
+        <h1 class="station" id="station">&mdash;</h1>
+        <div class="station-sub" id="stationSub"></div>
+      </div>
+      <span class="st" id="hdrSt"><span class="mk"></span><span id="hdrTxt">Checking</span></span>
+    </header>
 
-  <section id="v-logs" class="hide">
-    <h2>Logs</h2>
-    <div class="tools">
-      <input type="search" id="q" placeholder="Search name, NIM, purpose" oninput="renderLogs()">
-      <select id="range" onchange="loadLogs()">
-        <option value="today">Today</option>
-        <option value="7">Last 7 days</option>
-        <option value="30">Last 30 days</option>
-        <option value="all" selected>All time</option>
-      </select>
-      <select id="fstate" onchange="renderLogs()">
-        <option value="">All states</option>
-        <option value="Aktif">Active</option>
-        <option value="Selesai / Finish">Finished</option>
-        <option value="Auto Finish">Auto finish</option>
-      </select>
-      <button class="primary" onclick="doExport()">Export</button>
-    </div>
-    <div id="exportNote" class="note"></div>
-    <div id="logs"></div>
-  </section>
+    <!-- OVERVIEW -->
+    <section id="v-overview">
+      <div class="sec-row">
+        <h2 class="sec">Workstation health</h2>
+        <span class="stamp" id="stamp"></span>
+      </div>
+      <div class="health" id="health"></div>
 
-  <section id="v-server" class="hide">
-    <h2>Central server</h2>
-    <div class="card" id="serverCard"></div>
-  </section>
-</main>
+      <div id="usage"></div>
+
+      <div class="sec-row"><h2 class="sec">Recent</h2></div>
+      <div id="recent"></div>
+      <div class="after"><button onclick="go('logs')">View all logs</button></div>
+    </section>
+
+    <!-- LOGS -->
+    <section id="v-logs" class="hide">
+      <h2 class="sec">Logs</h2>
+      <div class="toolbar">
+        <div class="field">
+          <input id="q" type="search" placeholder="Search sessions"
+                 aria-label="Search sessions" oninput="renderLogs()">
+          <kbd id="kbd">Ctrl+K</kbd>
+        </div>
+        <div class="seg" id="seg" role="group" aria-label="Time range"></div>
+        <select id="fstate" onchange="renderLogs()" aria-label="Session state">
+          <option value="">All states</option>
+          <option value="Aktif">Active</option>
+          <option value="Selesai / Finish">Finished</option>
+          <option value="Auto Finish">Auto finish</option>
+        </select>
+        <span class="spacer"></span>
+        <button class="primary" onclick="doExport()">Export</button>
+      </div>
+      <div id="exportNote" class="note"></div>
+      <div id="logs"></div>
+      <div class="tally" id="tally"></div>
+    </section>
+
+    <!-- SERVER -->
+    <section id="v-server" class="hide">
+      <h2 class="sec">Central server</h2>
+      <div id="server"></div>
+    </section>
+  </main>
 </div>
 
-<div class="sheet" id="sheet" onclick="if(event.target.id==='sheet')closeSheet()">
-  <div class="panel" role="dialog" aria-label="Session details">
-    <button class="close" onclick="closeSheet()" aria-label="Close">&times;</button>
+<div class="scrim" id="scrim" onclick="if(event.target.id==='scrim')closeSheet()">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Session details">
+    <button class="x" onclick="closeSheet()" aria-label="Close">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+    </button>
     <h3 id="sheetTitle">Session</h3>
-    <dl class="kv" id="sheetBody"></dl>
+    <div id="sheetBody"></div>
   </div>
 </div>
 
 <script>
 var TOKEN=new URLSearchParams(location.search).get("t")||"";
-var OV=null, ROWS=[], SHOWN=[], VIEW="overview";
+var OV=null, ROWS=[], SHOWN=[], VIEW="overview", RANGE="all", LASTFOCUS=null;
+var RANGES=[["today","Today"],["7","7 days"],["30","30 days"],["all","All"]];
+
 function t(u){return u+(u.indexOf("?")<0?"?":"&")+"t="+encodeURIComponent(TOKEN)}
-var ENT={"&":"&amp;","<":"&lt;",">":"&gt;"};
-function esc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return ENT[c]})}
-function fgb(n){if(n==null)return "—";var v=n/1073741824;
-  return (v>=100?v.toFixed(0):v.toFixed(1))+" GB"}
+var ENT={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"};
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return ENT[c]})}
+function dash(s){return (s===null||s===undefined||s==="")?"—":s}
+function gb(n){if(n==null)return null;var v=n/1073741824;return (v>=100?v.toFixed(0):v.toFixed(1))+" GB"}
+function pct(n){return n==null?null:Math.round(n)+"%"}
 
 function go(v){
   VIEW=v;
   ["overview","logs","server"].forEach(function(k){
     document.getElementById("v-"+k).classList.toggle("hide",k!==v);
-    document.getElementById("nav-"+k).classList.toggle("on",k===v);
+    var a=document.getElementById("nav-"+k);
+    if(k===v)a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current");
   });
   if(v==="logs"&&!ROWS.length)loadLogs();
 }
 
-/* The seven states the UX contract defines, never collapsed into "offline".
-   local_only and sync_blocked are calm and successful: nothing is waiting. */
+/* ── the seven contract states, never collapsed ─────────────────────────
+   local_only and sync_blocked are calm and successful: on a device with no
+   server nothing is waiting, and a pending count there would be a lie. */
 function syncView(s){
-  if(!s)return{dot:"",txt:"Unknown",line:"Sync state could not be read."};
-  var st=s.connection_state, n=s.pending_count, cls=s.last_error_class;
-  if(st==="disabled")return{k:"local",dot:"ok",txt:"Local only",
+  if(!s)return{cls:"",txt:"Unknown",line:"Sync state could not be read."};
+  var st=s.connection_state,n=s.pending_count,cls=s.last_error_class;
+  if(st==="disabled")return{cls:"ok",txt:"Local only",quiet:1,
     line:"Stored on this workstation. Nothing needs to be uploaded."};
-  if(st==="blocked")return{k:"blocked",dot:"",txt:"Local only",
-    line:"Synchronization is disabled by policy. Data is stored complete on this workstation."};
-  if(st==="offline"&&cls==="network")return{k:"unavail",dot:"warn",txt:"Server unavailable",
+  if(st==="blocked")return{cls:"",txt:"Synchronization disabled",quiet:1,
+    line:"Disabled by policy. Data is stored complete on this workstation."};
+  if(st==="offline"&&cls==="network")return{cls:"hollow warn",txt:"Server unavailable",retry:1,
     line:(n?n+" change(s) ":"")+"stored safely on this workstation."};
-  if(st==="offline")return{k:"error",dot:"err",txt:"Sync failed",
+  if(st==="offline")return{cls:"err",txt:"Synchronization failed",retry:1,
     line:"The server rejected the last attempt. Local data is safe."};
-  if(n>0)return{k:"pending",dot:"warn",txt:n+" pending",
+  if(n>0)return{cls:"warn",txt:n+" waiting to synchronize",sync:1,
     line:n+" change(s) waiting to synchronize. Local data is safe."};
-  if(st==="connected")return{k:"synced",dot:"ok",txt:"Synced",line:"All changes synchronized."};
-  return{k:"pending",dot:"",txt:"Not yet synced",
+  if(st==="connected")return{cls:"ok",txt:"All changes synchronized",
+    line:"All changes synchronized."};
+  return{cls:"",txt:"Not yet synchronized",
     line:"No synchronization has run on this workstation yet."};
 }
 
-function card(label,value,foot,pct,title){
-  return '<div class="card"'+(title?' title="'+esc(title)+'"':'')+'>'
-    +'<div class="label">'+esc(label)+'</div>'
-    +(value==null?'<div class="metric na">Unavailable</div>'
-                 :'<div class="metric">'+esc(value)+'</div>')
-    +'<div class="foot">'+esc(foot)+'</div>'
-    +(pct==null?'':'<div class="bar"><i style="width:'+Math.max(0,Math.min(100,pct))+'%"></i></div>')
-    +'</div>';
+/* ── telemetry: absent is smaller, quieter, and has NO bar ───────────── */
+function metric(label,value,sub,p){
+  return '<div class="metric"><div class="lbl">'+esc(label)+'</div>'
+   +(value==null
+      ? '<div class="val na">Unavailable</div><div class="sub">'+esc(sub)+'</div>'
+      : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>'
+        +(p==null?'':'<div class="bar"><i style="width:'+Math.max(0,Math.min(100,p))+'%"></i></div>'))
+   +'</div>';
 }
-function paintTele(tl){
+function paintHealth(tl){
   if(!tl)return;
-  var c=tl.cpu,m=tl.memory,g=tl.gpu,st=tl.storage,h="";
-  h+=card("CPU", c?Math.round(c.percent)+"%":null,
-      c?(c.cores_physical?c.cores_physical+" cores · "+c.cores_logical+" threads"
-                         :c.cores_logical+" threads")
-       :"psutil not installed", c?c.percent:null);
-  h+=card("Memory", m?fgb(m.used_bytes):null,
-      m?"of "+fgb(m.total_bytes):"psutil not installed", m?m.percent:null);
-  h+=card("GPU", g?Math.round(g.percent)+"%":null,
-      g?fgb(g.vram_used_bytes)+" / "+fgb(g.vram_total_bytes)+" VRAM":"No GPU detected",
-      g?g.percent:null, g?g.name:"");
-  h+=card("Storage", st?fgb(st.free_bytes)+" free":null,
-      st?"of "+fgb(st.total_bytes):"Unavailable", st?st.percent:null);
-  document.getElementById("tele").innerHTML=h;
+  var c=tl.cpu,m=tl.memory,g=tl.gpu,s=tl.storage;
+  document.getElementById("health").innerHTML=
+     metric("CPU", c?pct(c.percent):null,
+            c?((c.cores_physical?c.cores_physical+" cores":c.cores_logical+" threads")):"psutil not installed",
+            c?c.percent:null)
+   + metric("Memory", m?gb(m.used_bytes):null,
+            m?"of "+gb(m.total_bytes):"psutil not installed", m?m.percent:null)
+   + metric("GPU", g?pct(g.percent):null,
+            g?gb(g.vram_used_bytes)+" / "+gb(g.vram_total_bytes)+" VRAM":"No supported GPU was detected.",
+            g?g.percent:null)
+   + metric("Storage", s?gb(s.free_bytes)+" free":null,
+            s?"of "+gb(s.total_bytes):"Unavailable", s?s.percent:null);
+  document.getElementById("stamp").textContent="refreshed just now";
 }
 
 function paintUsage(a){
   var el=document.getElementById("usage");
-  if(!a){el.innerHTML='<div class="empty"><b>No active usage</b>'
-    +'This workstation is currently idle.</div>';return}
-  var job=[a.job_type,a.job_id?"Job "+a.job_id:""].filter(Boolean).join(" · ")||"—";
-  el.innerHTML='<div class="usage"><div class="row">'
-   +'<div><div class="who">'+esc(a.nama||"Unknown")
-   +(a.nim?' <span class="mut">· '+esc(a.nim)+'</span>':'')+'</div>'
-   +'<div class="what">'+esc(a.tujuan||"—")+'</div>'
+  if(!a){el.innerHTML='<div class="empty" style="margin-bottom:var(--space-6)">'
+    +'<b>No active usage</b><span>This workstation is currently idle.</span></div>';return}
+  var job=[a.job_type,a.job_id?"Job "+a.job_id:"",a.tipe].filter(Boolean).join(" · ")||"—";
+  el.innerHTML='<div class="usage">'
+   +'<div class="usage-top"><span class="eyebrow">Current usage</span>'
+   +'<span class="st act"><span class="mk"></span>ACTIVE</span></div>'
+   +'<div class="usage-body"><div>'
+   +'<h3 class="purpose">'+esc(dash(a.tujuan))+'</h3>'
+   +'<div class="who">'+esc(a.nama||"Unknown")
+   +(a.nim?' <span>· '+esc(a.nim)+'</span>':'')+'</div>'
    +'<div class="meta">'+esc(job)+'</div></div>'
-   +'<div style="text-align:right"><div class="clock">'+esc(a.durasi)+'</div>'
-   +'<div class="meta">started '+esc(a.start)+'</div></div></div>'
-   +'<div style="margin-top:16px"><button onclick="detailActive()">Details</button></div></div>';
+   +'<div class="clock">'+esc(a.durasi)+'</div></div>'
+   +'<div class="usage-foot"><span class="meta">started '+esc(a.start)+'</span>'
+   +'<button onclick="detailActive()">Details</button></div></div>';
 }
 
 function paintRecent(list){
   var el=document.getElementById("recent");
-  if(!list||!list.length){el.innerHTML='<div class="empty"><b>No sessions yet</b>'
-    +'No sessions recorded on this workstation yet.</div>';return}
-  var h='<table><tbody>';
-  list.forEach(function(r,i){
-    h+='<tr onclick="detailRecent('+i+')">'
-      +'<td class="num mut" style="width:78px">'+esc(r.start)+'</td>'
-      +'<td style="width:160px">'+esc(r.nama)+'</td>'
-      +'<td>'+esc(r.tujuan||"—")+'</td>'
-      +'<td class="num" style="text-align:right">'+esc(r.durasi)+'</td></tr>';
-  });
-  el.innerHTML=h+'</tbody></table>';
+  if(!list||!list.length){el.innerHTML='<div class="empty"><b>No sessions recorded</b>'
+    +'<span>No sessions have been recorded on this workstation yet.</span></div>';return}
+  el.innerHTML='<div class="recent">'+list.map(function(r,i){
+    return '<div class="rrow" tabindex="0" data-i="'+i+'">'
+      +'<span class="t">'+esc(r.start)+'</span>'
+      +'<span><span class="n">'+esc(r.nama)+'</span> <span class="p">'+esc(dash(r.tujuan))+'</span></span>'
+      +'<span class="d">'+esc(r.durasi)+'</span></div>';
+  }).join("")+'</div>';
 }
 
 function paintServer(s){
-  var v=syncView(s);
-  var quiet=(v.k==="local"||v.k==="blocked");
-  document.getElementById("serverCard").innerHTML=
-    '<div class="row" style="align-items:center"><div>'
-   +'<div class="metric" style="font-size:19px">'+esc(v.txt)+'</div>'
-   +'<div class="foot">'+esc(v.line)+'</div></div>'
-   +'<span class="pill"><span class="dot '+v.dot+'"></span>'+esc(v.txt)+'</span></div>'
-   +'<div class="kv" style="margin-top:20px">'
+  var v=syncView(s), quiet=!!v.quiet;
+  var acts="";
+  if(v.sync)acts+='<button class="primary" onclick="syncNow()">Sync now</button>';
+  if(v.retry)acts+='<button onclick="syncNow()">Retry</button>';
+  document.getElementById("server").innerHTML='<div class="card">'
+   +'<div class="st '+v.cls+'" style="margin-bottom:var(--space-1)">'
+   +'<span class="mk"></span><span class="head">'+esc(v.txt)+'</span></div>'
+   +'<div class="line">'+esc(v.line)+'</div>'
+   +'<dl class="kv">'
    +'<dt>Server</dt><dd>'+((s&&s.server_configured)?"configured":"not configured")+'</dd>'
-   +'<dt>Privacy mode</dt><dd>'+esc((s&&s.privacy_mode)||"—")+'</dd>'
-   +'<dt>Pending</dt><dd>'+(quiet?"—":esc(s&&s.pending_count!=null?s.pending_count:"—"))+'</dd>'
-   +'<dt>Last success</dt><dd>'+esc((s&&s.last_success)||"—")+'</dd>'
-   +'<dt>Last error</dt><dd>'+esc((s&&s.last_error)||"—")+'</dd></div>';
+   +'<dt>Privacy mode</dt><dd>'+esc(dash(s&&s.privacy_mode))+'</dd>'
+   /* An em dash, never 0: a zero implies a queue that happens to be empty,
+      where the truth is that the question does not apply. */
+   +'<dt>Pending</dt><dd>'+(quiet?"—":esc(dash(s&&s.pending_count)))+'</dd>'
+   +'<dt>Last success</dt><dd>'+esc(dash(s&&s.last_success))+'</dd>'
+   +'<dt>Last error</dt><dd>'+esc(dash(s&&s.last_error))+'</dd></dl>'
+   +'<div class="actions">'+acts+'</div></div>';
 }
+function syncNow(){ loadOverview(); }
 
 function loadOverview(){
   fetch(t("/api/overview")).then(function(r){return r.json()}).then(function(d){
     OV=d;
-    document.getElementById("station").textContent=d.workstation.display;
-    document.getElementById("stationSub").textContent=
-      (d.workstation.display!==d.workstation.hostname)?d.workstation.hostname:"";
+    var w=d.workstation, sub=(w.display!==w.hostname)?w.hostname:"";
+    document.getElementById("station").textContent=w.display;
+    document.getElementById("stationSub").textContent=sub;
+    document.getElementById("chipName").textContent=w.display;
     var v=syncView(d.sync);
-    document.getElementById("syncPill").textContent=v.txt;
-    document.getElementById("syncDot").className="dot "+v.dot;
-    paintTele(d.telemetry); paintUsage(d.active); paintRecent(d.recent); paintServer(d.sync);
+    document.getElementById("chipSub").textContent=v.txt;
+    document.getElementById("hdrTxt").textContent=v.txt;
+    document.getElementById("hdrSt").className="st "+v.cls;
+    paintHealth(d.telemetry); paintUsage(d.active); paintRecent(d.recent); paintServer(d.sync);
   }).catch(function(){});
 }
 function loadTelemetry(){
-  fetch(t("/api/telemetry")).then(function(r){return r.json()}).then(paintTele).catch(function(){});
+  fetch(t("/api/telemetry")).then(function(r){return r.json()}).then(paintHealth).catch(function(){});
 }
+
+/* ── logs ────────────────────────────────────────────────────────────── */
+function paintSeg(){
+  document.getElementById("seg").innerHTML=RANGES.map(function(r){
+    return '<button aria-pressed="'+(r[0]===RANGE)+'" data-r="'+r[0]+'">'
+      +r[1]+'</button>'}).join("");
+}
+function setRange(r){RANGE=r;paintSeg();loadLogs()}
 function loadLogs(){
-  var r=document.getElementById("range").value;
-  fetch(t("/api/sessions?range="+encodeURIComponent(r))).then(function(x){return x.json()})
+  fetch(t("/api/sessions?range="+encodeURIComponent(RANGE)))
+    .then(function(x){return x.json()})
     .then(function(d){ROWS=d.sessions||[];renderLogs()}).catch(function(){});
 }
 function renderLogs(){
@@ -564,72 +763,118 @@ function renderLogs(){
     if(!q)return true;
     return [r.nama,r.nim,r.tujuan,r.job_type,r.job_id].join(" ").toLowerCase().indexOf(q)>=0;
   });
-  var el=document.getElementById("logs");
-  if(!SHOWN.length){el.innerHTML='<div class="empty"><b>No matching sessions</b>'
-    +'Nothing recorded for this filter.</div>';return}
-  var h='<table><thead><tr><th>Start</th><th>End</th><th>Name</th><th>NIM</th>'
-   +'<th>Purpose</th><th>Job</th><th style="text-align:right">Duration</th>'
-   +'<th>State</th></tr></thead><tbody>';
+  var el=document.getElementById("logs"), tally=document.getElementById("tally");
+  if(!SHOWN.length){
+    var empty=ROWS.length
+      ? ['No matching sessions','No session matches this filter.']
+      : ['No sessions in this period','Try a wider date range.'];
+    el.innerHTML='<div class="empty"><b>'+empty[0]+'</b><span>'+empty[1]+'</span></div>';
+    tally.textContent=""; return;
+  }
+  var h='<table><thead><tr><th>Start</th><th>End</th><th>Name</th>'
+   +'<th class="opt">NIM</th><th>Purpose</th><th class="opt">Job</th>'
+   +'<th class="r">Duration</th><th>State</th></tr></thead><tbody>';
   SHOWN.forEach(function(r,i){
     var job=[r.job_type,r.job_id].filter(Boolean).join(" · ")||"—";
-    h+='<tr onclick="detailRow('+i+')">'
+    h+='<tr tabindex="0" data-i="'+i+'">'
      +'<td class="num">'+esc(r.start)+'</td>'
-     +'<td class="num mut">'+esc(r.end||"—")+'</td>'
-     +'<td>'+esc(r.nama)+'</td><td class="num mut">'+esc(r.nim)+'</td>'
-     +'<td>'+esc(r.tujuan||"—")+'</td><td class="mut">'+esc(job)+'</td>'
-     +'<td class="num" style="text-align:right">'+esc(r.durasi)+'</td>'
+     +'<td class="num mut">'+esc(dash(r.end))+'</td>'
+     +'<td>'+esc(r.nama)+'</td>'
+     +'<td class="num mut opt">'+esc(dash(r.nim))+'</td>'
+     +'<td>'+esc(dash(r.tujuan))+'</td>'
+     +'<td class="mut opt">'+esc(job)+'</td>'
+     +'<td class="num r">'+esc(r.durasi)+'</td>'
      +'<td class="mut">'+esc(r.status)+'</td></tr>';
   });
   el.innerHTML=h+'</tbody></table>';
+  tally.textContent=SHOWN.length+(SHOWN.length===1?" session":" sessions");
 }
 
-function sheet(title,pairs){
-  document.getElementById("sheetTitle").textContent=title;
-  document.getElementById("sheetBody").innerHTML=pairs.map(function(p){
-    return "<dt>"+esc(p[0])+"</dt><dd>"+esc(p[1]||"—")+"</dd>"}).join("");
-  document.getElementById("sheet").classList.add("open");
+/* ── details sheet ───────────────────────────────────────────────────── */
+function group(title,pairs){
+  return '<div class="grp"><h4>'+esc(title)+'</h4><dl>'+pairs.map(function(p){
+    return '<dt>'+esc(p[0])+'</dt><dd>'+esc(dash(p[1]))+'</dd>'}).join("")+'</dl></div>';
 }
-function closeSheet(){document.getElementById("sheet").classList.remove("open")}
+function sheet(title,html){
+  LASTFOCUS=document.activeElement;
+  document.getElementById("sheetTitle").textContent=title;
+  document.getElementById("sheetBody").innerHTML=html;
+  document.getElementById("scrim").classList.add("open");
+  document.querySelector(".sheet .x").focus();
+}
+function closeSheet(){
+  document.getElementById("scrim").classList.remove("open");
+  if(LASTFOCUS&&LASTFOCUS.focus)LASTFOCUS.focus();
+}
 document.addEventListener("keydown",function(e){if(e.key==="Escape")closeSheet()});
 
+function body(r,station,syncTxt,localTxt){
+  return group("Identity",[["Name",r.nama],["NIM",r.nim]])
+   +group("Workstation",[["Station",station]])
+   +group("Session",[["Purpose",r.tujuan],["Job type",r.job_type],["Job ID",r.job_id],
+                     ["Access",r.tipe],["Start",r.start],["End",r.end],["Duration",r.durasi]])
+   +'<div class="grp"><h4>Description</h4><div class="prose">'
+     +esc(dash(r.keterangan))+'</div></div>'
+   +group("State",[["Local",localTxt],["Sync",syncTxt]]);
+}
 function detailActive(){
   var a=OV&&OV.active; if(!a)return;
-  sheet("Current session",[
-    ["Name",a.nama],["NIM",a.nim],["Workstation",OV.workstation.display],
-    ["Purpose",a.tujuan],["Job type",a.job_type],["Job ID",a.job_id],
-    ["Access",a.tipe],["Started",a.start],["Duration",a.durasi],
-    ["Description",a.keterangan],["Local status","Stored on this workstation"],
-    ["Sync",syncView(OV.sync).txt]]);
+  sheet("Current session", body(a, OV.workstation.display,
+        syncView(OV.sync).txt, "Stored on this workstation"));
 }
 function detailRow(i){
   var r=SHOWN[i]; if(!r)return;
-  sheet("Session",[
-    ["Name",r.nama],["NIM",r.nim],["Workstation",OV?OV.workstation.display:""],
-    ["Purpose",r.tujuan],["Job type",r.job_type],["Job ID",r.job_id],
-    ["Access",r.tipe],["Start",r.start],["End",r.end],["Duration",r.durasi],
-    ["Description",r.keterangan],["State",r.status]]);
+  sheet("Session", body(r, OV?OV.workstation.display:"",
+        syncView(OV&&OV.sync).txt, "Stored on this workstation"));
 }
 function detailRecent(i){
   var r=(OV&&OV.recent||[])[i]; if(!r)return;
-  sheet("Session",[["Name",r.nama],["NIM",r.nim],["Purpose",r.tujuan],
-    ["Start",r.start],["Duration",r.durasi]]);
+  sheet("Session", group("Identity",[["Name",r.nama],["NIM",r.nim]])
+    +group("Session",[["Purpose",r.tujuan],["Start",r.start],["Duration",r.durasi]]));
 }
 
 function doExport(){
   var note=document.getElementById("exportNote");
   note.textContent="Preparing export…";
-  var r=document.getElementById("range").value;
-  fetch(t("/api/export?range="+encodeURIComponent(r))).then(function(x){return x.json()})
+  fetch(t("/api/export?range="+encodeURIComponent(RANGE)))
+   .then(function(x){return x.json()})
    .then(function(d){
      if(d.ok){note.textContent=d.note||("Exported "+d.name);
               window.location=t("/download?f="+encodeURIComponent(d.name))}
-     else{note.textContent="Export failed: "+d.error}
+     else{note.textContent="Export failed. "+d.error}
    }).catch(function(){note.textContent="Export failed."});
 }
 
+/* Shortcut hint reflects the platform. Displayed only -- the binding ships
+   when the binding ships. */
+if(/Mac|iPhone|iPad/.test(navigator.platform||""))
+  document.getElementById("kbd").textContent="⌘K";
+
+/* Delegated rather than inline. An inline handler needs nested quotes, and
+   this page lives inside a Python triple-quoted string where a backslash
+   escape does not survive -- it silently became a real quote and took the
+   whole script out. Delegation keeps the markup free of both. */
+function delegate(id, pick){
+  var el=document.getElementById(id);
+  function run(e){ var hit=pick(e.target); if(hit!==null&&hit!==undefined) hit(); }
+  el.addEventListener("click", run);
+  el.addEventListener("keydown", function(e){ if(e.key==="Enter"){e.preventDefault();run(e)} });
+}
+delegate("recent", function(t){
+  var r=t.closest?t.closest(".rrow"):null;
+  return r?function(){detailRecent(+r.dataset.i)}:null; });
+delegate("logs", function(t){
+  var r=t.closest?t.closest("tr[data-i]"):null;
+  return r?function(){detailRow(+r.dataset.i)}:null; });
+delegate("seg", function(t){
+  var b=t.closest?t.closest("button[data-r]"):null;
+  return b?function(){setRange(b.dataset.r)}:null; });
+
+paintSeg();
 loadOverview();
 /* Telemetry refreshes on its own timer; the session queries deliberately do
-   not re-run with it -- redrawing a CPU number must not re-query the day. */
+   not run with it. Nothing animates on refresh -- numerals are tabular so a
+   changing digit moves nothing. */
 setInterval(function(){if(VIEW==="overview")loadTelemetry()},2500);
 setInterval(loadOverview,30000);
 </script>
