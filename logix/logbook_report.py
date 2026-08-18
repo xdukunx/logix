@@ -433,6 +433,13 @@ def build_sessions(rows):
             "kategori": kategori,
             "session_id": sid,
             "_active": not bool(end),
+            # A session has reached the server only when EVERY one of its
+            # events has. Reporting it synced while its END is still queued
+            # would tell the reader the record is safely central when half
+            # of it is not. safe_get returns "" for a legacy row with no
+            # column, which is falsy -- so an un-migrated database reads as
+            # not-yet-synced rather than as a confident yes.
+            "_synced": all(bool(safe_get(r, "synced")) for r in ordered_events),
         })
 
     for row in loose:
@@ -836,6 +843,18 @@ def build(start_date: Any = None,
         output_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         output_path = output_dir / f"report-logbook-{suffix}-{stamp}.xlsx"
+        # One-second resolution is not enough on its own. Two exports in the
+        # same second -- entirely normal when someone exports, changes a
+        # filter and exports again -- resolved to the SAME path, so the
+        # second silently overwrote the first and the person was handed one
+        # file believing they had two. Only ever appends when a collision
+        # would actually happen, so ordinary filenames are unchanged.
+        if output_path.exists():
+            for n in range(2, 100):
+                candidate = output_dir / f"report-logbook-{suffix}-{stamp}-{n}.xlsx"
+                if not candidate.exists():
+                    output_path = candidate
+                    break
 
     con = connect(db_file)
     try:
@@ -852,6 +871,20 @@ def build(start_date: Any = None,
             repair_active_session_from_windows_state(con)
         rows = fetch_physical(con, start_s, end_s)
         jobs = fetch_jobs(con, start_s, end_s)
+        # An export triggered from a FILTERED view must contain what the
+        # view showed. Exporting the whole period while the screen shows a
+        # search result is the kind of quiet mismatch that makes a report
+        # untrustworthy -- and the reader has no way to notice it.
+        #
+        # Applied here rather than in the SQL because the caller has already
+        # resolved which sessions matched (search spans several columns and
+        # matches a session if ANY row does), and re-deriving that in a
+        # second query risks the two disagreeing.
+        only = kwargs.get("session_ids")
+        if only is not None:
+            keep = set(only)
+            rows = [r for r in rows if safe_get(r, "session_id") in keep]
+            jobs = [j for j in jobs if safe_get(j, "session_id") in keep]
         write_xlsx(rows, jobs, output_path, period_label)
     finally:
         con.close()

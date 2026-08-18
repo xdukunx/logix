@@ -72,7 +72,12 @@ IDLE_SHUTDOWN_SECONDS = 30 * 60
 # tests, and this one is the thing that stops a PII endpoint being left open.
 IDLE_POLL_SECONDS = 30
 
-RANGES = ("today", "week", "month", "all")
+# "7" and "30" are day counts, not names, because that is what the segmented
+# control in the UI actually offers. They were missing here, so range=7 and
+# range=30 both failed the membership check below and silently fell back to
+# "today" -- the two buttons rendered today's sessions under a 7-day and a
+# 30-day label. "week" and "month" stay for any caller still using them.
+RANGES = ("today", "7", "30", "week", "month", "all")
 
 
 def resolve_range(name: str):
@@ -85,6 +90,12 @@ def resolve_range(name: str):
     today = date.today()
     if name == "today":
         return today, today, "Hari ini"
+    if name == "7":
+        # Rolling window, inclusive of today: "the last 7 days" as a person
+        # means it, not the calendar week.
+        return today - timedelta(days=6), today, "7 hari terakhir"
+    if name == "30":
+        return today - timedelta(days=29), today, "30 hari terakhir"
     if name == "week":
         # Monday-based, matching how a lab week is actually discussed.
         start = today - timedelta(days=today.weekday())
@@ -92,6 +103,163 @@ def resolve_range(name: str):
     if name == "month":
         return today.replace(day=1), today, "Bulan ini"
     return None, None, "Semua"
+
+
+def _render_session(s: dict) -> dict:
+    """One session, shaped for the table and the details sheet.
+
+    Empty stays empty. The page renders an em dash for a missing job or a
+    missing end time; substituting anything here would put a value in the
+    export and the API that the database does not hold.
+    """
+    active = bool(s.get("_active"))
+    return {
+        "session_id": s.get("session_id") or "",
+        "start": report.fmt_ts(s.get("start_ts")),
+        # An active session has no end. Not "now", not a guess -- an em dash
+        # is rendered client-side from this empty string.
+        "end": report.fmt_ts(s.get("end_ts")) if s.get("end_ts") else "",
+        "durasi": s.get("durasi") or "-",
+        "nama": s.get("nama") or "",
+        "nim": s.get("nim") or "",
+        "tujuan": s.get("tujuan") or "",
+        "tipe": s.get("tipe") or "",
+        "status": s.get("status") or "",
+        "keterangan": s.get("keterangan") or "",
+        "job_type": s.get("job_type") or "",
+        "job_id": s.get("job_id") or "",
+        "active": active,
+        # Whether THIS session has reached the server. Distinct from the
+        # device-wide connection state on the Server page: a device can be
+        # connected and still have older rows unsent.
+        "sync": "active" if active else ("synced" if s.get("_synced") else "pending"),
+    }
+
+
+def _repair_if_default_db(con, db_path: Path) -> None:
+    """Rebuild an active session whose START row never landed in SQLite.
+
+    Scoped to the DEFAULT database only, exactly as logbook_report.build()
+    scopes its own call: session.json describes THIS workstation's live
+    session, and repairing it into whatever database was passed via --db
+    would inject the running session into an unrelated file. Extracted here
+    so the paged query and load_sessions share one copy of that rule rather
+    than two that can drift.
+    """
+    try:
+        if db_path.resolve() == DEFAULT_DB.expanduser().resolve():
+            report.repair_active_session_from_windows_state(con)
+    except Exception:
+        # A repair that fails must never take the page down with it; the
+        # rest of the history is still perfectly readable.
+        pass
+
+
+# ---- Paged session queries ------------------------------------------------
+#
+# Measured against a seeded 10,000-session database (see
+# docs/OFFLINE_CLIENT_UI_SPEC.md, "Logs and Server"): loading every session
+# and pairing it cost 290ms and shipped 2.01MB to the browser, and the
+# majority of the time was build_sessions walking every event to match
+# STARTs with ENDs. Selecting the page of session IDs first is 14ms, because
+# idx_physical_log_session already exists -- then only that page's rows are
+# read and paired, which is 2ms more.
+#
+# Search lives in SQL as a CONSEQUENCE of that, not as a preference: once
+# the browser holds one page instead of the whole history, a client-side
+# filter would search only the page. It would look like it worked.
+
+SEARCHABLE = ("nama", "nim", "tujuan", "keterangan", "job_type", "job_id", "hostname")
+
+
+def _session_filter_sql(q, user, job_type):
+    """WHERE fragments and args selecting the session_ids that match.
+
+    Each condition is a subquery over the events, because a session matches
+    if ANY of its rows does -- identity is on the START row while a later
+    row may carry the job, and matching only one of them would drop real
+    results without saying so.
+    """
+    where, args = [], []
+    if q:
+        blob = "||".join(f"lower(COALESCE({c},''))" for c in SEARCHABLE)
+        where.append(f"session_id IN (SELECT session_id FROM physical_log "
+                     f"WHERE {blob} LIKE ?)")
+        args.append(f"%{q.strip().lower()}%")
+    if user:
+        where.append("session_id IN (SELECT session_id FROM physical_log "
+                     "WHERE nama = ?)")
+        args.append(user)
+    if job_type:
+        where.append("session_id IN (SELECT session_id FROM physical_log "
+                     "WHERE job_type = ?)")
+        args.append(job_type)
+    return where, args
+
+
+def load_sessions_page(db_path: Path, range_name: str, q: str = "", user: str = "",
+                       job_type: str = "", limit: int = 50, offset: int = 0):
+    """One page of sessions, newest first, plus the total that matched.
+
+    The total is a separate COUNT rather than len() of the page, because the
+    UI has to be able to say "50 of 1,284" -- and a page that cannot tell
+    the reader whether more exists is not an audit surface.
+    """
+    start_d, end_d, label = resolve_range(range_name)
+    where, args = _session_filter_sql(q, user, job_type)
+    if start_d:
+        where.append("session_id IN (SELECT session_id FROM physical_log "
+                     "WHERE timestamp >= ? AND timestamp <= ?)")
+        args += [f"{start_d.isoformat()}T00:00:00", f"{end_d.isoformat()}T23:59:59"]
+
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    con = report.connect(db_path)
+    try:
+        report.ensure_physical_schema(con)
+        _repair_if_default_db(con, db_path)
+
+        total = con.execute(
+            f"SELECT COUNT(*) FROM (SELECT session_id FROM physical_log{clause} "
+            f"GROUP BY session_id)", args).fetchone()[0]
+
+        ids = [r[0] for r in con.execute(
+            f"SELECT session_id FROM physical_log{clause} GROUP BY session_id "
+            f"ORDER BY MAX(timestamp) DESC LIMIT ? OFFSET ?",
+            args + [max(1, limit), max(0, offset)]).fetchall()]
+
+        sessions = []
+        if ids:
+            ph = ",".join("?" for _ in ids)
+            rows = con.execute(
+                f"SELECT * FROM physical_log WHERE session_id IN ({ph}) "
+                f"ORDER BY timestamp", ids).fetchall()
+            by_id = {sid: i for i, sid in enumerate(ids)}
+            sessions = report.build_sessions(rows)
+            # build_sessions returns dict order, not the ordering the page
+            # was selected in. Re-sort to the ID order the query established,
+            # or the page arrives shuffled relative to its own pagination.
+            sessions.sort(key=lambda x: by_id.get(x.get("session_id"), 1 << 30))
+    finally:
+        con.close()
+    return sessions, label, total
+
+
+def distinct_values(db_path: Path, column: str) -> list[str]:
+    """Filter options, taken from what the database actually contains. A
+    dropdown offering job types nobody has ever recorded is noise."""
+    if column not in ("nama", "job_type"):
+        return []
+    con = report.connect(db_path)
+    try:
+        report.ensure_physical_schema(con)
+        return [r[0] for r in con.execute(
+            f"SELECT DISTINCT {column} FROM physical_log "
+            f"WHERE {column} IS NOT NULL AND {column} != '' ORDER BY {column}"
+        ).fetchall()]
+    except Exception:
+        return []
+    finally:
+        con.close()
 
 
 def _summarize(sessions: list[dict]) -> dict:
@@ -162,9 +330,10 @@ def load_sessions(db_path: Path, range_name: str):
 
 
 
-def _export_csv(db_path, start_d, end_d):
+def _export_csv(db_path, start_d, end_d, only_ids=None):
     """Fallback when openpyxl is absent. Same rows, same columns, same
-    source -- build_sessions -- so the CSV cannot disagree with the xlsx."""
+    source -- build_sessions -- so the CSV cannot disagree with the xlsx,
+    including when the view was filtered."""
     import csv
     con = report.connect(db_path)
     try:
@@ -172,9 +341,20 @@ def _export_csv(db_path, start_d, end_d):
     finally:
         con.close()
     sessions = report.build_sessions(rows)
+    if only_ids is not None:
+        keep = set(only_ids)
+        sessions = [x for x in sessions if x.get("session_id") in keep]
     outdir = Path(report.DEFAULT_OUTDIR)
     outdir.mkdir(parents=True, exist_ok=True)
     out = outdir / f"logix-sessions-{time.strftime('%Y%m%d-%H%M%S')}.csv"
+    # Same collision guard as the xlsx path: two exports in one second must
+    # not resolve to one file.
+    if out.exists():
+        for n in range(2, 100):
+            alt = out.with_name(out.stem + f"-{n}" + out.suffix)
+            if not alt.exists():
+                out = alt
+                break
     cols = ["start_ts", "end_ts", "nama", "nim", "tujuan", "job_type",
             "job_id", "durasi", "tipe", "status", "keterangan"]
     with out.open("w", newline="", encoding="utf-8-sig") as fh:
@@ -207,6 +387,101 @@ def _sync_snapshot(db_path):
     except Exception as exc:
         return {"connection_state": "unknown", "error": str(exc),
                 "pending_count": None, "last_error_class": None}
+
+
+# The seven contract states, resolved server-side from the structured
+# classification rather than by the browser parsing an error string. The UI
+# renders what it is told; it does not interpret.
+_ERROR_TEXT = {
+    "network": "Server could not be reached.",
+    "auth": "The server rejected this workstation's credentials.",
+    "rejected": "The server rejected the data sent.",
+    "server": "The server reported an internal error.",
+    "unknown": "Synchronization failed.",
+}
+
+
+def _server_state(db_path: Path) -> dict:
+    """Everything the Server page renders, already resolved to one state.
+
+    connection_state from sync_status is device-wide and does not on its own
+    say whether anything is queued, so pending_count decides between SYNCED
+    and SYNC_PENDING. local_only and blocked are terminal and carry no
+    pending count at all -- on a device that does not sync, rows are
+    finished, not waiting, and a number there would be a lie about what the
+    product is doing.
+    """
+    snap = _sync_snapshot(db_path)
+    st = snap.get("connection_state")
+    pending = snap.get("pending_count")
+    cls = snap.get("last_error_class")
+
+    if st == "disabled":
+        state, detail = "LOCAL_ONLY", "Session data is stored on this workstation."
+    elif st == "blocked":
+        state, detail = "SYNC_BLOCKED", "Synchronization is disabled by policy."
+    elif st == "offline" and cls == "network":
+        state, detail = "SERVER_UNAVAILABLE", _ERROR_TEXT["network"]
+    elif st == "offline":
+        state, detail = "SYNC_ERROR", _ERROR_TEXT.get(cls or "unknown", _ERROR_TEXT["unknown"])
+    elif pending:
+        state, detail = "SYNC_PENDING", f"{pending} change(s) waiting to synchronize."
+    elif st == "connected":
+        state, detail = "SYNCED", "All changes synchronized."
+    else:
+        state, detail = "SYNC_PENDING", "No synchronization has run on this workstation yet."
+
+    quiet = state in ("LOCAL_ONLY", "SYNC_BLOCKED")
+    return {
+        "state": state,
+        "detail": detail,
+        "server_url": paths.server_url() or "",
+        "server_configured": bool(snap.get("server_configured")),
+        "privacy_mode": snap.get("privacy_mode") or "",
+        # None, never 0, when the question does not apply -- a zero implies a
+        # queue that happens to be empty.
+        "pending": None if quiet else pending,
+        "last_success": snap.get("last_success"),
+        "last_attempt": snap.get("last_attempt"),
+        "error_class": cls,
+        # The human sentence is above; this is for whoever is debugging, and
+        # is often the same person reading the page.
+        "diagnostic": snap.get("last_error"),
+        "can_sync": state in ("SYNC_PENDING", "SYNC_ERROR", "SERVER_UNAVAILABLE"),
+        "can_test": bool(snap.get("server_configured")),
+    }
+
+
+def _server_action(db_path: Path, action: str) -> dict:
+    """Run the real sync, or just re-read state for a connection test.
+
+    Deliberately shells out to log_physical rather than importing and
+    calling it in-process: the sync path opens its own connection, writes,
+    and retries, and running that inside the request thread of a server
+    whose own docstring promises to stay out of the way is how a hung
+    socket becomes a hung page.
+    """
+    import subprocess
+    py = sys.executable
+    script = str(Path(__file__).resolve().parent / "log_physical.py")
+    flag = "--sync-to-server" if action == "sync" else "--sync-status"
+    try:
+        out = subprocess.run([py, script, flag, "--db", str(db_path)],
+                             capture_output=True, text=True, timeout=90)
+        after = _server_state(db_path)
+        # NOT the exit code. log_physical exits 0 after a failed sync -- it
+        # prints "synced 0" and returns cleanly, because a sync that could
+        # not reach the server is not a crash. Reporting that as success put
+        # "Synchronization finished." on screen directly above "Server
+        # unavailable". The resulting STATE is what actually happened.
+        ok = out.returncode == 0 and after["state"] not in (
+            "SERVER_UNAVAILABLE", "SYNC_ERROR")
+        return {"ok": ok, "action": action, "state": after,
+                "output": (out.stdout or out.stderr or "").strip()[-400:]}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "action": action,
+                "error": "The server did not respond in time.",
+                "state": _server_state(db_path)}
 
 
 def _active_session(sessions):
@@ -510,6 +785,17 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .faint{color:var(--text-faint)}
 .tally{margin-top:var(--space-3);font-size:12px;color:var(--text-muted)}
 
+/* NIM under the name, job id under the job type: present for audit,
+   never competing with the value above it. */
+.sub2{font-size:11px;color:var(--text-faint);margin-top:1px;
+  font-variant-numeric:tabular-nums}
+/* Group headings on the Server page. Quieter than a section rule -- this
+   page is a settings surface, not a console. */
+.grp-h{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-faint);margin:var(--space-5) 0 var(--space-2)}
+.okline{color:var(--ok)}
+.diag{font-family:var(--mono);font-size:11px;color:var(--text-muted);
+  word-break:break-word}
 /* ── server ──────────────────────────────────────────────────────────── */
 .card{border:1px solid var(--border);border-radius:var(--radius-md);
   background:var(--surface);padding:var(--space-5);max-width:560px}
@@ -634,15 +920,17 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
       <div class="toolbar">
         <div class="field">
           <input id="q" type="search" placeholder="Search sessions"
-                 aria-label="Search sessions" oninput="renderLogs()">
+                 aria-label="Search sessions">
           <kbd id="kbd">Ctrl+K</kbd>
         </div>
         <div class="seg" id="seg" role="group" aria-label="Time range"></div>
-        <select id="fstate" onchange="renderLogs()" aria-label="Session state">
-          <option value="">All states</option>
-          <option value="Aktif">Active</option>
-          <option value="Selesai / Finish">Finished</option>
-          <option value="Auto Finish">Auto finish</option>
+        <select id="fuser" aria-label="User"><option value="">All users</option></select>
+        <select id="fjob" aria-label="Job type"><option value="">All jobs</option></select>
+        <select id="fsync" aria-label="Sync state">
+          <option value="">All sync states</option>
+          <option value="synced">Synced</option>
+          <option value="pending">Pending</option>
+          <option value="active">Active</option>
         </select>
         <span class="spacer"></span>
         <button class="primary" onclick="doExport()">Export</button>
@@ -650,6 +938,7 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
       <div id="exportNote" class="note"></div>
       <div id="logs"></div>
       <div class="tally" id="tally"></div>
+      <div class="after" id="morewrap"></div>
     </section>
 
     <!-- SERVER -->
@@ -690,7 +979,8 @@ function go(v){
     var a=document.getElementById("nav-"+k);
     if(k===v)a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current");
   });
-  if(v==="logs"&&!ROWS.length)loadLogs();
+  if(v==="logs"&&!ROWS.length)loadLogs(true);
+  if(v==="server")loadServer();
 }
 
 /* ── the seven contract states, never collapsed ─────────────────────────
@@ -888,24 +1178,83 @@ function paintRecent(list){
   }).join("")+'</div>';
 }
 
-function paintServer(s){
-  var v=syncView(s), quiet=!!v.quiet;
+var SERVER=null;
+
+/* The seven states are resolved SERVER-side from the structured failure
+   class (see _server_state). This renders what it is told; it does not
+   parse an error string to work out what happened. */
+var SERVER_TONE={LOCAL_ONLY:"ok",SYNC_BLOCKED:"",SYNC_PENDING:"warn",
+                 SYNCING:"act",SYNCED:"ok",SERVER_UNAVAILABLE:"hollow warn",
+                 SYNC_ERROR:"err"};
+var SERVER_TITLE={LOCAL_ONLY:"Local only",SYNC_BLOCKED:"Synchronization disabled",
+                  SYNC_PENDING:"Waiting to synchronize",SYNCING:"Synchronizing",
+                  SYNCED:"All changes synchronized",
+                  SERVER_UNAVAILABLE:"Server unavailable",SYNC_ERROR:"Synchronization failed"};
+
+function loadServer(){
+  fetch(t("/api/server")).then(function(x){return x.json()})
+    .then(function(d){SERVER=d;paintServer(d)}).catch(function(){});
+}
+
+function paintServer(d){
+  if(!d){return}
+  var tone=SERVER_TONE[d.state]||"", title=SERVER_TITLE[d.state]||d.state;
   var acts="";
-  if(v.sync)acts+='<button class="primary" onclick="syncNow()">Sync now</button>';
-  if(v.retry)acts+='<button onclick="syncNow()">Retry</button>';
-  document.getElementById("server").innerHTML='<div class="card">'
-   +'<div class="st '+v.cls+'" style="margin-bottom:var(--space-1)">'
-   +'<span class="mk"></span><span class="head">'+esc(v.txt)+'</span></div>'
-   +'<div class="line">'+esc(v.line)+'</div>'
-   +'<dl class="kv">'
-   +'<dt>Server</dt><dd>'+((s&&s.server_configured)?"configured":"not configured")+'</dd>'
-   +'<dt>Privacy mode</dt><dd>'+esc(dash(s&&s.privacy_mode))+'</dd>'
-   /* An em dash, never 0: a zero implies a queue that happens to be empty,
-      where the truth is that the question does not apply. */
-   +'<dt>Pending</dt><dd>'+(quiet?"—":esc(dash(s&&s.pending_count)))+'</dd>'
-   +'<dt>Last success</dt><dd>'+esc(dash(s&&s.last_success))+'</dd>'
-   +'<dt>Last error</dt><dd>'+esc(dash(s&&s.last_error))+'</dd></dl>'
-   +'<div class="actions">'+acts+'</div></div>';
+  /* data-act + delegation, not an inline handler: this page lives inside a
+     Python triple-quoted string where a backslash escape does not survive,
+     so a nested quote silently becomes a real one and takes out the script. */
+  if(d.can_sync)acts+='<button class="primary" data-act="sync">'
+    +(d.state==="SYNC_PENDING"?"Sync now":"Retry")+'</button>';
+  if(d.can_test)acts+='<button data-act="test">Test connection</button>';
+
+  /* Local logging is stated explicitly whenever the server is not reachable.
+     The whole point of the page is that a server problem is not a Logix
+     problem, and saying so beats leaving the reader to infer it. */
+  var reassure=(d.state==="SERVER_UNAVAILABLE"||d.state==="SYNC_ERROR")
+    ? '<dt>Local logging</dt><dd class="okline">Working normally</dd>' : "";
+
+  document.getElementById("server").innerHTML=
+    '<div class="card">'
+   +'<div class="st '+tone+'" style="margin-bottom:var(--space-1)">'
+   +'<span class="mk"></span><span class="head">'+esc(title)+'</span></div>'
+   +'<div class="line">'+esc(d.detail||"")+'</div>'
+
+   +'<h3 class="grp-h">Connection</h3><dl class="kv">'
+   +'<dt>Server URL</dt><dd>'+esc(d.server_url||"not configured")+'</dd>'
+   +'<dt>Last contact</dt><dd>'+esc(dash(d.last_success))+'</dd>'
+   +reassure+'</dl>'
+
+   +'<h3 class="grp-h">Synchronization</h3><dl class="kv">'
+   +'<dt>Privacy mode</dt><dd>'+esc(dash(d.privacy_mode))+'</dd>'
+   /* null, never 0: on a device that does not sync, rows are finished, not
+      waiting, and a number here would misdescribe the product. */
+   +'<dt>Pending</dt><dd>'+(d.pending==null?"—":esc(d.pending))+'</dd>'
+   +'<dt>Last attempt</dt><dd>'+esc(dash(d.last_attempt))+'</dd>'
+   +(d.diagnostic?'<dt>Diagnostic</dt><dd class="diag">'+esc(d.diagnostic)+'</dd>':"")
+   +'</dl>'
+
+   +'<div class="actions">'+acts+'</div>'
+   +'<div class="note" id="serverNote"></div></div>';
+}
+
+function serverAction(kind){
+  var note=document.getElementById("serverNote");
+  if(note)note.textContent=(kind==="sync"?"Synchronizing…":"Testing connection…");
+  fetch(t("/api/server/"+kind),{method:"GET"})
+    .then(function(x){return x.json()})
+    .then(function(d){
+      if(d.state){SERVER=d.state;paintServer(d.state)}
+      var n=document.getElementById("serverNote");
+      /* The sentence follows the resulting STATE, not the exit code: a sync
+         that could not reach the server exits cleanly, and calling that
+         "finished" contradicted the "Server unavailable" line above it. */
+      if(n)n.textContent=d.ok
+        ? (kind==="sync"?"Synchronization finished.":"Server reachable.")
+        : (d.error||(d.state&&d.state.detail)||"That did not succeed.");
+    }).catch(function(){
+      var n=document.getElementById("serverNote");
+      if(n)n.textContent="Could not run that action.";
+    });
 }
 function syncNow(){ loadOverview(); }
 
@@ -927,51 +1276,110 @@ function loadTelemetry(){
   fetch(t("/api/telemetry")).then(function(r){return r.json()}).then(paintHealth).catch(function(){});
 }
 
-/* ── logs ────────────────────────────────────────────────────────────── */
+/* ── logs ──────────────────────────────────────────────────────────────
+   Search, filters and paging all run in SQL. That is not a preference:
+   the browser now holds one page instead of the whole history, so a
+   client-side filter would search only the page -- which looks like it
+   works and quietly is not a search. */
+var TOTAL=0, OFFSET=0, PAGE_SIZE=50, LOADING=false, SEARCH_TIMER=null;
+
 function paintSeg(){
   document.getElementById("seg").innerHTML=RANGES.map(function(r){
     return '<button aria-pressed="'+(r[0]===RANGE)+'" data-r="'+r[0]+'">'
       +r[1]+'</button>'}).join("");
 }
-function setRange(r){RANGE=r;paintSeg();loadLogs()}
-function loadLogs(){
-  fetch(t("/api/sessions?range="+encodeURIComponent(RANGE)))
-    .then(function(x){return x.json()})
-    .then(function(d){ROWS=d.sessions||[];renderLogs()}).catch(function(){});
+function setRange(r){RANGE=r;paintSeg();loadLogs(true)}
+
+function logsQuery(extra){
+  var p="range="+encodeURIComponent(RANGE);
+  var q=document.getElementById("q").value.trim();
+  var u=document.getElementById("fuser").value;
+  var j=document.getElementById("fjob").value;
+  var sy=document.getElementById("fsync").value;
+  if(q)p+="&q="+encodeURIComponent(q);
+  if(u)p+="&user="+encodeURIComponent(u);
+  if(j)p+="&job_type="+encodeURIComponent(j);
+  if(sy)p+="&sync="+encodeURIComponent(sy);
+  return p+(extra||"");
 }
+
+/* reset=true starts a new result set; otherwise this appends the next
+   page to what is already on screen. */
+function loadLogs(reset){
+  if(LOADING)return;
+  LOADING=true;
+  if(reset){OFFSET=0;ROWS=[]}
+  fetch(t("/api/logs?"+logsQuery("&limit="+PAGE_SIZE+"&offset="+OFFSET)))
+    .then(function(x){return x.json()})
+    .then(function(d){
+      TOTAL=d.total||0;
+      ROWS=reset?(d.sessions||[]):ROWS.concat(d.sessions||[]);
+      OFFSET=ROWS.length;
+      LOADING=false;
+      renderLogs();
+    }).catch(function(){LOADING=false});
+}
+
+function loadFilterOptions(){
+  fetch(t("/api/logs/filters")).then(function(x){return x.json()}).then(function(d){
+    function fill(id,label,vals){
+      var el=document.getElementById(id);
+      el.innerHTML='<option value="">'+label+'</option>'+(vals||[]).map(function(v){
+        return '<option value="'+esc(v)+'">'+esc(v)+'</option>'}).join("");
+    }
+    fill("fuser","All users",d.users);
+    /* An empty job list means nothing has ever recorded one. Disabling the
+       control says that, where an empty dropdown just looks broken. */
+    fill("fjob","All jobs",d.job_types);
+    document.getElementById("fjob").disabled=!(d.job_types&&d.job_types.length);
+  }).catch(function(){});
+}
+
+var SYNC_LABEL={synced:"Synced",pending:"Pending",active:"Active"};
+
 function renderLogs(){
-  var q=(document.getElementById("q").value||"").toLowerCase();
-  var fs=document.getElementById("fstate").value;
-  SHOWN=ROWS.filter(function(r){
-    if(fs&&r.status!==fs)return false;
-    if(!q)return true;
-    return [r.nama,r.nim,r.tujuan,r.job_type,r.job_id].join(" ").toLowerCase().indexOf(q)>=0;
-  });
+  SHOWN=ROWS;
   var el=document.getElementById("logs"), tally=document.getElementById("tally");
+  var more=document.getElementById("morewrap");
   if(!SHOWN.length){
-    var empty=ROWS.length
-      ? ['No matching sessions','No session matches this filter.']
+    var filtered=document.getElementById("q").value.trim()||
+                 document.getElementById("fuser").value||
+                 document.getElementById("fjob").value||
+                 document.getElementById("fsync").value;
+    var empty=filtered
+      ? ['No matching sessions','No session matches this search or filter.']
       : ['No sessions in this period','Try a wider date range.'];
     el.innerHTML='<div class="empty"><b>'+empty[0]+'</b><span>'+empty[1]+'</span></div>';
-    tally.textContent=""; return;
+    tally.textContent=""; more.innerHTML=""; return;
   }
-  var h='<table><thead><tr><th>Start</th><th>End</th><th>Name</th>'
-   +'<th class="opt">NIM</th><th>Purpose</th><th class="opt">Job</th>'
-   +'<th class="r">Duration</th><th>State</th></tr></thead><tbody>';
+  var h='<table><thead><tr><th>Date</th><th>Start</th><th>User</th>'
+   +'<th>Purpose</th><th class="opt">Job</th>'
+   +'<th class="r">Duration</th><th>Sync</th></tr></thead><tbody>';
   SHOWN.forEach(function(r,i){
-    var job=[r.job_type,r.job_id].filter(Boolean).join(" · ")||"—";
+    /* NIM sits UNDER the name: present for audit, never competing with it. */
+    var who=esc(r.nama||"—")+(r.nim?'<div class="sub2">'+esc(r.nim)+'</div>':"");
+    var job=r.job_type||r.job_id
+      ? esc(r.job_type||"—")+(r.job_id?'<div class="sub2">'+esc(r.job_id)+'</div>':"")
+      : "—";
+    var d=(r.start||"").split(" ")[0], tm=(r.start||"").split(" ")[1]||"";
+    var syncCls=r.sync==="synced"?"ok":(r.sync==="active"?"act":"warn");
     h+='<tr tabindex="0" data-i="'+i+'">'
-     +'<td class="num">'+esc(r.start)+'</td>'
-     +'<td class="num mut">'+esc(dash(r.end))+'</td>'
-     +'<td>'+esc(r.nama)+'</td>'
-     +'<td class="num mut opt">'+esc(dash(r.nim))+'</td>'
+     +'<td class="num">'+esc(d)+'</td>'
+     +'<td class="num mut">'+esc(tm)+'</td>'
+     +'<td>'+who+'</td>'
      +'<td>'+esc(dash(r.tujuan))+'</td>'
-     +'<td class="mut opt">'+esc(job)+'</td>'
+     +'<td class="mut opt">'+job+'</td>'
      +'<td class="num r">'+esc(r.durasi)+'</td>'
-     +'<td class="mut">'+esc(r.status)+'</td></tr>';
+     +'<td><span class="st '+syncCls+'"><span class="mk"></span>'
+       +esc(SYNC_LABEL[r.sync]||r.sync)+'</span></td></tr>';
   });
   el.innerHTML=h+'</tbody></table>';
-  tally.textContent=SHOWN.length+(SHOWN.length===1?" session":" sessions");
+  tally.textContent=SHOWN.length+" of "+TOTAL+(TOTAL===1?" session":" sessions");
+  /* An explicit control, not infinite scroll: someone auditing history
+     needs to know whether they have reached the end. */
+  more.innerHTML=(SHOWN.length<TOTAL)
+    ? '<button onclick="loadLogs(false)">Load '+Math.min(PAGE_SIZE,TOTAL-SHOWN.length)+' more</button>'
+    : "";
 }
 
 /* ── details sheet ───────────────────────────────────────────────────── */
@@ -1063,11 +1471,35 @@ delegate("recent", function(t){
 delegate("logs", function(t){
   var r=t.closest?t.closest("tr[data-i]"):null;
   return r?function(){detailRow(+r.dataset.i)}:null; });
+delegate("server", function(t){
+  var b=t.closest?t.closest("button[data-act]"):null;
+  return b?function(){serverAction(b.dataset.act)}:null; });
 delegate("seg", function(t){
   var b=t.closest?t.closest("button[data-r]"):null;
   return b?function(){setRange(b.dataset.r)}:null; });
 
+/* Debounced: each keystroke is a SQL query, and firing one per character
+   would queue requests faster than they return. 250ms is below the
+   threshold where typing feels laggy and well above a fast typist s gap
+   between keys. */
+document.getElementById("q").addEventListener("input",function(){
+  clearTimeout(SEARCH_TIMER);
+  SEARCH_TIMER=setTimeout(function(){loadLogs(true)},250);
+});
+["fuser","fjob","fsync"].forEach(function(id){
+  document.getElementById(id).addEventListener("change",function(){loadLogs(true)});
+});
+/* The hint has been on screen since the Overview work; this is the binding
+   it was promising. */
+document.addEventListener("keydown",function(e){
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){
+    e.preventDefault(); go("logs");
+    var q=document.getElementById("q"); q.focus(); q.select();
+  }
+});
+
 paintSeg();
+loadFilterOptions();
 loadOverview();
 /* Telemetry refreshes on its own timer; the session queries deliberately do
    not run with it. Nothing animates on refresh -- numerals are tabular so a
@@ -1162,42 +1594,82 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                             "gpu": None}).encode("utf-8"))
             return
 
-        if route == "/api/sessions":
+        if route in ("/api/sessions", "/api/logs"):
             name = (qs.get("range") or ["today"])[0]
             if name not in RANGES:
                 name = "today"
+            q = (qs.get("q") or [""])[0]
+            user = (qs.get("user") or [""])[0]
+            job_type = (qs.get("job_type") or [""])[0]
+            sync_f = (qs.get("sync") or [""])[0]
             try:
-                sessions, label = load_sessions(self.state.db, name)
+                limit = min(500, max(1, int((qs.get("limit") or ["50"])[0])))
+                offset = max(0, int((qs.get("offset") or ["0"])[0]))
+            except ValueError:
+                limit, offset = 50, 0
+            try:
+                sessions, label, total = load_sessions_page(
+                    self.state.db, name, q=q, user=user, job_type=job_type,
+                    limit=limit, offset=offset)
             except Exception as exc:  # a broken DB must not take the page down
                 self._send(500, json.dumps({"error": str(exc)}).encode("utf-8"))
                 return
+
+            rendered = [_render_session(s) for s in sessions]
+            # Sync is a per-ROW column rather than a session-level one, so it
+            # cannot be pushed into the session-id query above without
+            # changing what a "matching session" means. Filtered here, on the
+            # page -- which is why the total below is the unfiltered-by-sync
+            # count and the UI labels it as the range total, not the match
+            # count.
+            if sync_f:
+                rendered = [r for r in rendered if r["sync"] == sync_f]
+
             payload = {
                 "label": label,
                 "device": self.state.device,
                 "db": str(self.state.db),
                 "summary": _summarize(sessions),
-                "sessions": [
-                    {
-                        "start": report.fmt_ts(s.get("start_ts")),
-                        "end": report.fmt_ts(s.get("end_ts")) if s.get("end_ts") else "",
-                        "durasi": s.get("durasi") or "-",
-                        "nama": s.get("nama") or "",
-                        "nim": s.get("nim") or "",
-                        "tujuan": s.get("tujuan") or "",
-                        "tipe": s.get("tipe") or "",
-                        "status": s.get("status") or "",
-                        # Carried for the details sheet and the job column.
-                        # Empty is the ordinary case and must stay empty --
-                        # the page renders an em dash rather than a value.
-                        "keterangan": s.get("keterangan") or "",
-                        "job_type": s.get("job_type") or "",
-                        "job_id": s.get("job_id") or "",
-                        "active": bool(s.get("_active")),
-                    }
-                    for s in sessions
-                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "returned": len(rendered),
+                "sessions": rendered,
             }
             self._send(200, json.dumps(payload).encode("utf-8"))
+            return
+
+        if route == "/api/server":
+            try:
+                self._send(200, json.dumps(_server_state(self.state.db)).encode("utf-8"))
+            except Exception as exc:
+                self._send(200, json.dumps({"error": str(exc)}).encode("utf-8"))
+            return
+
+        if route in ("/api/server/test", "/api/server/sync"):
+            # These are the ONLY endpoints on this server that are not
+            # read-only, and they take no parameters: they can run the
+            # existing sync path and nothing else. See this module's
+            # docstring, which is updated rather than left to mislead.
+            try:
+                self._send(200, json.dumps(
+                    _server_action(self.state.db, route.rsplit("/", 1)[1])
+                ).encode("utf-8"))
+            except Exception as exc:
+                self._send(200, json.dumps({"ok": False, "error": str(exc)}).encode("utf-8"))
+            return
+
+        if route == "/api/logs/filters":
+            # Options taken from what the database actually contains. A
+            # dropdown offering job types nobody has ever recorded is noise.
+            try:
+                self._send(200, json.dumps({
+                    "users": distinct_values(self.state.db, "nama"),
+                    "job_types": distinct_values(self.state.db, "job_type"),
+                }).encode("utf-8"))
+            except Exception as exc:
+                self._send(200, json.dumps(
+                    {"users": [], "job_types": [], "error": str(exc)}).encode("utf-8"))
             return
 
         if route == "/api/export":
@@ -1205,11 +1677,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if name not in RANGES:
                 name = "today"
             start_d, end_d, _ = resolve_range(name)
+            # Export what the VIEW is showing, not the whole period. The
+            # filters are resolved through the same paged query the table
+            # uses, with no limit, so the workbook and the screen can never
+            # disagree about which sessions matched.
+            q = (qs.get("q") or [""])[0]
+            user = (qs.get("user") or [""])[0]
+            job_type = (qs.get("job_type") or [""])[0]
+            only_ids = None
+            if q or user or job_type:
+                try:
+                    matched, _lbl, _tot = load_sessions_page(
+                        self.state.db, name, q=q, user=user, job_type=job_type,
+                        limit=100000, offset=0)
+                    only_ids = [m.get("session_id") for m in matched]
+                except Exception:
+                    only_ids = None
             try:
                 # Straight to the existing generator: the download is the same
                 # file the CLI produces, not a second implementation of it.
                 out = report.build(start_date=start_d, end_date=end_d,
-                                   full=(start_d is None), db=self.state.db)
+                                   full=(start_d is None), db=self.state.db,
+                                   session_ids=only_ids)
                 p = Path(out)
                 self.state.exports[p.name] = p
                 self._send(200, json.dumps({"ok": True, "name": p.name,
@@ -1221,7 +1710,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # the request died without a reply. Export degrades to CSV
                 # rather than the page appearing to hang.
                 try:
-                    p = _export_csv(self.state.db, start_d, end_d)
+                    p = _export_csv(self.state.db, start_d, end_d, only_ids)
                     self.state.exports[p.name] = p
                     self._send(200, json.dumps({
                         "ok": True, "name": p.name, "format": "csv",
