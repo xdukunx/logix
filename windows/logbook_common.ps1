@@ -689,6 +689,11 @@ function Invoke-WSLLogbook {
         [ValidateSet('self_declared', 'unverified', 'directory')]
         [string]$IdentitySource = 'self_declared',
         [string]$PersonRole = '',
+        # Optional session metadata. Empty is the normal case and must stay
+        # cheap: these add two keys to a payload the START path already
+        # writes, and nothing on that path validates or waits on them.
+        [string]$JobType = '',
+        [string]$JobId = '',
         # START uses this. See Invoke-NativeBridge's async branch for why it
         # is safe there and why it is NOT the default: a close/END must know
         # whether the row was really written before the workstation locks.
@@ -726,6 +731,8 @@ function Invoke-WSLLogbook {
         anydesk_detected = $AnyDeskDetected
         identity_source = $IdentitySource
         person_role = $PersonRole
+        job_type = $JobType
+        job_id = $JobId
     }
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
@@ -2385,8 +2392,21 @@ function Build-LogbookPopupXaml($cfg) {
     $tHint    = ConvertTo-LogbookXmlText ([string]$cfg.text.hint)
     $tHeading = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'signinTitle' 'Mulai sesi')
 
+    $tJobType = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobTypeLabel' 'Jenis pekerjaan (opsional)')
+    $tJobId   = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobIdLabel' 'ID pekerjaan (opsional)')
+
     $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
     $purposeItems = (@($cfg.purposes)    | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
+
+    # Server-overridable like every other list here, with a default that is
+    # deliberately short. A long taxonomy invites miscategorisation, and the
+    # FIRST item is empty because "no job" is the ordinary answer and has to
+    # be the one requiring no interaction.
+    $jobTypes = @($cfg.jobTypes)
+    if (-not $jobTypes -or $jobTypes.Count -eq 0) {
+        $jobTypes = @('', 'Simulation', 'Analysis', 'Documentation', 'Testing', 'Maintenance', 'Meeting', 'Other')
+    }
+    $jobTypeItems = ($jobTypes | ForEach-Object { "              <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
 
     # ShowInTaskbar="True", not False: confirmed live that a Topmost,
     # ShowInTaskbar=False, WindowStyle=None window spawned by the Task
@@ -2503,6 +2523,28 @@ $purposeItems
 
         <TextBlock Text="$tKet" Style="{StaticResource LxFieldLabel}"/>
         <TextBox Name="KetBox" Style="{StaticResource LxField}" Margin="0,0,0,14"/>
+
+        <!-- Optional job metadata. Most workstation use is not a formal job,
+             so both start empty and neither is ever validated: leaving them
+             blank is the ordinary case, not an incomplete form. Side by side
+             because they are one thought, and the form is already long. -->
+        <Grid Margin="0,0,0,14">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="$tJobType" Style="{StaticResource LxFieldLabel}"/>
+            <ComboBox Name="JobTypeBox" Style="{StaticResource LxCombo}" IsEditable="True">
+$jobTypeItems
+            </ComboBox>
+          </StackPanel>
+          <StackPanel Grid.Column="2">
+            <TextBlock Text="$tJobId" Style="{StaticResource LxFieldLabel}"/>
+            <TextBox Name="JobIdBox" Style="{StaticResource LxField}"/>
+          </StackPanel>
+        </Grid>
 
         <!-- Access type is auto-detected, never a user choice: the control is
              present so the controller can select the detected value, but it is

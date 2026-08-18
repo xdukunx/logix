@@ -22,8 +22,14 @@ Assert ($mainCard.Width -eq '320') "sign-in dialog is 320px wide"
 Assert ($mainCard.CornerRadius -eq '22') "sign-in dialog uses radius 22, matching the pill language"
 $logo = ($doc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'LogoText' }).Text
 Assert ($logo -eq 'Logix') "default logo text Logix"
-$items = $doc.SelectNodes("//*[local-name()='ComboBoxItem']")
-Assert ($items.Count -eq 6) "2 access + 3 purpose + the 'Lainnya' free-text escape = 6 combo items"
+# Counted PER COMBO, not across the whole document. The original counted
+# every ComboBoxItem in the XAML, which made it a test of how many dropdowns
+# the form happens to have -- adding the optional job type broke it while
+# saying nothing about the lists it was meant to guard.
+$accessItems = $doc.SelectNodes("//*[local-name()='ComboBox'][@Name='AccessBox']/*")
+Assert ($accessItems.Count -eq 2) "2 configured access types"
+$purposeItems = $doc.SelectNodes("//*[local-name()='ComboBox'][@Name='TujuanBox']/*")
+Assert ($purposeItems.Count -eq 4) "3 configured purposes + the 'Lainnya' free-text escape hatch"
 $accessBox = $doc.SelectNodes("//*[local-name()='ComboBox']") | Where-Object { $_.Name -eq 'AccessBox' }
 Assert ($accessBox.IsEnabled -eq 'False') "access type is auto-detected and read-only, never a user choice"
 $nimBox = $doc.SelectNodes("//*[local-name()='TextBox']") | Where-Object { $_.Name -eq 'NimBox' }
@@ -1093,6 +1099,44 @@ Assert ($closeFn -match '\[datetime\]\$EndTime') `
     "the closer accepts an end time"
 Assert ($closeFn -match '\$EndTime -lt \$startedAt') `
     "and refuses to date a close before its own start (no negative durations)"
+
+# Optional job metadata on the sign-in form. The property that matters is
+# that it is OPTIONAL: nothing may validate it, and nothing on the START path
+# may wait on it. tests/test_job_metadata.py proves the storage half.
+# Asserted against the file, not a regex-extracted function body -- these
+# markers are unique, and an extraction that silently matches nothing turns
+# every check below it into a false failure.
+Assert ($commonSrc -match 'Name="JobTypeBox"') "the sign-in form offers a job type"
+Assert ($commonSrc -match 'Name="JobIdBox"') "and a job id"
+Assert ($commonSrc -match 'jobTypes = @\(\$cfg\.jobTypes\)') `
+    "the job type list is server-overridable like every other list here"
+Assert ($commonSrc -match "@\('', 'Simulation'") `
+    "and its first option is empty, because no job is the ordinary answer"
+
+# And prove the form BUILDS with them, not only that the source mentions
+# them: a malformed XAML fragment reads as perfectly good text.
+Assert ($doc.SelectNodes("//*[local-name()='ComboBox'][@Name='JobTypeBox']").Count -eq 1) `
+    "the built XAML contains the job type control"
+Assert ($doc.SelectNodes("//*[local-name()='TextBox'][@Name='JobIdBox']").Count -eq 1) `
+    "and the job id control"
+Assert ($doc.SelectNodes("//*[local-name()='ComboBox'][@Name='JobTypeBox']/*").Count -eq 8) `
+    "7 job types plus the empty default"
+
+$popupSrc = Get-Content (Join-Path $PSScriptRoot 'logbook_popup.ps1') -Raw
+Assert ($popupSrc -match "FindName\('JobTypeBox'\)") "the popup resolves the job type control"
+Assert ($popupSrc -match "FindName\('JobIdBox'\)") "and the job id control"
+Assert ($popupSrc -match '-JobType \(Get-ComboText \$jobType\)') `
+    "and passes both on submit"
+Assert ($popupSrc -match 'job_type\s+= \$JobType.Trim\(\)') `
+    "session.json carries the job metadata for a resumed session"
+Assert ($popupSrc -notmatch '(?s)if[^
+
+]*\$jobId\.Text[^
+
+]*IsNullOrWhiteSpace') `
+    "nothing validates the job fields -- blank is the ordinary case"
+Assert ($bridgeFn -match '\[string\]\$JobType') "the bridge accepts job metadata"
+Assert ($bridgeFn -match 'job_type = \$JobType') "and puts it in the payload"
 
 $staleFn = [regex]::Match($commonSrc,
     '(?s)function Close-StaleLogbookSessionIfAny \{.*?\r?\n\}\r?\n').Value
