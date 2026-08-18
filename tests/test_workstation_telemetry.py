@@ -155,3 +155,47 @@ def test_gpu_refresh_can_be_forced(monkeypatch):
 def test_human_bytes_renders_absence_as_an_em_dash():
     assert w.human_bytes(None) == "—"
     assert w.human_bytes(1024 ** 3).endswith("GB")
+
+
+# ---- per-core: one reading per real CPU, never a synthesised row --------
+
+def test_cpu_reports_one_reading_per_logical_cpu():
+    """The dashboard draws one block PER CORE, so the row is only honest if
+    the count comes from the machine rather than from a number chosen to
+    look tidy."""
+    c = w.cpu()
+    if c is None:
+        pytest.skip("psutil not installed")
+    assert len(c["per_core"]) == c["cores_logical"]
+
+
+def test_aggregate_is_the_mean_of_the_cores_it_is_drawn_beside():
+    """Taken from a third cpu_percent() call the aggregate would drift from
+    the per-core row on screen, and a viewer would have no way to work out
+    which one to believe."""
+    c = w.cpu()
+    if c is None:
+        pytest.skip("psutil not installed")
+    expected = round(sum(c["per_core"]) / len(c["per_core"]), 1)
+    assert abs(c["percent"] - expected) < 0.15
+
+
+def test_per_core_readings_are_independent(monkeypatch):
+    """Guards against the aggregate being splayed across N identical
+    entries, which would look like a per-core readout while carrying no
+    per-core information at all."""
+    monkeypatch.setattr(w, "_cpu_last_value", None)
+
+    class FakePsutil:
+        @staticmethod
+        def cpu_percent(interval=None, percpu=False):
+            return [10.0, 90.0, 0.0, 45.5] if percpu else 36.375
+        @staticmethod
+        def cpu_count(logical=True):
+            return 4 if logical else 2
+
+    monkeypatch.setattr(w, "psutil", FakePsutil)
+    monkeypatch.setattr(w, "HAVE_PSUTIL", True)
+    c = w.cpu(interval=0)
+    assert c["per_core"] == [10.0, 90.0, 0.0, 45.5]
+    assert c["percent"] == 36.4

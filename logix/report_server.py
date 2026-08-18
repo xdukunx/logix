@@ -273,39 +273,47 @@ PAGE = """<!doctype html>
 <title>Logix</title>
 <style>
 /* ── tokens ─────────────────────────────────────────────────────────────
-   Light is the default. A shared lab workstation is used briefly, by many
-   people, in a room lit for working. Dark is opt-in and gets its own
-   contrast ladder with a re-picked accent -- it is not a filter. */
+   Values mirror frontend/src/tokens.css -- the LogiX v3 "Clean Calibration"
+   ramp the server dashboard already ships. Not merely similar: the same
+   hex, so a person moving between the admin dashboard and this local
+   console is looking at one product rather than two that resemble each
+   other. The names differ (that file prefixes --lx-) because this page is
+   standalone and has no build step; the VALUES are the contract.
+
+   That file encodes the same rules this page arrived at independently:
+   status colour exists only as a dot or a hairline edge, never a tinted
+   background, and the accent is reserved for links, focus rings and
+   primary buttons. Nothing else. */
 :root{
-  --bg:#F6F5F2; --surface:#FFFFFF; --surface-subtle:#FBFAF8;
-  --surface-accent:#EEF4F6; --border:#E3E0DA; --border-strong:#CFCBC3;
-  --text:#14161A; --text-muted:#565C63; --text-faint:#8A9098;
-  --accent:#1A5D6E; --accent-hover:#144A58; --accent-ink:#FFFFFF;
-  --ok:#2E6F4E; --warn:#8A5A12; --err:#A33A2A;
+  --bg:#f4f5f7; --surface:#ffffff; --surface-subtle:#f4f5f7;
+  --surface-accent:#f4f5f7; --border:#e6e9ef; --border-strong:#d9dde3;
+  --text:#14181f; --text-muted:#6a7382; --text-faint:#8a94a6;
+  --accent:#2563eb; --accent-hover:#1d4ed8; --accent-ink:#ffffff;
+  --ok:#16a34a; --warn:#d97706; --err:#dc2626;
 
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
   --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
 
   --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
   --space-5:24px; --space-6:32px; --space-7:48px;
-  --radius-sm:4px; --radius-md:8px; --radius-lg:12px;
+  --radius-sm:4px; --radius-md:10px; --radius-lg:16px;
   --duration-fast:120ms; --duration-normal:180ms;
   --ease:cubic-bezier(.2,.6,.2,1);
 }
 :root[data-theme="dark"]{
-  --bg:#0F1113; --surface:#16191C; --surface-subtle:#1B1F23;
-  --surface-accent:#12272E; --border:#262B30; --border-strong:#373D44;
-  --text:#E8EAEC; --text-muted:#9AA1A9; --text-faint:#6B727A;
-  --accent:#4FB3C9; --accent-hover:#6BC6D9; --accent-ink:#0F1113;
-  --ok:#5FB98A; --warn:#D4A257; --err:#E0796A;
+  --bg:#0b0f16; --surface:#111722; --surface-subtle:#0b0f16;
+  --surface-accent:#0b0f16; --border:#1e2836; --border-strong:#2a3648;
+  --text:#edf1f7; --text-muted:#8a94a6; --text-faint:#6b7280;
+  --accent:#2563eb; --accent-hover:#3b82f6; --accent-ink:#ffffff;
+  --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#0F1113; --surface:#16191C; --surface-subtle:#1B1F23;
-    --surface-accent:#12272E; --border:#262B30; --border-strong:#373D44;
-    --text:#E8EAEC; --text-muted:#9AA1A9; --text-faint:#6B727A;
-    --accent:#4FB3C9; --accent-hover:#6BC6D9; --accent-ink:#0F1113;
-    --ok:#5FB98A; --warn:#D4A257; --err:#E0796A;
+    --bg:#0b0f16; --surface:#111722; --surface-subtle:#0b0f16;
+    --surface-accent:#0b0f16; --border:#1e2836; --border-strong:#2a3648;
+    --text:#edf1f7; --text-muted:#8a94a6; --text-faint:#6b7280;
+    --accent:#2563eb; --accent-hover:#3b82f6; --accent-ink:#ffffff;
+    --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
   }
 }
 
@@ -372,17 +380,36 @@ h2.sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:upperc
 .metric .val.na{font-size:13px;font-weight:400;color:var(--text-faint);line-height:1.55;
   padding:6px 0 5px}
 .metric .sub{font-size:12px;color:var(--text-muted);margin-top:2px}
-/* Block meter -- a row of LEDs, not a dial. Filled count is a REAL
-   percentage (CPU/memory/storage/GPU utilisation) rounded to the nearest
-   block; there is no second colour, no "of 100" framing, nothing a lit
-   block could be mistaken for besides "this much of this machine is in
-   use right now". A metric with no reading renders no row at all -- same
-   rule the gauge it replaces followed: absence is never drawn as a
-   measurement, full or empty. */
-.blocks{display:flex;gap:2px;margin-top:var(--space-3)}
-.blocks i{flex:1;height:14px;border-radius:1px;background:var(--border-strong);
-  min-width:0}
-.blocks i.on{background:var(--accent)}
+/* Three shapes, because the four readings are three different shapes of
+   data -- not variety for its own sake:
+     CPU      countable discrete units  -> one block PER REAL CORE
+     Mem/Disk continuous magnitude      -> a bar
+     GPU      a single utilisation %    -> a dial
+   A row of 18 arbitrary blocks under "28.3 GB free" implied storage came
+   in 18 countable units. It does not. Cores do. */
+
+/* One block per logical CPU, each filled from the bottom by THAT core's
+   own load -- psutil.cpu_percent(percpu=True), not the aggregate split
+   into equal parts. A block is a core, so the row is only meaningful at
+   the real core count. */
+.cores{display:flex;gap:2px;margin-top:var(--space-3);align-items:flex-end;height:22px}
+.cores .c{flex:1;min-width:0;height:100%;background:var(--border-strong);
+  border-radius:1px;position:relative;overflow:hidden}
+.cores .c i{position:absolute;left:0;right:0;bottom:0;background:var(--accent);
+  display:block}
+
+/* Continuous magnitude. Same 3px hairline the rest of the page uses. */
+.bar{height:4px;background:var(--border-strong);border-radius:2px;
+  margin-top:var(--space-3);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
+
+/* One utilisation percentage, one dial. */
+.gauge{position:relative;width:64px;height:64px;flex:none;margin-top:var(--space-2)}
+.gauge svg{width:100%;height:100%;display:block}
+.gauge .gv{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)}
+.metric.has-gauge{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:var(--space-3)}
 
 /* ── current usage: the one accented object ──────────────────────────── */
 /* Plain, same surface and same 1px border as every other panel on the page
@@ -572,7 +599,15 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
       <div class="sec-row"><h2 class="sec">Recent</h2></div>
       <div id="recent"></div>
-      <div class="after"><button onclick="go('logs')">View all logs</button></div>
+      <!-- Export sits here as well as on Logs. Exporting is one of the two
+           things a device owner actually comes to this page to do, and
+           having it only behind a nav hop made it feel like a buried
+           feature rather than a button. Same handler, same local data. -->
+      <div class="after">
+        <button onclick="go('logs')">View all logs</button>
+        <button class="primary" onclick="doExport()">Export report</button>
+      </div>
+      <div id="exportNoteOverview" class="note"></div>
     </section>
 
     <!-- LOGS -->
@@ -663,39 +698,74 @@ function syncView(s){
 }
 
 /* ── telemetry: absent is smaller, quieter, and has NO meter ─────────── */
-/* A row of 18 LEDs, not a dial -- a dashboard of four dials read as "wall of
-   gauges" (a generic-analytics tell), where a hardware-monitor utility
-   just lights up the blocks that are true right now. Filled count is
-   percent/100 rounded to the nearest block, the same real reading the
-   gauge it replaces used; nothing else changed about what this represents. */
-function blockRow(p){
-  var n=18, filled=Math.round(p/100*n), out="";
-  for(var i=0;i<n;i++) out+='<i class="'+(i<filled?"on":"")+'"></i>';
+function clamp(p){return Math.max(0,Math.min(100,p))}
+
+/* One block per REAL logical CPU, each filled by that core's own load. The
+   count is len(per_core), never a round number chosen for looks: a block
+   IS a core, so 16 cores draw 16 blocks and 32 draw 32. */
+function coreRow(perCore){
+  return perCore.map(function(v){
+    return '<div class="c"><i style="height:'+clamp(v)+'%"></i></div>';
+  }).join("");
+}
+
+/* 24 ticks over a 270-degree sweep. Kept for GPU alone: it is one
+   utilisation percentage with no countable units behind it and no second
+   dimension, which is the only place a dial says more than a bar would. */
+function gaugeTicks(p){
+  var n=24, start=135, sweep=270, filled=Math.round(p/100*n), out="";
+  for(var i=0;i<n;i++){
+    var ang=(start+sweep*i/(n-1)).toFixed(1);
+    var col=(i<filled)?"var(--accent)":"var(--border-strong)";
+    out+='<line x1="50" y1="13" x2="50" y2="22" stroke="'+col+'" stroke-width="4.5" '
+      +'stroke-linecap="round" transform="rotate('+ang+' 50 50)"/>';
+  }
   return out;
 }
-function metric(label,value,sub,p){
-  var pClamped=(p==null)?null:Math.max(0,Math.min(100,p));
-  return '<div class="metric"><div class="lbl">'+esc(label)+'</div>'
+
+/* shape: "cores" | "bar" | "gauge" | null. null renders no indicator at
+   all -- absence is never drawn as a measurement, in any of the three. */
+function metric(label,value,sub,shape,data){
+  var body='<div class="lbl">'+esc(label)+'</div>'
    +(value==null
       ? '<div class="val na">Unavailable</div><div class="sub">'+esc(sub)+'</div>'
-      : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>')
-   +(pClamped==null?'':'<div class="blocks">'+blockRow(pClamped)+'</div>')
-   +'</div>';
+      : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>');
+
+  if(shape==="cores" && data && data.length)
+    return '<div class="metric">'+body+'<div class="cores">'+coreRow(data)+'</div></div>';
+  if(shape==="bar" && data!=null)
+    return '<div class="metric">'+body
+      +'<div class="bar"><i style="width:'+clamp(data)+'%"></i></div></div>';
+  if(shape==="gauge" && data!=null)
+    return '<div class="metric has-gauge"><div>'+body+'</div>'
+      +'<div class="gauge"><svg viewBox="0 0 100 100">'+gaugeTicks(clamp(data))+'</svg>'
+      +'<div class="gv">'+Math.round(clamp(data))+'%</div></div></div>';
+  return '<div class="metric">'+body+'</div>';
 }
 function paintHealth(tl){
   if(!tl)return;
   var c=tl.cpu,m=tl.memory,g=tl.gpu,s=tl.storage;
+  /* The sub-line names BOTH counts when they differ. per_core comes back
+     one entry per LOGICAL cpu, so on a 10-core/16-thread part the row is
+     16 blocks -- and saying only "10 cores" over 16 blocks would leave the
+     viewer counting and finding the label wrong. */
+  var cpuSub="psutil not installed";
+  if(c){
+    cpuSub=(c.cores_physical && c.cores_physical!==c.cores_logical)
+      ? c.cores_logical+" threads on "+c.cores_physical+" cores"
+      : (c.cores_logical||0)+" cores";
+  }
   document.getElementById("health").innerHTML=
-     metric("CPU", c?pct(c.percent):null,
-            c?((c.cores_physical?c.cores_physical+" cores":c.cores_logical+" threads")):"psutil not installed",
-            c?c.percent:null)
+     metric("CPU", c?pct(c.percent):null, cpuSub, "cores", c?c.per_core:null)
    + metric("Memory", m?gb(m.used_bytes):null,
-            m?"of "+gb(m.total_bytes):"psutil not installed", m?m.percent:null)
+            m?"of "+gb(m.total_bytes):"psutil not installed",
+            "bar", m?m.percent:null)
    + metric("GPU", g?pct(g.percent):null,
             g?gb(g.vram_used_bytes)+" / "+gb(g.vram_total_bytes)+" VRAM":"No supported GPU was detected.",
-            g?g.percent:null)
+            "gauge", g?g.percent:null)
    + metric("Storage", s?gb(s.free_bytes)+" free":null,
-            s?"of "+gb(s.total_bytes):"Unavailable", s?s.percent:null);
+            s?"of "+gb(s.total_bytes):"Unavailable",
+            "bar", s?s.percent:null);
   document.getElementById("stamp").textContent="refreshed just now";
 }
 
@@ -858,16 +928,29 @@ function detailRecent(i){
     +group("Session",[["Purpose",r.tujuan],["Start",r.start],["Duration",r.durasi]]));
 }
 
+/* Writes to whichever note element belongs to the view the user is on, so
+   feedback appears where they clicked rather than on the other page. */
+function exportNote(msg){
+  var ids=["exportNote","exportNoteOverview"];
+  for(var i=0;i<ids.length;i++){
+    var el=document.getElementById(ids[i]);
+    if(el) el.textContent=msg;
+  }
+}
 function doExport(){
-  var note=document.getElementById("exportNote");
-  note.textContent="Preparing export…";
+  exportNote("Preparing export…");
   fetch(t("/api/export?range="+encodeURIComponent(RANGE)))
    .then(function(x){return x.json()})
    .then(function(d){
-     if(d.ok){note.textContent=d.note||("Exported "+d.name);
-              window.location=t("/download?f="+encodeURIComponent(d.name))}
-     else{note.textContent="Export failed. "+d.error}
-   }).catch(function(){note.textContent="Export failed."});
+     if(d.ok){
+       /* Say where it went, not just that it happened -- the browser drops
+          it in the download folder and a bare "Exported" leaves the person
+          hunting for a filename they never saw. */
+       exportNote("Saved "+d.name+(d.note?" — "+d.note:""));
+       window.location=t("/download?f="+encodeURIComponent(d.name));
+     }
+     else{exportNote("Export failed. "+d.error)}
+   }).catch(function(){exportNote("Export failed.")});
 }
 
 /* Shortcut hint reflects the platform. Displayed only -- the binding ships

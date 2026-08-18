@@ -88,8 +88,19 @@ def cpu(interval: float | None = None) -> dict[str, Any] | None:
             return dict(_cpu_last_value)
         interval = _CPU_SAMPLE_SECONDS
     try:
+        # percpu in the SAME sampling window as the aggregate, not a second
+        # call: two cpu_percent() calls back to back would give the second one
+        # a near-zero window and return a row of zeros. psutil keeps separate
+        # internal state for the aggregate and the per-cpu series, so this is
+        # one blocking sample that yields both.
+        per_core = psutil.cpu_percent(interval=interval, percpu=True)
         _cpu_last_value = {
-            "percent": psutil.cpu_percent(interval=interval),
+            # Recomputed from the per-core readings rather than taken from a
+            # third call: the aggregate must be consistent with the row of
+            # cores drawn beside it, or the number and the blocks disagree on
+            # screen for no reason a viewer could work out.
+            "percent": round(sum(per_core) / len(per_core), 1) if per_core else 0.0,
+            "per_core": [round(v, 1) for v in per_core],
             "cores_logical": psutil.cpu_count(logical=True),
             "cores_physical": psutil.cpu_count(logical=False),
         }
