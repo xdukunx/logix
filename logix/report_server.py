@@ -364,7 +364,8 @@ h2.sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:upperc
 .health{border:1px solid var(--border);border-radius:var(--radius-md);
   background:var(--surface);display:grid;grid-template-columns:repeat(4,1fr);
   margin-bottom:var(--space-5)}
-.metric{padding:var(--space-4);border-left:1px solid var(--border)}
+.metric{padding:var(--space-4);border-left:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;gap:var(--space-3)}
 .metric:first-child{border-left:0}
 .metric .lbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
   color:var(--text-faint);margin-bottom:var(--space-2)}
@@ -372,8 +373,16 @@ h2.sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:upperc
 .metric .val.na{font-size:13px;font-weight:400;color:var(--text-faint);line-height:1.55;
   padding:6px 0 5px}
 .metric .sub{font-size:12px;color:var(--text-muted);margin-top:2px}
-.bar{height:3px;background:var(--border);border-radius:2px;margin-top:var(--space-3);overflow:hidden}
-.bar i{display:block;height:100%;background:var(--text);border-radius:2px}
+/* Radial gauge. Ticks fill proportionally to a REAL percentage (CPU/memory/
+   storage/GPU utilisation) -- never a target, score, or goal, which is why
+   there is no second colour band and no "of 100" framing anywhere near it.
+   A metric with no reading (na) gets no gauge at all, same rule as the old
+   linear bar: absence must never render as a full or empty dial, either of
+   which would look like a real measurement. */
+.gauge{position:relative;width:60px;height:60px;flex:none}
+.gauge svg{width:100%;height:100%;display:block}
+.gauge .gv{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)}
 
 /* ── current usage: the one accented object ──────────────────────────── */
 .usage{background:var(--surface-accent);border:1px solid var(--border);
@@ -649,13 +658,33 @@ function syncView(s){
 }
 
 /* ── telemetry: absent is smaller, quieter, and has NO bar ───────────── */
+/* 24 short radial ticks over a 270-degree sweep (a 90-degree gap at the
+   bottom, like a speedometer). Filled count is percent/100 rounded to the
+   nearest tick -- the ONLY input is a real reading. There is deliberately
+   no second colour band, no "target" mark, and no center label reading
+   anything but the percent itself: this shape is legitimate here only
+   because CPU/memory/storage/GPU utilisation are genuine fractions of a
+   known whole, never a goal or a score. */
+function gaugeTicks(p){
+  var n=24, start=135, sweep=270, filled=Math.round(p/100*n), out="";
+  for(var i=0;i<n;i++){
+    var ang=(start+sweep*i/(n-1)).toFixed(1);
+    var col=(i<filled)?"var(--accent)":"var(--border)";
+    out+='<line x1="50" y1="13" x2="50" y2="22" stroke="'+col+'" stroke-width="4.5" '
+      +'stroke-linecap="round" transform="rotate('+ang+' 50 50)"/>';
+  }
+  return out;
+}
 function metric(label,value,sub,p){
-  return '<div class="metric"><div class="lbl">'+esc(label)+'</div>'
+  var pClamped=(p==null)?null:Math.max(0,Math.min(100,p));
+  var gauge=(pClamped==null)?"":
+    '<div class="gauge"><svg viewBox="0 0 100 100">'+gaugeTicks(pClamped)+'</svg>'
+    +'<div class="gv">'+Math.round(pClamped)+'%</div></div>';
+  return '<div class="metric"><div class="info"><div class="lbl">'+esc(label)+'</div>'
    +(value==null
       ? '<div class="val na">Unavailable</div><div class="sub">'+esc(sub)+'</div>'
-      : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>'
-        +(p==null?'':'<div class="bar"><i style="width:'+Math.max(0,Math.min(100,p))+'%"></i></div>'))
-   +'</div>';
+      : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>')
+   +'</div>'+gauge+'</div>';
 }
 function paintHealth(tl){
   if(!tl)return;
