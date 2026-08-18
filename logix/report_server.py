@@ -36,7 +36,12 @@ treats as first-class. So:
   * it requires a token minted at launch, because on a shared workstation
     "localhost" is not a security boundary -- another signed-in user can reach
     a loopback port;
-  * it is read-only: there is no endpoint here that writes to the database;
+  * it is read-only with two deliberate exceptions: /api/server/sync and
+    /api/server/test, which run the existing sync path. They take no
+    parameters and can do nothing else, so there is still no way to write
+    arbitrary data through this server -- but "read-only" on its own would
+    now be untrue, and a docstring that quietly stops matching the code is
+    worse than one that admits the seam;
   * it exits on its own after an idle period, so a forgotten browser tab does
     not leave a PII endpoint listening for the rest of the day.
 """
