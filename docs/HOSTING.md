@@ -14,6 +14,37 @@ Python + SQLite (the DB file is created automatically on first run).
 
 ---
 
+## 0. Requirements & sizing a VM
+
+| | Needed |
+|---|---|
+| OS | Linux, macOS, or Windows — CI runs the test suite on Ubuntu and Windows |
+| Python | 3.11+ (CI tests 3.11 and 3.12; there's no hard floor lower than that) |
+| Node.js | Optional — only used to build the React dashboard at install time. Without it, the server serves the built-in static UI instead, with no loss of function. |
+| Dependencies | `fastapi`, `uvicorn`, `openpyxl` — no external database, no Docker |
+
+**Sizing a VM:** the server is one `uvicorn` process talking to a local SQLite
+file — no worker pool, no queue, no background jobs beyond the odd export.
+Devices are quiet by design: each one only calls in on a heartbeat (5 seconds
+by default, `LOGIX_HEARTBEAT_SECONDS`) plus the occasional session sync, and
+this project is deliberately scoped to **self-hosted, low hundreds of
+devices** per server, not a multi-tenant SaaS load. For that shape:
+
+* **A single lab (up to ~50 workstations):** 1 vCPU, 1 GB RAM, 10 GB disk.
+  This is a conservative floor, not a benchmarked ceiling — it hasn't been
+  load-tested against real traffic, but the workload (small JSON requests,
+  a single-writer SQLite DB) is light enough that headroom is expected.
+* **A full building (a few hundred devices):** 2 vCPU, 2 GB RAM, 20 GB disk
+  gives comfortable headroom for the same shape of traffic at higher volume.
+* **Disk** is mostly the SQLite DB and exported reports, not logs or media —
+  10 GB is generous for years of session history at this scale.
+
+If you outgrow "low hundreds of devices," that's a re-architecture (a real
+DB server, multiple app workers), not a bigger VM — see
+[Architecture](ARCHITECTURE.md).
+
+---
+
 ## 1. One-command setup (recommended)
 
 **Fresh Linux/macOS host, one line** — clones the repo, checks/installs

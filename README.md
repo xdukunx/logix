@@ -44,6 +44,7 @@
       <a href="#getting-started">Getting Started</a>
       <ul>
         <li><a href="#is-this-for-you">Is this for you?</a></li>
+        <li><a href="#requirements">Requirements</a></li>
         <li><a href="#setup-step-by-step">Setup, step by step</a></li>
         <li><a href="#install-via-a-package-manager">Install via a package manager</a></li>
       </ul>
@@ -126,6 +127,17 @@ Details: [docs/PRIVACY.md](docs/PRIVACY.md) &middot; [SECURITY.md](SECURITY.md) 
 
 * **One computer** — install the agent below; sessions log **locally**, nothing else to set up.
 * **A whole lab** — add a [central server](docs/HOSTING.md) for one dashboard, downloadable reports, and remote lock/message/screenshot commands across every machine.
+
+### Requirements
+
+| | Client (workstation) | Server (optional) |
+|---|---|---|
+| OS | Windows 10/11, x64 (full agent) · Linux/macOS (SSH-only capture) | Linux, macOS, or Windows |
+| Python | 3.8+ | 3.11+ |
+| Hardware | None — no resident process; DB is ~7 MB per 10,000 sessions | **1 vCPU / 1 GB RAM / 10 GB disk** for a typical lab |
+
+No Docker, no external database, either side. Reasoning behind the VM numbers
+(and how they change for a bigger lab): [docs/HOSTING.md](docs/HOSTING.md#0-requirements--sizing-a-vm).
 
 ### Setup, step by step
 
