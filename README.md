@@ -45,7 +45,6 @@
       <ul>
         <li><a href="#is-this-for-you">Is this for you?</a></li>
         <li><a href="#setup-step-by-step">Setup, step by step</a></li>
-        <li><a href="#quick-start">Quick start</a></li>
         <li><a href="#install-via-a-package-manager">Install via a package manager</a></li>
       </ul>
     </li>
@@ -162,23 +161,39 @@ The server is a place the workstations send their sessions to, so you can see
 every machine in one dashboard. Workstations keep working normally if the
 server is down — they just catch up later.
 
-You will do this once on the server, then once per workstation.
+Seven steps: five on the server, one on each workstation, one to finish.
 
-**Step 1 — get the server ready.**
+**Step 1 — put the server software on the machine.**
 
-On the machine that will be the server:
+One line, on the machine that will be the server:
 
 ```bash
-git clone https://github.com/xdukunx/logix.git
+curl -fsSL https://raw.githubusercontent.com/xdukunx/logix/main/install/bootstrap-server.sh | bash
+```
+
+Windows: `irm https://raw.githubusercontent.com/xdukunx/logix/main/install/bootstrap-server.ps1 | iex`
+
+It fetches the code and installs what the server needs. Like any
+pipe-to-shell installer, read it first if you would rather:
+`curl -fsSL <url> -o s.sh && less s.sh`.
+
+**Step 2 — prepare it for real use.**
+
+```bash
 cd logix
 python ops/go_live.py init --admin-email you@campus.ac.id
 ```
 
-This makes a clean database and prints your **admin password** and an
-**ingest key**. Write the password down — you sign in to the dashboard with
-it. Both are saved to `server/.env.production`.
+This is a separate step on purpose. Step 1 installs the software; this one
+starts a **clean database** and generates the credentials, because a
+database left over from testing carries test devices and real names that
+have no business on a server handling students' data. It refuses to reuse
+one.
 
-**Step 2 — tell the server which computers exist.**
+It prints your **admin password** — write it down, you sign in to the
+dashboard with it — and saves everything to `server/.env.production`.
+
+**Step 3 — tell the server which computers exist.**
 
 Make a text file, one line per workstation:
 
@@ -198,7 +213,7 @@ It prints one **invite code** per workstation. Each code only works on the
 machine it was made for, so it is safe to print the list and walk around the
 lab with it. Codes are single use and expire after 15 minutes.
 
-**Step 3 — turn the server on.**
+**Step 4 — turn the server on.**
 
 ```bash
 caddy run --config docs/deploy/Caddyfile.lab   # HTTPS; edit it first to set your server name
@@ -206,9 +221,9 @@ python ops/serve.py                            # Logix itself
 ```
 
 Open `https://your-server-name` in a browser and sign in with the email you
-gave in Step 1 and the password it printed.
+gave in Step 2 and the password it printed.
 
-**Step 4 — install on each workstation, and connect it.**
+**Step 5 — install on each workstation, and connect it.**
 
 This is the step that connects a computer to the server. One command, on the
 workstation, as Administrator:
@@ -220,7 +235,7 @@ LogixAgentSetup.exe /VERYSILENT `
   /DEVICENAME="WS-01 - Simulation node"
 ```
 
-Use the invite code that Step 2 printed **for that machine**. The installer
+Use the invite code that Step 3 printed **for that machine**. The installer
 does the rest: it introduces itself to the server, receives a key that
 belongs to that computer alone, deletes the shared key, and starts running.
 
@@ -231,13 +246,13 @@ wizard asks for the same three things.
 > than a public domain), add `/SERVERCERT=<path to root.crt>` so the
 > workstation trusts it.
 
-**Step 5 — check it worked.**
+**Step 6 — check it worked.**
 
 On the workstation: Start menu → **Laporan Logix** → **Server** tab. It
 should say *All changes synchronized*. On the server dashboard, the machine
 appears in the device list within a few seconds.
 
-**Step 6 — lock the door.**
+**Step 7 — lock the door.**
 
 Once every workstation has enrolled:
 
@@ -263,100 +278,6 @@ these it is, in plain words:
 | *Server could not be reached* | Network or address problem. Local logging keeps working. |
 | *The server rejected this workstation's credentials* | The device key is wrong or was revoked — re-enrol with a fresh invite code. |
 | *N waiting to synchronize* | It is connected and catching up. Press **Sync now** if you do not want to wait. |
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-### Quick start
-
-**Windows lab PC, one line** (in an elevated PowerShell — right-click PowerShell → "Run as Administrator"). Installs the core logger *and* the sign-in popup / timer widget:
-
-```powershell
-irm https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 | iex
-```
-
-**Linux / macOS**, or if you'd rather clone the repo yourself first:
-
-```bash
-git clone https://github.com/xdukunx/logix.git
-cd logix
-
-# Linux / macOS
-sudo ./install/install.sh
-
-# Windows (core logger only, no sign-in popup — use the one-liner above for that)
-.\install\install.ps1
-```
-
-That's it for local-only use — sessions are now logged to a local SQLite
-database. Generate an Excel report any time:
-
-```bash
-python logbook_report.py     # writes an .xlsx into <data-dir>/reports
-```
-
-Either installer also asks (or takes flags) to point the device at a central
-server. Full walkthrough, flags, and mass-deployment: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-### Running a lab: server + workstations
-
-Four commands on the server, then one installer run per workstation. Everything
-below — clean database, generated secrets, HTTPS, and each device's own
-credential — is set up by these steps; there is nothing to configure by hand
-afterwards.
-
-**On the server**
-
-```bash
-# 1. Clean database + generated admin password and ingest key -> server/.env.production
-python ops/go_live.py init --admin-email you@campus.ac.id
-
-# 2. Pre-register the lab. One line per station: hostname[,display name]
-python ops/go_live.py register --devices stations.txt
-
-# 3. HTTPS. Edit docs/deploy/Caddyfile.lab first to set your server's name
-caddy run --config docs/deploy/Caddyfile.lab
-
-# 4. Start Logix itself (loopback only -- Caddy is the way in)
-python ops/serve.py
-```
-
-`init` **refuses to reuse a development database**: a dev DB carries test
-devices, sessions with real names and NIMs, and keys that have been sitting in
-a working tree. `register` prints one invite code per station, each **pinned to
-that hostname** — a code that leaks is worthless anywhere else, so it is safe to
-print the table and carry it round the lab. Codes are single-use and expire in
-15 minutes.
-
-**On each workstation** — one command, fully unattended:
-
-```powershell
-LogixAgentSetup.exe /VERYSILENT `
-  /SERVERURL=https://logix.lab `
-  /INVITECODE=A1B2-C3D4-E5F6-7890 `
-  /SERVERCERT=\\server\share\root.crt `
-  /DEVICENAME="WS-07 - GPU-A100"
-```
-
-That single run does all of it: trusts the server's certificate, performs the
-enrolment **handshake** and stores a key belonging to that machine alone, wipes
-the shared bootstrap key from disk, registers the logon task, and starts the
-agent. Leave the flags off and the wizard asks for the same things instead.
-
-`/SERVERCERT` is only needed for a lab server that issues its own certificate
-(`Caddyfile.lab`). With a public domain and a real certificate, omit it.
-
-**Finally, close the door**
-
-```bash
-python ops/go_live.py lockdown   # only per-device keys work from now on
-python ops/go_live.py check      # fails on anything still unsafe
-```
-
-`lockdown` refuses to run while any registered device has yet to enrol, so it
-cannot cut a straggler off. After it, the shared ingest key is inert: a leaked
-copy no longer lets anything report as a device.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
