@@ -1,0 +1,13 @@
+# Optional dependencies -- ONLY needed for the local dashboard's telemetry
+# cards and its XLSX export. The core (capture, session lifecycle, logbook,
+# sync, reporting) needs none of these and must never be made to.
+#
+#   pip install -r requirements-dashboard.txt
+#
+# Without psutil the dashboard shows "Unavailable" for CPU and memory.
+# Storage does not need it (shutil.disk_usage is stdlib) and GPU does not
+# either (nvidia-smi, spawned on demand and cached).
+#
+# Without openpyxl the Export XLSX action is offered as CSV instead.
+psutil>=5.9
+openpyxl>=3.1

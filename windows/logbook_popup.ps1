@@ -391,7 +391,10 @@ $profileFile = Join-Path $Global:StateDir 'last_profile.json'
 # user fast path, so the two paths can never drift. Writes the session file +
 # local profile, logs START, and starts the timer.
 function Invoke-LogbookStartSession {
-    param([string]$Nama, [string]$Nim, [string]$Access, [string]$Tujuan, [string]$Keterangan)
+    param([string]$Nama, [string]$Nim, [string]$Access, [string]$Tujuan, [string]$Keterangan,
+          # Optional. Never validated and never blocking: most workstation
+          # use is not a formal job, so blank is the ordinary answer.
+          [string]$JobType = '', [string]$JobId = '')
     Ensure-LogbookDirs
     $sessionType = $Access.Trim()
     $sid = "win-$env:USERNAME-$([DateTimeOffset]::Now.ToUnixTimeSeconds())-$([guid]::NewGuid().ToString('N').Substring(0,8))"
@@ -408,6 +411,8 @@ function Invoke-LogbookStartSession {
         nim              = $Nim.Trim()
         tujuan           = $Tujuan.Trim()
         keterangan       = $Keterangan.Trim()
+        job_type         = $JobType.Trim()
+        job_id           = $JobId.Trim()
     }
     $obj | ConvertTo-Json -Depth 4 | Out-File -FilePath $Global:SessionFile -Encoding UTF8 -Force
     # Persist locally so the fast path can resume next time (identity never
@@ -440,7 +445,7 @@ function Invoke-LogbookStartSession {
     # -- which logbook_report.build() already calls on every report. A close
     # (END) keeps the synchronous bridge on purpose, because that path has to
     # know whether the row was really written before it locks the machine.
-    $dispatched = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan -Async
+    $dispatched = Invoke-WSLLogbook -Event 'START' -SessionType $sessionType -AnyDeskDetected $anydeskDetected -SessionId $sid -Nama $obj.nama -Nim $obj.nim -Tujuan $obj.tujuan -Keterangan $obj.keterangan -JobType $obj.job_type -JobId $obj.job_id -Async
     if (-not $dispatched) { Write-LogbookError "START logging failed to dispatch but continuing safely. sid=$sid" }
     return $true
 }
@@ -588,6 +593,8 @@ Set-LogbookNumericOnly $nim
 $access = $window.FindName('AccessBox')
 $tujuan = $window.FindName('TujuanBox')
 $ket = $window.FindName('KetBox')
+$jobType = $window.FindName('JobTypeBox')
+$jobId = $window.FindName('JobIdBox')
 $btn = $window.FindName('SubmitBtn')
 
 $hint = $window.FindName('HintText')
@@ -671,7 +678,7 @@ $btn.Add_Click({
         Ensure-LogbookDirs
         $btn.IsEnabled = $false
         $btn.Content = 'Menyimpan...'
-        Invoke-LogbookStartSession -Nama $nama.Text -Nim $nim.Text -Access (Get-ComboText $access) -Tujuan (Get-ComboText $tujuan) -Keterangan $ket.Text | Out-Null
+        Invoke-LogbookStartSession -Nama $nama.Text -Nim $nim.Text -Access (Get-ComboText $access) -Tujuan (Get-ComboText $tujuan) -Keterangan $ket.Text -JobType (Get-ComboText $jobType) -JobId $jobId.Text | Out-Null
         $script:submitted = $true
         # Session started and the timer process is launching; wait for it to
         # actually reach the screen (Invoke-LogbookHandoffToTimer), THEN

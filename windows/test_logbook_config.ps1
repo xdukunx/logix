@@ -22,8 +22,14 @@ Assert ($mainCard.Width -eq '320') "sign-in dialog is 320px wide"
 Assert ($mainCard.CornerRadius -eq '22') "sign-in dialog uses radius 22, matching the pill language"
 $logo = ($doc.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'LogoText' }).Text
 Assert ($logo -eq 'Logix') "default logo text Logix"
-$items = $doc.SelectNodes("//*[local-name()='ComboBoxItem']")
-Assert ($items.Count -eq 6) "2 access + 3 purpose + the 'Lainnya' free-text escape = 6 combo items"
+# Counted PER COMBO, not across the whole document. The original counted
+# every ComboBoxItem in the XAML, which made it a test of how many dropdowns
+# the form happens to have -- adding the optional job type broke it while
+# saying nothing about the lists it was meant to guard.
+$accessItems = $doc.SelectNodes("//*[local-name()='ComboBox'][@Name='AccessBox']/*")
+Assert ($accessItems.Count -eq 2) "2 configured access types"
+$purposeItems = $doc.SelectNodes("//*[local-name()='ComboBox'][@Name='TujuanBox']/*")
+Assert ($purposeItems.Count -eq 4) "3 configured purposes + the 'Lainnya' free-text escape hatch"
 $accessBox = $doc.SelectNodes("//*[local-name()='ComboBox']") | Where-Object { $_.Name -eq 'AccessBox' }
 Assert ($accessBox.IsEnabled -eq 'False') "access type is auto-detected and read-only, never a user choice"
 $nimBox = $doc.SelectNodes("//*[local-name()='TextBox']") | Where-Object { $_.Name -eq 'NimBox' }
@@ -1062,9 +1068,87 @@ Assert ($bridgeFn -match 'if \(-not \$Async\) \{ Remove-Item \$payloadPath') `
     "and the synchronous path still deletes its own payload immediately"
 # A close must NOT be async: it has to know the row was really written before
 # the workstation locks behind it.
-Assert ($commonSrc -match "(?s)function Close-ActiveLogbookSession.*?Invoke-WSLLogbook -Event \`$Reason(?![^
-]*-Async)") `
+#
+# Asserted against the whole function body rather than one call line. The
+# original form pinned the literal `Invoke-WSLLogbook -Event $Reason`, which
+# made it a test of the CALL SYNTAX -- switching to splatting (to pass an
+# optional -Timestamp) broke it while the property it guards was untouched.
+# Absence of -Async anywhere in the closer is the actual invariant, and it
+# survives however the arguments are passed.
+# \r?\n, not \n: .gitattributes normalises these files to CRLF on checkout,
+# so a bare \n matches only in a working copy that tooling left as LF.
+$closeFn = [regex]::Match($commonSrc,
+    '(?s)function Close-ActiveLogbookSession \{.*?\r?\n\}\r?\n').Value
+Assert ($closeFn.Length -gt 0) `
+    "Close-ActiveLogbookSession is still a top-level function"
+Assert ($closeFn -match 'Invoke-WSLLogbook') `
+    "the close path still goes through the logging bridge"
+Assert ($closeFn -notmatch 'Async') `
     "ending a session still waits for its write (only START is fire-and-forget)"
+
+# AUTO_CLOSE end-time semantics. Duration is derived by subtracting the START
+# row's timestamp from the END row's (logbook_report.fmt_duration), so an END
+# dated "now" charges the user for every hour between the real end of the
+# session and the moment anything noticed. tests/test_auto_close_duration.py
+# proves the arithmetic; these prove the closers actually supply the bound.
+Assert ($bridgeFn -match '\[datetime\]\$Timestamp') `
+    "the bridge accepts an explicit event time, so a close can be back-dated"
+Assert ($bridgeFn -match '\$eventTime\s*=.*Get-Date') `
+    "and still defaults to now when nobody supplies one"
+Assert ($closeFn -match '\[datetime\]\$EndTime') `
+    "the closer accepts an end time"
+Assert ($closeFn -match '\$EndTime -lt \$startedAt') `
+    "and refuses to date a close before its own start (no negative durations)"
+
+# Optional job metadata on the sign-in form. The property that matters is
+# that it is OPTIONAL: nothing may validate it, and nothing on the START path
+# may wait on it. tests/test_job_metadata.py proves the storage half.
+# Asserted against the file, not a regex-extracted function body -- these
+# markers are unique, and an extraction that silently matches nothing turns
+# every check below it into a false failure.
+Assert ($commonSrc -match 'Name="JobTypeBox"') "the sign-in form offers a job type"
+Assert ($commonSrc -match 'Name="JobIdBox"') "and a job id"
+Assert ($commonSrc -match 'jobTypes = @\(\$cfg\.jobTypes\)') `
+    "the job type list is server-overridable like every other list here"
+Assert ($commonSrc -match "@\('', 'Simulation'") `
+    "and its first option is empty, because no job is the ordinary answer"
+
+# And prove the form BUILDS with them, not only that the source mentions
+# them: a malformed XAML fragment reads as perfectly good text.
+Assert ($doc.SelectNodes("//*[local-name()='ComboBox'][@Name='JobTypeBox']").Count -eq 1) `
+    "the built XAML contains the job type control"
+Assert ($doc.SelectNodes("//*[local-name()='TextBox'][@Name='JobIdBox']").Count -eq 1) `
+    "and the job id control"
+Assert ($doc.SelectNodes("//*[local-name()='ComboBox'][@Name='JobTypeBox']/*").Count -eq 8) `
+    "7 job types plus the empty default"
+
+$popupSrc = Get-Content (Join-Path $PSScriptRoot 'logbook_popup.ps1') -Raw
+Assert ($popupSrc -match "FindName\('JobTypeBox'\)") "the popup resolves the job type control"
+Assert ($popupSrc -match "FindName\('JobIdBox'\)") "and the job id control"
+Assert ($popupSrc -match '-JobType \(Get-ComboText \$jobType\)') `
+    "and passes both on submit"
+Assert ($popupSrc -match 'job_type\s+= \$JobType.Trim\(\)') `
+    "session.json carries the job metadata for a resumed session"
+Assert ($popupSrc -notmatch '(?s)if[^
+
+]*\$jobId\.Text[^
+
+]*IsNullOrWhiteSpace') `
+    "nothing validates the job fields -- blank is the ordinary case"
+Assert ($bridgeFn -match '\[string\]\$JobType') "the bridge accepts job metadata"
+Assert ($bridgeFn -match 'job_type = \$JobType') "and puts it in the payload"
+
+$staleFn = [regex]::Match($commonSrc,
+    '(?s)function Close-StaleLogbookSessionIfAny \{.*?\r?\n\}\r?\n').Value
+Assert ($staleFn -match "-EndTime \`$bootTime") `
+    "a session orphaned by a reboot is dated at the boot, not at discovery"
+
+$overAgeFn = [regex]::Match($commonSrc,
+    '(?s)function Close-OverAgeLogbookSessionIfAny \{.*?\r?\n\}\r?\n').Value
+Assert ($overAgeFn -match 'AddSeconds\(\$maxSec\)') `
+    "an over-age session is dated at start plus the cap, which is what the cap means"
+Assert ($overAgeFn -match "-EndTime \`$endAt") `
+    "and that bound is actually passed to the closer"
 
 Write-Host "START latency: the first-call costs are paid before the user can click"
 # PowerShell loads cmdlets and .NET types lazily, so the FIRST ConvertTo-Json

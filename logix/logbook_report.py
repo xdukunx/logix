@@ -32,6 +32,14 @@ BASE_COLUMNS = {
     "client_ip": "TEXT",
     "anydesk_detected": "INTEGER DEFAULT 0",
     "raw_json": "TEXT",
+    # Optional, contextual session metadata. Logix is still
+    # person + workstation + purpose + session; a job is something a session
+    # MAY be associated with, not a new first-class object -- which is why
+    # these are two nullable columns rather than a jobs table with a
+    # taxonomy nobody has agreed on yet. Old rows are NULL and stay valid,
+    # and neither field participates in event_uid or dedup.
+    "job_type": "TEXT",
+    "job_id": "TEXT",
 }
 
 CLOSE_EVENTS = {"END", "LOCK", "AUTO_FINISH", "AUTO_CLOSE", "DISCONNECT", "LOGOFF"}
@@ -312,6 +320,29 @@ def fmt_ts(s: str | None) -> str:
     return str(s or "")
 
 
+def _session_seconds(row) -> int:
+    """Elapsed seconds for one session, or 0 if it cannot be determined.
+
+    Deliberately recomputed from the two timestamps rather than parsed back
+    out of the rendered duration string -- the string is for humans and its
+    format has changed before."""
+    try:
+        start = parse_ts(row.get("start_ts"))
+        end = parse_ts(row.get("end_ts"))
+        if not start or not end:
+            return 0
+        delta = int((end - start).total_seconds())
+        return delta if delta > 0 else 0
+    except Exception:
+        return 0
+
+
+def fmt_seconds(total: int) -> str:
+    h, rem = divmod(int(total), 3600)
+    m = rem // 60
+    return f"{h}j {m}m"
+
+
 def fmt_duration(start_s: str | None, end_s: str | None, active: bool = False) -> str:
     start = parse_ts(start_s)
     end = parse_ts(end_s) if end_s else None
@@ -389,9 +420,26 @@ def build_sessions(rows):
             "status": status,
             "durasi": fmt_duration(safe_get(start, "timestamp"), safe_get(end, "timestamp") if end else None, active=(not end)),
             "keterangan": first_nonempty(display_rows, "keterangan"),
+            # Optional and usually empty. first_nonempty over the whole
+            # session, not just the START row, so a value supplied on any
+            # event of the session still surfaces.
+            "job_type": first_nonempty(display_rows, "job_type"),
+            "job_id": first_nonempty(display_rows, "job_id"),
+            # Which machine recorded this. Not shown in the session table --
+            # a device report is all one workstation -- but the summary sheet
+            # has to name it, because a file that leaves this machine is
+            # useless if it does not say which machine it describes.
+            "hostname": first_nonempty(display_rows, "hostname"),
             "kategori": kategori,
             "session_id": sid,
             "_active": not bool(end),
+            # A session has reached the server only when EVERY one of its
+            # events has. Reporting it synced while its END is still queued
+            # would tell the reader the record is safely central when half
+            # of it is not. safe_get returns "" for a legacy row with no
+            # column, which is falsy -- so an un-migrated database reads as
+            # not-yet-synced rather than as a confident yes.
+            "_synced": all(bool(safe_get(r, "synced")) for r in ordered_events),
         })
 
     for row in loose:
@@ -473,7 +521,12 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     ws["A3"].fill = PatternFill("solid", fgColor="F0FDFA")
     ws["A3"].alignment = Alignment(horizontal="center")
 
-    headers = ["No", "Waktu Mulai", "Waktu Selesai", "Nama / User", "NIM / ID", "Tujuan", "Tipe Akses", "Status", "Durasi", "Keterangan", "Kategori"]
+    # Job Type / Job ID sit next to Tujuan because they describe the same
+    # thing: what this session was for. Optional and usually blank, which
+    # is why they are exported as empty cells rather than a placeholder --
+    # a spreadsheet reader can filter on blank, but not on an em dash.
+    headers = ["No", "Waktu Mulai", "Waktu Selesai", "Nama / User", "NIM / ID", "Tujuan",
+               "Job Type", "Job ID", "Tipe Akses", "Status", "Durasi", "Keterangan", "Kategori"]
     for col, h in enumerate(headers, 1):
         c = ws.cell(4, col, h)
         c.font = Font(color="111827", bold=True)
@@ -490,6 +543,8 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
             row["nama"],
             row["nim"],
             row["tujuan"],
+            row.get("job_type", ""),
+            row.get("job_id", ""),
             row["tipe"],
             row["status"],
             row["durasi"],
@@ -501,11 +556,11 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
             c.fill = white
             c.border = border
             c.alignment = Alignment(vertical="top", wrap_text=True)
-            if col == 7:
+            if col == 9:
                 access = str(val).upper()
                 c.fill = {"ANYDESK": anydesk_fill, "PHYSICAL": physical_fill, "SSH": remote_fill}.get(access, white)
                 c.font = Font(bold=True, color="111827")
-            if col == 8:
+            if col == 10:
                 status = str(val).upper()
                 if "AKTIF" in status:
                     c.fill = active_fill
@@ -516,8 +571,8 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
                 c.font = Font(bold=True, color="111827")
 
     last = max(5, 4 + len(sessions))
-    ws.auto_filter.ref = f"A4:K{last}"
-    widths = [6, 21, 21, 26, 16, 34, 14, 16, 14, 46, 16]
+    ws.auto_filter.ref = f"A4:M{last}"
+    widths = [6, 21, 21, 26, 16, 34, 16, 14, 14, 16, 14, 46, 16]
     for idx, width in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(idx)].width = width
 
@@ -532,7 +587,26 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     ssh = sum(1 for r in sessions if str(r["tipe"]).upper() == "SSH")
     anydesk = sum(1 for r in sessions if str(r["tipe"]).upper() == "ANYDESK")
     physical = sum(1 for r in sessions if str(r["tipe"]).upper() == "PHYSICAL")
+    # Who and where and when, before how many. A report that reaches someone
+    # else is useless if it does not say which workstation and which period it
+    # describes -- and the export timestamp is what distinguishes two files
+    # generated from the same range on different days.
+    stations = sorted({str(r.get("hostname") or "").strip()
+                       for r in sessions if str(r.get("hostname") or "").strip()})
+    users = sorted({str(r.get("nama") or "").strip()
+                    for r in sessions if str(r.get("nama") or "").strip()})
+    total_seconds = 0
+    for r in sessions:
+        secs = _session_seconds(r)
+        if secs:
+            total_seconds += secs
+
     for item in [
+        ("Workstation", ", ".join(stations) if stations else "-"),
+        ("Periode laporan", period_label),
+        ("Diekspor", datetime.now().strftime("%d %b %Y %H:%M")),
+        ("Pengguna unik", len(users)),
+        ("Total durasi", fmt_seconds(total_seconds) if total_seconds else "-"),
         ("Total sesi/event logbook", len(sessions)),
         ("Sesi aktif", active),
         ("Selesai / Finish", finished),
@@ -769,6 +843,18 @@ def build(start_date: Any = None,
         output_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         output_path = output_dir / f"report-logbook-{suffix}-{stamp}.xlsx"
+        # One-second resolution is not enough on its own. Two exports in the
+        # same second -- entirely normal when someone exports, changes a
+        # filter and exports again -- resolved to the SAME path, so the
+        # second silently overwrote the first and the person was handed one
+        # file believing they had two. Only ever appends when a collision
+        # would actually happen, so ordinary filenames are unchanged.
+        if output_path.exists():
+            for n in range(2, 100):
+                candidate = output_dir / f"report-logbook-{suffix}-{stamp}-{n}.xlsx"
+                if not candidate.exists():
+                    output_path = candidate
+                    break
 
     con = connect(db_file)
     try:
@@ -785,6 +871,20 @@ def build(start_date: Any = None,
             repair_active_session_from_windows_state(con)
         rows = fetch_physical(con, start_s, end_s)
         jobs = fetch_jobs(con, start_s, end_s)
+        # An export triggered from a FILTERED view must contain what the
+        # view showed. Exporting the whole period while the screen shows a
+        # search result is the kind of quiet mismatch that makes a report
+        # untrustworthy -- and the reader has no way to notice it.
+        #
+        # Applied here rather than in the SQL because the caller has already
+        # resolved which sessions matched (search spans several columns and
+        # matches a session if ANY row does), and re-deriving that in a
+        # second query risks the two disagreeing.
+        only = kwargs.get("session_ids")
+        if only is not None:
+            keep = set(only)
+            rows = [r for r in rows if safe_get(r, "session_id") in keep]
+            jobs = [j for j in jobs if safe_get(j, "session_id") in keep]
         write_xlsx(rows, jobs, output_path, period_label)
     finally:
         con.close()

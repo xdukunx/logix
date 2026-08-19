@@ -689,16 +689,34 @@ function Invoke-WSLLogbook {
         [ValidateSet('self_declared', 'unverified', 'directory')]
         [string]$IdentitySource = 'self_declared',
         [string]$PersonRole = '',
+        # Optional session metadata. Empty is the normal case and must stay
+        # cheap: these add two keys to a payload the START path already
+        # writes, and nothing on that path validates or waits on them.
+        [string]$JobType = '',
+        [string]$JobId = '',
         # START uses this. See Invoke-NativeBridge's async branch for why it
         # is safe there and why it is NOT the default: a close/END must know
         # whether the row was really written before the workstation locks.
-        [switch]$Async
+        [switch]$Async,
+        # When the event happened, if that is NOT now.
+        #
+        # Duration is not stored anywhere -- logbook_report.py derives it by
+        # subtracting the START row's timestamp from the END row's. So an END
+        # written at the moment we NOTICE a session should have closed dates
+        # the session to that moment, and a machine locked overnight produces
+        # a 25-hour row for an 8-hour cap. Only the automatic closers pass
+        # this; a human pressing SELESAI really is ending it now.
+        #
+        # payload_from_args already prefers a timestamp present in the JSON
+        # payload over now_iso(), so this needs nothing on the Python side.
+        [datetime]$Timestamp = [datetime]::MinValue
     )
     Ensure-LogbookDirs
     $winUser = "$env:USERDOMAIN\$env:USERNAME"
     $payloadPath = Join-Path $Global:StateDir ("payload-{0}.json" -f ([guid]::NewGuid().ToString('N')))
+    $eventTime = if ($Timestamp -eq [datetime]::MinValue) { Get-Date } else { $Timestamp }
     $payload = [ordered]@{
-        timestamp = (Get-Date).ToString('o')
+        timestamp = $eventTime.ToString('o')
         event = $Event
         username = $env:USERNAME
         windows_user = $winUser
@@ -713,6 +731,8 @@ function Invoke-WSLLogbook {
         anydesk_detected = $AnyDeskDetected
         identity_source = $IdentitySource
         person_role = $PersonRole
+        job_type = $JobType
+        job_id = $JobId
     }
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
@@ -1085,24 +1105,87 @@ function Get-LogbookStatusFile {
 # YASB's custom widget with return_format: json reads {"text", "alt", "tooltip"}.
 # Written whole via a temp file + move so a bar polling mid-write never reads a
 # half-flushed file and renders a blank slot.
+# How long a consumer may treat this file as describing the present. The
+# widget writes a beacon well inside it (see BAR_BEACON_SECONDS), so a file
+# older than this means the process that was writing it is gone -- not that
+# the session is still running.
+$Global:BAR_STALE_SECONDS = 150
+# The one periodic write. Everything else is change-driven. Without a beacon a
+# killed widget leaves the bar reading "active" forever, and Clear-LogbookBarStatus
+# cannot run from a process that no longer exists.
+$Global:BAR_BEACON_SECONDS = 60
+
 function Write-LogbookBarStatus {
     param(
         [string]$Text = '',
         [string]$Alt = '',
         [string]$Tooltip = '',
-        [string]$State = 'idle'
+        [string]$State = 'idle',
+        # ---- schema v1: STATE, not a rendered timer --------------------------
+        # The bar computes elapsed itself from started_at, which is what removes
+        # the reason to rewrite this file every second.
+        [string]$SessionId = '',
+        [string]$StartedAt = '',
+        [string]$Title = '',
+        [string]$Station = '',
+        [string]$SyncState = '',
+        [int]$PendingEvents = 0,
+        # Beacons and genuine changes both write; an unchanged tick does not.
+        [switch]$Force
     )
     try {
         $path = Get-LogbookStatusFile
         $payload = [ordered]@{
-            text    = $Text
-            alt     = $Alt
-            tooltip = $Tooltip
-            # Not read by YASB itself -- it is there so a stylesheet or another
-            # bar can colour the slot by session state without parsing the text.
-            state   = $State
-            updated = (Get-Date).ToString('o')
+            schema_version = 1
+            state          = $State
+            session_id     = $SessionId
+            started_at     = $StartedAt
+            title          = $Title
+            station        = $Station
+            sync_state     = $SyncState
+            pending_events = $PendingEvents
+            # PRIVACY, binding: no nim and no nama, ever. A third-party bar
+            # renders this file onto a shared workstation's taskbar, where
+            # anyone walking past reads it. station and title are the most
+            # this may carry.
+            #
+            # ---- legacy keys, one release only ----------------------------
+            # An installed YASB config still reads {data[text]}. Dropping these
+            # the same day the schema changes would blank the bar on every
+            # machine that has not been reconfigured yet; schema_version is how
+            # a consumer tells which contract it is holding.
+            text           = $Text
+            alt            = $Alt
+            tooltip        = $Tooltip
+            updated_at     = (Get-Date).ToString('o')
+            updated        = (Get-Date).ToString('o')
         }
+
+        # Everything except the timestamps and the second-granularity legacy
+        # strings. Two ticks that differ only in when they happened are not a
+        # change, and rewriting the file for them is the 3600-writes-an-hour
+        # this schema exists to stop.
+        #
+        # alt and tooltip carry HH:MM:SS, so leaving them in the signature
+        # would make every single tick a "change" and the gate would do
+        # nothing at all. They are legacy tooltip text; being up to a minute
+        # stale costs nothing. text carries HH:MM and stays in, which lands
+        # the write rate on the minute -- the same cadence as the beacon, and
+        # the finest granularity the legacy bar slot actually renders.
+        $sig = ($payload.GetEnumerator() |
+            Where-Object { $_.Key -notin @('updated_at', 'updated', 'alt', 'tooltip') } |
+            ForEach-Object { "$($_.Key)=$($_.Value)" }) -join '|'
+        $now = Get-Date
+        $age = $Global:BAR_BEACON_SECONDS + 1
+        if ($Global:LogbookBarLastWrite) {
+            $age = ($now - $Global:LogbookBarLastWrite).TotalSeconds
+        }
+        if (-not $Force -and $sig -eq $Global:LogbookBarLastSig -and
+            $age -lt $Global:BAR_BEACON_SECONDS) {
+            return
+        }
+        $Global:LogbookBarLastSig = $sig
+        $Global:LogbookBarLastWrite = $now
         $tmp = "$path.tmp"
         # NOT Out-File -Encoding UTF8: in Windows PowerShell 5.1 that always
         # writes a UTF-8 BOM, and YASB's CustomWidget reads this file's output
@@ -1123,7 +1206,11 @@ function Write-LogbookBarStatus {
 # session is running when the agent may have died. Called when the timer exits.
 function Clear-LogbookBarStatus {
     try {
-        Write-LogbookBarStatus -Text '' -Alt '' -Tooltip 'Tidak ada sesi aktif' -State 'none'
+        # -Force: a session ending is exactly the transition a consumer must
+        # never miss, and it must not be swallowed by the change gate on the
+        # off chance the previous write carried the same fields.
+        Write-LogbookBarStatus -Text '' -Alt '' -Tooltip 'Tidak ada sesi aktif' `
+            -State 'none' -SyncState '' -PendingEvents 0 -Force
     } catch { }
 }
 
@@ -2305,8 +2392,21 @@ function Build-LogbookPopupXaml($cfg) {
     $tHint    = ConvertTo-LogbookXmlText ([string]$cfg.text.hint)
     $tHeading = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'signinTitle' 'Mulai sesi')
 
+    $tJobType = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobTypeLabel' 'Jenis pekerjaan (opsional)')
+    $tJobId   = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobIdLabel' 'ID pekerjaan (opsional)')
+
     $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
     $purposeItems = (@($cfg.purposes)    | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
+
+    # Server-overridable like every other list here, with a default that is
+    # deliberately short. A long taxonomy invites miscategorisation, and the
+    # FIRST item is empty because "no job" is the ordinary answer and has to
+    # be the one requiring no interaction.
+    $jobTypes = @($cfg.jobTypes)
+    if (-not $jobTypes -or $jobTypes.Count -eq 0) {
+        $jobTypes = @('', 'Simulation', 'Analysis', 'Documentation', 'Testing', 'Maintenance', 'Meeting', 'Other')
+    }
+    $jobTypeItems = ($jobTypes | ForEach-Object { "              <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
 
     # ShowInTaskbar="True", not False: confirmed live that a Topmost,
     # ShowInTaskbar=False, WindowStyle=None window spawned by the Task
@@ -2423,6 +2523,28 @@ $purposeItems
 
         <TextBlock Text="$tKet" Style="{StaticResource LxFieldLabel}"/>
         <TextBox Name="KetBox" Style="{StaticResource LxField}" Margin="0,0,0,14"/>
+
+        <!-- Optional job metadata. Most workstation use is not a formal job,
+             so both start empty and neither is ever validated: leaving them
+             blank is the ordinary case, not an incomplete form. Side by side
+             because they are one thought, and the form is already long. -->
+        <Grid Margin="0,0,0,14">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="14"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="$tJobType" Style="{StaticResource LxFieldLabel}"/>
+            <ComboBox Name="JobTypeBox" Style="{StaticResource LxCombo}" IsEditable="True">
+$jobTypeItems
+            </ComboBox>
+          </StackPanel>
+          <StackPanel Grid.Column="2">
+            <TextBlock Text="$tJobId" Style="{StaticResource LxFieldLabel}"/>
+            <TextBox Name="JobIdBox" Style="{StaticResource LxField}"/>
+          </StackPanel>
+        </Grid>
 
         <!-- Access type is auto-detected, never a user choice: the control is
              present so the controller can select the detected value, but it is
@@ -3256,7 +3378,14 @@ function Get-ActiveLogbookSessionAgeSeconds {
 }
 
 function Close-ActiveLogbookSession {
-    param([string]$Reason = 'END')
+    param(
+        [string]$Reason = 'END',
+        # Only the automatic closers pass this -- see Invoke-WSLLogbook's
+        # -Timestamp. A user pressing SELESAI is ending the session now, so
+        # the default is right for them and wrong for a session being closed
+        # hours after whatever really ended it.
+        [datetime]$EndTime = [datetime]::MinValue
+    )
     Ensure-LogbookDirs
     # Marks the ENDING state for any other process that asks (see
     # Get-LogbookSessionState). Best-effort in both directions: failing to
@@ -3269,7 +3398,29 @@ function Close-ActiveLogbookSession {
     try {
         if (Test-Path $Global:SessionFile) {
             $session = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
-            [void](Invoke-WSLLogbook -Event $Reason -SessionType $session.session_type -AnyDeskDetected ([int]$session.anydesk_detected) -SessionId $session.session_id -Nama $session.nama -Nim $session.nim -Tujuan $session.tujuan -Keterangan $session.keterangan)
+            $bridge = @{
+                Event = $Reason; SessionType = $session.session_type
+                AnyDeskDetected = [int]$session.anydesk_detected
+                SessionId = $session.session_id; Nama = $session.nama
+                Nim = $session.nim; Tujuan = $session.tujuan
+                Keterangan = $session.keterangan
+            }
+            if ($EndTime -ne [datetime]::MinValue) {
+                # Never date the close BEFORE the session started: a clock
+                # change, or a caller doing its own arithmetic, must not be
+                # able to produce a negative duration. Falling back to the
+                # start time yields a zero-length session, which is visibly
+                # odd but arithmetically sound.
+                $startedAt = [datetime]::MinValue
+                try { $startedAt = [datetime]$session.start_time } catch { }
+                if ($startedAt -ne [datetime]::MinValue -and $EndTime -lt $startedAt) {
+                    Write-LogbookError "Close end time $($EndTime.ToString('o')) precedes start $($session.start_time) for sid=$($session.session_id); clamping to start."
+                    $EndTime = $startedAt
+                }
+                $bridge['Timestamp'] = $EndTime
+                Write-LogbookInfo "Closing sid=$($session.session_id) reason=$Reason dated $($EndTime.ToString('o')) rather than now."
+            }
+            [void](Invoke-WSLLogbook @bridge)
             Remove-Item $Global:SessionFile -Force -ErrorAction SilentlyContinue
             if (Test-Path $Global:SessionFile) {
                 # Removing session.json is what actually ends the session; if it
@@ -3326,7 +3477,14 @@ function Close-StaleLogbookSessionIfAny {
         if ($null -eq $bootTime) { return $false }
         if ($bootTime -gt $start) {
             Write-LogbookInfo "Stale session detected sid=$($session.session_id) started=$($session.start_time) boot=$($bootTime.ToString('o')); auto-closing instead of resuming."
-            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+            # Dated at the boot, not at now. The machine was OFF between the
+            # real end of this session and this moment, and the session
+            # certainly did not continue through a shutdown -- closing it at
+            # "now" would bill every hour the workstation spent powered down
+            # to whoever last used it. The boot is the tightest upper bound
+            # available: we cannot know the shutdown time, but we know the
+            # session was over by the time the machine came back.
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' -EndTime $bootTime | Out-Null
             return $true
         }
     } catch { Write-LogbookError "Stale session check failed: $($_.Exception.Message)" }
@@ -3364,7 +3522,18 @@ function Close-OverAgeLogbookSessionIfAny {
     if ($maxSec -le 0) { return $false }
     if ($ageSec -ge $maxSec) {
         Write-LogbookInfo "Session age ${ageSec}s exceeds cap ${maxSec}s; auto-closing instead of resuming."
-        Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+        # Dated at start + cap, which is what the cap MEANS: this session is
+        # allowed to have lasted eight hours, and no part of the time after
+        # that is evidence of anything. Closing at "now" instead recorded the
+        # full wall-clock gap -- a machine locked overnight produced a
+        # 25-hour row from an 8-hour rule.
+        $endAt = [datetime]::MinValue
+        try { $endAt = ([datetime](Get-ActiveLogbookSession).start_time).AddSeconds($maxSec) } catch { }
+        if ($endAt -eq [datetime]::MinValue) {
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' | Out-Null
+        } else {
+            Close-ActiveLogbookSession -Reason 'AUTO_CLOSE' -EndTime $endAt | Out-Null
+        }
         return $true
     }
     return $false

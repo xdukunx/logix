@@ -1169,14 +1169,22 @@ $timer.Add_Tick({
     $sliverText.Text = $pillClock.Text + ' ' + [char]0x00B7 + ' ' + $script:stationLabel
     $script:tick += 1
 
-    # Publish for a status bar (see Write-LogbookBarStatus). Done here rather
-    # than from a separate poller because this tick already holds every value
-    # a bar wants, one second fresh.
+    # Publish for a status bar (see Write-LogbookBarStatus). Still called from
+    # this tick because the tick already holds every value a bar wants -- but
+    # the writer now drops an unchanged tick, so the file is rewritten on a
+    # real state change or once a minute as a liveness beacon, not 3600 times
+    # an hour to advance a clock the bar can compute itself from started_at.
+    #
+    # The legacy text keys are still supplied for an un-updated YASB config.
     Write-LogbookBarStatus `
         -Text $pillClock.Text `
         -Alt ($script:stationLabel + ' ' + [char]0x00B7 + ' ' + $cardClock.Text) `
         -Tooltip ("{0} {1} {2}" -f $script:stationLabel, [char]0x00B7, $cardClock.Text) `
-        -State (Get-LogbookBarState)
+        -State (Get-LogbookBarState) `
+        -SessionId $script:barSessionId `
+        -StartedAt $script:barStartedAt `
+        -Title $script:barTitle `
+        -Station $script:stationLabel
 
     if ($script:collapseAtTick -ge 0 -and $script:tick -ge $script:collapseAtTick) {
         if ($script:msgState -eq 'replying' -and $replyInput.IsKeyboardFocusWithin) {
@@ -1245,6 +1253,23 @@ function Test-LogbookIdleWarning {
 # yields the station ID "WS-07", not "WS".
 $script:stationLabel = ([regex]::Split([string]$deviceName, '\s+(?:-|\u00B7)\s+'))[0].Trim()
 if (-not $script:stationLabel) { $script:stationLabel = $env:COMPUTERNAME }
+
+# Fields for the bar status contract v1 (see Write-LogbookBarStatus). Read
+# once at boot, not per tick: they do not change for the life of a session,
+# and the point of the schema is that a bar derives elapsed time from
+# started_at rather than being handed a clock.
+#
+# Deliberately NOT nama or nim. This file is rendered by a third-party bar
+# onto a shared workstation's taskbar.
+$script:barSessionId = ''
+$script:barStartedAt = ''
+$script:barTitle = ''
+try {
+    $bs = Get-Content $Global:SessionFile -Raw | ConvertFrom-Json
+    $script:barSessionId = [string]$bs.session_id
+    $script:barStartedAt = [string]$bs.start_time
+    $script:barTitle = [string]$bs.tujuan
+} catch { }
 
 # How long the pointer must REST on the pill before it expands. Long enough
 # that crossing the top edge on the way to a browser tab does not summon a

@@ -189,6 +189,14 @@ BASE_COLUMNS = {
     # mahasiswa / tendik / dosen. Free text and usually empty today; a campus
     # directory would populate it authoritatively.
     "person_role": "TEXT",
+    # Optional, contextual session metadata, mirroring logix/log_physical.py.
+    # Added here because the agent already sends these and the server was
+    # silently dropping them: a job id typed at sign-in reached the local
+    # logbook and the local export, then vanished on sync, so the central
+    # dashboard and the device disagreed about the same session with nothing
+    # to explain the difference. Nullable, and not part of event_uid.
+    "job_type": "TEXT",
+    "job_id": "TEXT",
 }
 
 # An unattended session cannot legitimately run forever. Used two ways: to cap
@@ -490,6 +498,11 @@ class LogPayload(BaseModel):
     # typed into the sign-in popup.
     identity_source: Optional[str] = "self_declared"
     person_role: Optional[str] = ""
+    # Optional job metadata. Defaulted rather than required so an agent that
+    # predates these fields keeps posting successfully -- the whole point of
+    # them being nullable on both sides.
+    job_type: Optional[str] = ""
+    job_id: Optional[str] = ""
 
 class HeartbeatPayload(BaseModel):
     hostname: str
@@ -2596,7 +2609,20 @@ def log_event(logs: List[LogPayload], _: None = Depends(verify_api_key),
                 # recording a label the dashboard renders verbatim.
                 payload.identity_source or "self_declared",
                 payload.person_role or "",
+                payload.job_type or "",
+                payload.job_id or "",
             ]
+            # cols is generated from BASE_COLUMNS but vals is written out by
+            # hand, so adding a column to BASE_COLUMNS without adding a value
+            # here silently produces an arity mismatch -- which surfaces as a
+            # blanket HTTP 500 on every sync, with the real cause buried in a
+            # sqlite message the agent never sees. Fail loudly at the seam.
+            if len(vals) != len(cols):
+                raise RuntimeError(
+                    f"physical_log INSERT arity mismatch: {len(cols)} columns "
+                    f"({cols}) but {len(vals)} values -- a column was added to "
+                    "BASE_COLUMNS without a matching entry in this list."
+                )
             conn.execute(sql, vals)
             inserted += 1
         

@@ -88,8 +88,39 @@ function Set-LogbookPosturePref([string]$Posture) {
 # ---- status path (fast, no output formatting) -------------------------------
 # ('Action' is handled at the top of the file, before the dot-source.)
 if ($PSCmdlet.ParameterSetName -eq 'Status') {
-    if (Test-Path $statusFile) { Get-Content $statusFile -Raw }
-    else { '{"text":"","alt":"","tooltip":"Logix: tidak ada sesi aktif","state":"none"}' }
+    $empty = '{"schema_version":1,"state":"none","text":"","alt":"","tooltip":"Logix: tidak ada sesi aktif"}'
+    if (-not (Test-Path $statusFile)) { $empty; exit 0 }
+
+    $raw = Get-Content $statusFile -Raw
+    # STALENESS. The widget writes a beacon every BAR_BEACON_SECONDS, so a
+    # file older than BAR_STALE_SECONDS means the process that was writing it
+    # is gone -- the machine was cut, the widget was killed -- NOT that the
+    # session is still running. A bar left showing a live-looking session for
+    # a workstation nobody is at is worse than one showing nothing, which is
+    # the same reasoning behind Clear-LogbookBarStatus.
+    #
+    # Consumers that read bar_status.json DIRECTLY (the generated YASB config
+    # does, via `type`, to avoid spawning a shell on every poll) must apply
+    # this rule themselves: treat now - updated_at > 150s as unknown, never
+    # as active.
+    try {
+        $p = $raw | ConvertFrom-Json
+        $stamp = if ($p.updated_at) { $p.updated_at } else { $p.updated }
+        if ($stamp) {
+            $age = ((Get-Date) - [datetime]$stamp).TotalSeconds
+            if ($age -gt $Global:BAR_STALE_SECONDS) {
+                Write-LogbookInfo "bar_status.json is ${age}s old (> $($Global:BAR_STALE_SECONDS)s); reporting unknown rather than a session nobody is running."
+                '{"schema_version":1,"state":"unknown","text":"","alt":"","tooltip":"Logix: status tidak diketahui"}'
+                exit 0
+            }
+        }
+    } catch {
+        # Malformed: hand back the empty contract rather than a broken one.
+        # json.loads on the bar side would swallow the error and render the
+        # raw template forever.
+        $empty; exit 0
+    }
+    $raw
     exit 0
 }
 
