@@ -85,12 +85,18 @@ def dash(monkeypatch, tmp_path):
     lp = _mod("log_physical")
     con = lp.connect(db)
     lp.migrate(con)
-    _seed(lp, con, "START", "s1", "2026-08-18T08:41:00+07:00",
+    # Dated RELATIVE to today, not to a fixed calendar day. /api/overview
+    # asks for the "today" range, so a hardcoded date makes these tests pass
+    # on the day they were written and fail every day after -- which is
+    # exactly what happened when the date rolled over mid-session.
+    from datetime import date
+    d = date.today().isoformat()
+    _seed(lp, con, "START", "s1", f"{d}T08:41:00+07:00",
           nama="Rani", nim="000000000", tujuan="DFTB Parameterization",
           job_type="Simulation", job_id="258026",
           keterangan="Slater-Koster parameter validation.")
-    _seed(lp, con, "END", "s1", "2026-08-18T11:15:00+07:00")
-    _seed(lp, con, "START", "s2", "2026-08-18T12:00:00+07:00",
+    _seed(lp, con, "END", "s1", f"{d}T11:15:00+07:00")
+    _seed(lp, con, "START", "s2", f"{d}T12:00:00+07:00",
           nama="Alya", nim="000000001", tujuan="Molecular Dynamics")
     con.commit()
     con.close()
