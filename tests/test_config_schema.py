@@ -86,8 +86,18 @@ def test_schema_no_longer_lists_speculative_unimplemented_fields():
 # pre-v3 MindLab palette, so a freshly installed workstation rendered a maroon
 # sign-in card that no design document called for. Tokens are only the source of
 # truth if the thing that serves them agrees.
-
-SERVER_CONFIG_PATH = Path(__file__).resolve().parent.parent / "server" / "server_config.json"
+#
+# Checked against DEFAULT_CONFIG in server/main.py, not the runtime
+# server_config.json on disk. That file is deliberately gitignored -- an
+# admin can repaint it from the dashboard, and a real deployment's copy is
+# meant to diverge from the repo -- so it does not exist on a fresh
+# checkout at all. It is only ever created by startup_event() writing
+# DEFAULT_CONFIG the first time the server runs, which makes DEFAULT_CONFIG
+# the actual thing "a freshly installed workstation" gets, and the real
+# regression-guard target this test's own docstring describes. Reading the
+# gitignored file directly meant this test could only ever pass on a
+# machine that happened to have started the server locally before -- it
+# failed on every CI runner, every time, since the day it was written.
 
 # docs/design/LogiX_BUILD_BRIEF.md: "#741B47 maroon is retired as the accent,
 # kept only as legacy comparison."
@@ -103,21 +113,22 @@ V3_CLIENT_COLORS = {
 }
 
 
-def _served_colors() -> dict:
-    return json.loads(SERVER_CONFIG_PATH.read_text(encoding="utf-8"))["branding"]["colors"]
+def _served_colors(monkeypatch) -> dict:
+    main = _load_main(monkeypatch)
+    return main.DEFAULT_CONFIG["branding"]["colors"]
 
 
-def test_served_branding_matches_the_v3_client_palette():
-    colors = _served_colors()
+def test_served_branding_matches_the_v3_client_palette(monkeypatch):
+    colors = _served_colors(monkeypatch)
     for key, expected in V3_CLIENT_COLORS.items():
         assert colors.get(key) == expected, (
             f"branding.colors.{key} is {colors.get(key)!r}, expected {expected!r}. "
-            "This file paints the WPF client; it has to track src/tokens.css."
+            "DEFAULT_CONFIG paints the WPF client on first run; it has to track src/tokens.css."
         )
 
 
-def test_retired_maroon_accent_is_not_served_to_clients():
-    assert RETIRED_MAROON.lower() not in json.dumps(_served_colors()).lower(), (
+def test_retired_maroon_accent_is_not_served_to_clients(monkeypatch):
+    assert RETIRED_MAROON.lower() not in json.dumps(_served_colors(monkeypatch)).lower(), (
         f"{RETIRED_MAROON} was retired as the accent in v3. If a lab genuinely "
         "wants it back, that is a per-deployment override, not the shipped default."
     )

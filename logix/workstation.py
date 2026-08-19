@@ -137,8 +137,23 @@ def storage(path: Path | str | None = None) -> dict[str, Any] | None:
             path = paths.data_home()
         except Exception:
             path = Path.home()
+    path = Path(path)
+    # disk_usage needs a path that EXISTS -- it stats the target, not just
+    # the volume. On a fresh install data_home() has never been created (no
+    # session has been logged yet), which is the single most important case
+    # for this metric to get right, not an edge case to shrug off: "can this
+    # workstation still record" answered "Unavailable" on the exact machine
+    # that just asked "can I start recording". Free space on a volume does
+    # not depend on whether one particular subdirectory under it has been
+    # created yet, so walk up to the nearest ancestor that already exists.
+    probe = path
+    while not probe.exists():
+        parent = probe.parent
+        if parent == probe:  # hit the filesystem root without finding one
+            break
+        probe = parent
     try:
-        usage = shutil.disk_usage(str(path))
+        usage = shutil.disk_usage(str(probe))
         return {"free_bytes": usage.free,
                 "total_bytes": usage.total,
                 "used_bytes": usage.used,

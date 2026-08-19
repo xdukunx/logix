@@ -260,3 +260,30 @@ def test_gpu_absent_sensor_is_omitted_not_zeroed(monkeypatch):
     g = w.gpu(force=True)
     assert g["percent"] == 10.0
     assert "temp_c" not in g and "power_w" not in g and "clock_mhz" not in g
+
+
+def test_storage_works_when_data_home_has_never_been_created(monkeypatch, tmp_path):
+    """The exact failure this test exists to catch: on a fresh install (a
+    brand new CI runner is the same case) data_home() has never been
+    created, because nothing has logged a session yet. shutil.disk_usage
+    needs its target to EXIST, so calling it directly on an uncreated
+    directory raised FileNotFoundError, caught, and returned None --
+    "Unavailable" on the exact machine that just asked whether it could
+    start recording. Free space on a volume does not depend on whether one
+    particular subdirectory under it has been created."""
+    never_created = tmp_path / "not" / "yet" / "made" / "Logix"
+    assert not never_created.exists()
+    r = w.storage(never_created)
+    assert r is not None
+    assert r["total_bytes"] > 0
+    assert r["path"] == str(never_created), "reports the asked-for path, not the ancestor it measured"
+
+
+def test_storage_via_data_home_when_it_has_never_been_created(monkeypatch, tmp_path):
+    """Same case, through the real call path report_server actually uses
+    (storage() with no argument -> paths.data_home())."""
+    import paths
+    never = tmp_path / "never-created-data-home"
+    monkeypatch.setattr(paths, "data_home", lambda: never)
+    r = w.storage()
+    assert r is not None and r["total_bytes"] > 0
