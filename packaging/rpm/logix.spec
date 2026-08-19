@@ -10,7 +10,7 @@
 %global logixlib /opt/software/logix
 
 Name:           logix
-Version:        1.1.1
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        Privacy-first sign-in logbook for shared lab computers (core + CLI)
 
@@ -78,6 +78,10 @@ echo "Privacy: records who/how/when only -- see %{_docdir}/logix/PRIVACY.md"
 echo ""
 
 %changelog
+* Wed Aug 19 2026 MindLab <noreply@github.com> - 1.2.0-1
+- Local workstation dashboard (Overview/Logs/Server), optional job metadata,
+  YASB status contract v1, structured sync failure classification, and two
+  correctness fixes (BOM handling in device identity, auto-close timestamps).
 * Mon Jul 21 2026 MindLab <noreply@github.com> - 1.1.1-1
 - Attach deb/rpm to the GitHub Release on this tag (packaging work merged
   after v1.1.0 was cut).

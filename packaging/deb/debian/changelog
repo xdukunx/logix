@@ -1,3 +1,23 @@
+logix (1.2.0) noble; urgency=medium
+
+  * Local workstation dashboard: Overview (current session, live CPU/memory/
+    GPU/storage), Logs (searchable local history, paged for 10k+ sessions),
+    Server (sync state with structured failure classes). Served on
+    loopback by report_server.py; no new dependency.
+  * Optional job_type/job_id session metadata, carried through the local
+    logbook, the dashboard, the XLSX/CSV export, and server sync.
+  * YASB status contract v1: state-driven bar_status.json instead of a
+    rewritten-every-second timer string; legacy keys kept for compatibility.
+  * Sync failure classification (network/auth/rejected/server/unknown) so
+    the UI never has to parse an error string to decide what to show.
+  * Fixed: a UTF-8 BOM in device.json or config.env could make an enrolled
+    device look unenrolled (every sync returning 401 with a valid key on
+    disk). Fixed: automatic session closes were dated at discovery instead
+    of at the boot/cap boundary, which could turn an overnight lock into a
+    25-hour session.
+
+ -- MindLab <noreply@github.com>  Wed, 19 Aug 2026 00:00:00 +0000
+
 logix (1.1.1) noble; urgency=medium
 
   * Re-tag to attach the .deb/.rpm to the GitHub Release -- the packaging
