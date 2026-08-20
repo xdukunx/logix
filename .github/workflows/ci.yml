@@ -221,27 +221,46 @@ jobs:
           done
           exit $fail
 
-      - name: Production posture (ops/go_live.py init + check)
+      # One assertion per step on purpose: a failing step is then
+      # identifiable from the workflow API by name alone, without reading the
+      # log body. The first Ubuntu failure here was a single fat step, which
+      # reported only that 'something in the production posture' broke.
+      - name: go_live.py init (clean DB + generated secrets)
         run: |
-          # Logs and probe output go to the runner's temp dir, never into the
-          # checkout -- the last step asserts the install leaves it pristine.
-          python3 ops/go_live.py init --admin-email "$CI_ADMIN_EMAIL" \
-            | tee "$RUNNER_TEMP/go_live.log"
-          # The ops/_venv.py re-exec, which was only verifiable on Windows
-          # locally: `python3 ops/go_live.py` runs under a system interpreter
-          # that has no fastapi, so it must hop into server/.venv by itself.
-          if [ "$EXPECT_REEXEC" = "1" ]; then
-            grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$RUNNER_TEMP/go_live.log" \
-              || { echo "ops/_venv.py did not re-exec into server/.venv"; exit 1; }
-          fi
-          test -f server/.env.production || { echo ".env.production not written"; exit 1; }
-          test -f server/central_logix.db || { echo "clean database not created"; exit 1; }
-          [ "$(stat -c %a server/.env.production)" = "600" ] \
-            || { echo ".env.production is not 0600"; exit 1; }
+          set -x
+          # Log goes to the runner temp dir, never the checkout -- a later
+          # step asserts the install leaves the tree pristine.
+          python3 ops/go_live.py init --admin-email "$CI_ADMIN_EMAIL" 2>&1 | tee "$RUNNER_TEMP/go_live.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: go_live.py init re-execs into server/.venv
+        if: env.EXPECT_REEXEC == '1'
+        run: |
+          grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$RUNNER_TEMP/go_live.log" || { echo "no re-exec happened; log follows:"; cat "$RUNNER_TEMP/go_live.log"; exit 1; }
+
+      - name: init wrote .env.production, mode 0600
+        run: |
+          set -x
+          ls -la server/
+          test -f server/.env.production
+          [ "$(stat -c %a server/.env.production)" = "600" ]
+
+      - name: init created a clean database
+        run: |
+          set -x
+          test -f server/central_logix.db
+
+      - name: .env.production holds the expected production posture
+        run: |
+          set -x
+          grep -v -e PASSWORD -e API_KEY server/.env.production
           grep -qx "LOGIX_DEV_MODE=0" server/.env.production
           grep -qx "ADMIN_EMAILS=$CI_ADMIN_EMAIL" server/.env.production
-          python3 ops/go_live.py check
 
+      - name: go_live.py check reports no blocking issues
+        run: |
+          set -x
+          python3 ops/go_live.py check
       - name: Start the server (ops/serve.py) and probe /api/health
         run: |
           log="$RUNNER_TEMP/serve.log"
