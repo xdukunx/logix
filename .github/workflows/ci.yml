@@ -227,11 +227,22 @@ jobs:
       # reported only that 'something in the production posture' broke.
       - name: go_live.py init (clean DB + generated secrets)
         run: |
-          set -x
           # Log goes to the runner temp dir, never the checkout -- a later
-          # step asserts the install leaves the tree pristine.
-          python3 ops/go_live.py init --admin-email "$CI_ADMIN_EMAIL" 2>&1 | tee "$RUNNER_TEMP/go_live.log"
-          exit "${PIPESTATUS[0]}"
+          # step asserts the install leaves the tree pristine. Not piped to
+          # tee: a pipeline reports tee's status, which silently swallowed a
+          # failing init here for two runs.
+          log="$RUNNER_TEMP/go_live.log"
+          if python3 ops/go_live.py init --admin-email "$CI_ADMIN_EMAIL" > "$log" 2>&1; then
+            cat "$log"
+          else
+            rc=$?
+            cat "$log"
+            # Surfaced as an annotation as well as log text: annotations are
+            # readable from the checks API, so a failure here is diagnosable
+            # without downloading the log archive.
+            echo "::error::go_live.py init exited $rc -- $(tail -c 900 "$log" | tr -s "[:space:]" " ")"
+            exit $rc
+          fi
 
       - name: go_live.py init re-execs into server/.venv
         if: env.EXPECT_REEXEC == '1'
