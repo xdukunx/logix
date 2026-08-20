@@ -91,3 +91,4 @@ frontend/test-results/
 # means real student names and NIMs -- exactly what CLAUDE_CODE_HANDOFF.md
 # forbids committing.
 frontend/diagnose-*.png
+pytest.log

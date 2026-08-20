@@ -64,7 +64,19 @@ jobs:
       - name: Unit tests (redaction gate, upsert, schedule artifacts, server hardening)
         run: |
           python -m pip install --upgrade pip pytest httpx -r server/requirements.txt
-          python -m pytest tests/ -q
+          # Captured rather than streamed so a failure can be republished as an
+          # annotation: annotations are readable from the checks API, log
+          # bodies are not, which is the difference between diagnosing a
+          # platform-specific failure and guessing at it.
+          if python -m pytest tests/ -q > pytest.log 2>&1; then
+            cat pytest.log
+          else
+            rc=$?
+            cat pytest.log
+            echo "::error::pytest failed -- $(grep -E "^(FAILED|ERROR)" pytest.log | head -20 | tr -s "[:space:]" " ")"
+            echo "::error::tail -- $(tail -c 1200 pytest.log | tr -s "[:space:]" " ")"
+            exit $rc
+          fi
 
   dashboard:
     name: dashboard (typecheck + build)
