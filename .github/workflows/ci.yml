@@ -176,6 +176,9 @@ jobs:
           # job quietly stops proving anything -- so say so loudly.
           if python3 -c "import fastapi" >/dev/null 2>&1; then
             echo "::warning::system python3 already has fastapi; the venv re-exec path is not exercised"
+            echo "EXPECT_REEXEC=0" >> "$GITHUB_ENV"
+          else
+            echo "EXPECT_REEXEC=1" >> "$GITHUB_ENV"
           fi
 
       - name: Assert server/.env was written with the expected keys
@@ -227,8 +230,10 @@ jobs:
           # The ops/_venv.py re-exec, which was only verifiable on Windows
           # locally: `python3 ops/go_live.py` runs under a system interpreter
           # that has no fastapi, so it must hop into server/.venv by itself.
-          grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$RUNNER_TEMP/go_live.log" \
-            || { echo "ops/_venv.py did not re-exec into server/.venv"; exit 1; }
+          if [ "$EXPECT_REEXEC" = "1" ]; then
+            grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$RUNNER_TEMP/go_live.log" \
+              || { echo "ops/_venv.py did not re-exec into server/.venv"; exit 1; }
+          fi
           test -f server/.env.production || { echo ".env.production not written"; exit 1; }
           test -f server/central_logix.db || { echo "clean database not created"; exit 1; }
           [ "$(stat -c %a server/.env.production)" = "600" ] \
@@ -260,8 +265,10 @@ jobs:
           cat "$body"
           grep -qE '"status" *: *"ok"' "$body" \
             || { echo "unexpected /api/health payload"; exit 1; }
-          grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$log" \
-            || { echo "ops/serve.py did not re-exec into server/.venv"; exit 1; }
+          if [ "$EXPECT_REEXEC" = "1" ]; then
+            grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$log" \
+              || { echo "ops/serve.py did not re-exec into server/.venv"; exit 1; }
+          fi
 
       - name: Nothing the install generated is committable
         run: |

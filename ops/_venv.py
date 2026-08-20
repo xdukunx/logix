@@ -60,7 +60,12 @@ def ensure(module: str = "fastapi") -> None:
     except OSError:
         return
 
-    print(f"Using the server's virtualenv: {py}")
+    # flush: stdout is block-buffered when it is a pipe (a CI step, `| tee`,
+    # anything capturing output), so without this the notice sits in the
+    # parent's buffer until exit and lands AFTER everything the child printed
+    # -- announcing the interpreter switch below the work it supposedly
+    # preceded.
+    print(f"Using the server's virtualenv: {py}", flush=True)
     env = dict(os.environ, **{_GUARD: "1"})
     result = subprocess.run([str(py), *sys.argv], env=env)
     sys.exit(result.returncode)
