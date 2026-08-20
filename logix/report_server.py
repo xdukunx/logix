@@ -349,8 +349,10 @@ def _export_csv(db_path, start_d, end_d, only_ids=None):
     if only_ids is not None:
         keep = set(only_ids)
         sessions = [x for x in sessions if x.get("session_id") in keep]
-    outdir = Path(report.DEFAULT_OUTDIR)
-    outdir.mkdir(parents=True, exist_ok=True)
+    # Not report.DEFAULT_OUTDIR directly: that is the system-wide reports
+    # directory, which an ordinary user cannot create on macOS or Linux, and
+    # this dashboard runs as an ordinary user by design.
+    outdir = paths.writable_reports_dir()
     out = outdir / f"logix-sessions-{time.strftime('%Y%m%d-%H%M%S')}.csv"
     # Same collision guard as the xlsx path: two exports in one second must
     # not resolve to one file.

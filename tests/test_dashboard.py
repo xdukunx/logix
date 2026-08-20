@@ -50,6 +50,12 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("LOGIX_SERVER_URL", "")
     monkeypatch.setenv("LOGIX_PRIVACY_MODE", "local_only")
     monkeypatch.setenv("LOGIX_DB", str(tmp_path / "not-the-served.db"))
+    # Exports otherwise land in the SYSTEM reports directory -- a real
+    # write outside tmp_path, onto whatever machine runs the suite. It
+    # only looked harmless because that path happens to be writable on
+    # Windows and on the Linux runner; on macOS it is root-owned and six
+    # export tests failed with EACCES.
+    monkeypatch.setenv("LOGBOOK_REPORT_DIR", str(tmp_path / "reports"))
     _mod("paths")
 
 

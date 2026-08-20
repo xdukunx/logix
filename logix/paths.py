@@ -189,3 +189,47 @@ def write_device_identity(device_id: str, api_key: str, category: str = "") -> P
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return path
 
+
+
+def user_data_home() -> Path:
+    """Per-user data directory -- always writable by the person running us."""
+    if sys.platform.startswith("win"):
+        base = os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+        return Path(base) / "Logix"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Logix"
+    base = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
+    return Path(base) / "logix"
+
+
+def writable_reports_dir() -> Path:
+    """A reports directory this process can actually write to.
+
+    default_reports_dir() sits under the SYSTEM data home, which is root-owned
+    on macOS (/Library/Application Support/Logix) and on Linux
+    (/opt/software/logix). The local dashboard is explicitly a per-user thing
+    -- no account, no admin, loopback only -- so an export there died with
+    "[Errno 13] Permission denied" and the button was simply dead for the
+    person it exists for. It only ever appeared to work on Windows and on CI
+    runners, where those directories happen to be writable.
+
+    An EXPLICIT LOGBOOK_REPORT_DIR is never second-guessed. Reports carry
+    names and NIMs, so an admin who pointed them at a particular volume (an
+    encrypted disk, a share with its own ACL) must not have them quietly
+    written somewhere else instead; that path is returned as given and the
+    caller's write fails loudly if it cannot be used. Only the default falls
+    back to the per-user directory.
+    """
+    configured = get("LOGBOOK_REPORT_DIR")
+    target = Path(configured).expanduser() if configured else default_reports_dir()
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        if os.access(target, os.W_OK):
+            return target
+    except OSError:
+        pass
+    if configured:
+        return target
+    fallback = user_data_home() / "reports"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback

@@ -838,9 +838,15 @@ def build(start_date: Any = None,
         output_path = Path(explicit_output).expanduser()
         output_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        output_dir = Path(out_dir) if out_dir is not None else DEFAULT_OUTDIR
-        output_dir = output_dir.expanduser()
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # writable_reports_dir() rather than DEFAULT_OUTDIR for the default
+        # case: the system-wide reports directory is root-owned on macOS and
+        # Linux, so a report written by an ordinary user failed with EACCES.
+        # An explicitly passed out_dir is honoured as given.
+        if out_dir is not None:
+            output_dir = Path(out_dir).expanduser()
+            output_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            output_dir = paths.writable_reports_dir()
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         output_path = output_dir / f"report-logbook-{suffix}-{stamp}.xlsx"
         # One-second resolution is not enough on its own. Two exports in the

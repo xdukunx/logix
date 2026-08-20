@@ -72,6 +72,10 @@ def _seed_db(path: Path) -> None:
 def server(tmp_path, monkeypatch):
     """A live report server over a synthetic database, on a free port."""
     monkeypatch.setenv("LOGIX_DB", str(tmp_path / "logix.db"))
+    # Keep exports inside tmp_path. Without this they go to the system-wide
+    # reports directory, which is root-owned on macOS (EACCES) and a real
+    # write onto the host everywhere else.
+    monkeypatch.setenv("LOGBOOK_REPORT_DIR", str(tmp_path / "reports"))
     db = tmp_path / "logix.db"
     _seed_db(db)
 
