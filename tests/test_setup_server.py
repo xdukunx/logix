@@ -61,6 +61,7 @@ def test_env_written_via_flags_and_seeded_from_example(tmp_path, monkeypatch):
         "--ingest-key", "k123",
         "--allowed-origins", "https://logix.example.org",
         "--dev-mode", "0",
+        "--no-install-deps",
     ])
     assert rc == 0
     text = (server_dir / ".env").read_text(encoding="utf-8")
@@ -82,7 +83,8 @@ def test_generated_ingest_key_is_strong(tmp_path, monkeypatch):
     monkeypatch.setattr(sv, "REQUIREMENTS", server_dir / "requirements.txt")
 
     rc = sv.main(["--admin-emails", "a@b.c", "--dev-mode", "0",
-                  "--allowed-origins", "x", "--admin-password", "pw"])
+                  "--allowed-origins", "x", "--admin-password", "pw",
+                  "--no-install-deps"])
     assert rc == 0
     text = (server_dir / ".env").read_text(encoding="utf-8")
     key_line = next(l for l in text.splitlines() if l.startswith("LOGIX_INGEST_API_KEY="))
@@ -182,3 +184,66 @@ def test_jobs_catch_up_after_the_host_was_off():
     silently skips that night's backup."""
     script = sv.build_windows_jobs_ps1("python")
     assert script.count("-StartWhenAvailable") == len(sv.WINDOWS_JOBS)
+
+
+def test_dependencies_are_installed_by_default(tmp_path, monkeypatch):
+    """The old default produced a setup that reported success and then could
+    not start: nothing installed fastapi/uvicorn, so the "Done, run this"
+    command died on ModuleNotFoundError. Installing is now the default."""
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    (server_dir / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+    monkeypatch.setattr(sv, "SERVER_DIR", server_dir)
+    monkeypatch.setattr(sv, "ENV_PATH", server_dir / ".env")
+    monkeypatch.setattr(sv, "REQUIREMENTS", server_dir / "requirements.txt")
+
+    calls = []
+    monkeypatch.setattr(sv, "install_deps", lambda: calls.append(True) or "PY")
+
+    rc = sv.main(["--admin-emails", "a@b.c", "--dev-mode", "0",
+                  "--allowed-origins", "x", "--admin-password", "pw"])
+    assert rc == 0
+    assert calls, "setup ran without installing the server's dependencies"
+
+
+def test_no_install_deps_opts_out(tmp_path, monkeypatch):
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    (server_dir / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+    monkeypatch.setattr(sv, "SERVER_DIR", server_dir)
+    monkeypatch.setattr(sv, "ENV_PATH", server_dir / ".env")
+    monkeypatch.setattr(sv, "REQUIREMENTS", server_dir / "requirements.txt")
+
+    calls = []
+    monkeypatch.setattr(sv, "install_deps", lambda: calls.append(True) or "PY")
+
+    rc = sv.main(["--admin-emails", "a@b.c", "--dev-mode", "0",
+                  "--allowed-origins", "x", "--admin-password", "pw",
+                  "--no-install-deps"])
+    assert rc == 0
+    assert not calls
+
+
+def test_venv_follows_server_dir(tmp_path, monkeypatch):
+    """venv_dir() is derived at call time, so pointing SERVER_DIR elsewhere
+    never builds a virtualenv inside the real checkout."""
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(sv, "SERVER_DIR", server_dir)
+    assert sv.venv_dir() == server_dir / ".venv"
+    assert str(sv.venv_python()).startswith(str(server_dir))
+
+
+def test_service_unit_uses_the_interpreter_that_has_uvicorn(tmp_path, monkeypatch):
+    """The systemd unit must ExecStart the venv's python. Pointing it at the
+    system interpreter gives a service that fails on every boot, because the
+    dependencies were installed into the venv."""
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    monkeypatch.setattr(sv, "SERVER_DIR", server_dir)
+    monkeypatch.setattr(sv, "ENV_PATH", server_dir / ".env")
+
+    venv_py = str(sv.venv_python())
+    unit = sv.build_linux_unit(venv_py, "127.0.0.1", 8000, "logix")
+    assert f"ExecStart={venv_py} -m uvicorn main:app" in unit
+    assert "User=logix" in unit

@@ -3,9 +3,14 @@
 
 Run this from a clone of the repo on the machine that will host the server.
 It writes server/.env (generating a strong ingest API key for you), installs
-the server dependencies, and can register the server to start on boot
-(systemd / launchd / Task Scheduler). No Docker, no external database -- 
-the server is FastAPI + SQLite and runs on a plain Python install.
+the server dependencies into server/.venv, and can register the server to
+start on boot (systemd / launchd / Task Scheduler). No Docker, no external
+database -- the server is FastAPI + SQLite.
+
+The dependencies go into a virtualenv rather than the system interpreter
+because Debian 12 and Ubuntu 23.04+ mark theirs externally managed (PEP 668),
+where pip refuses to install at all. Pass --no-install-deps if you are
+managing the environment yourself.
 
   Linux/macOS:  python3 install/setup_server.py
   Windows:      python install\\setup_server.py
@@ -44,12 +49,58 @@ MACOS_LABEL = "com.mindlab.logix-server"
 WINDOWS_TASK = "LogixServer"
 
 
-def install_deps() -> None:
+# Derived at call time rather than frozen at import, so that redirecting
+# SERVER_DIR (as the tests do) redirects the venv with it instead of building
+# one in the real checkout.
+def venv_dir() -> Path:
+    return SERVER_DIR / ".venv"
+
+
+def venv_python() -> Path:
+    """Where a virtualenv at venv_dir() keeps its interpreter."""
+    if os.name == "nt":
+        return venv_dir() / "Scripts" / "python.exe"
+    return venv_dir() / "bin" / "python"
+
+
+def server_python() -> str:
+    """The interpreter that actually has fastapi/uvicorn -- the venv if one
+    exists, otherwise whatever is running this script."""
+    py = venv_python()
+    return str(py) if py.exists() else sys.executable
+
+
+def install_deps() -> str:
+    """Install the server's dependencies into server/.venv and return its python.
+
+    Deliberately NOT into the system interpreter. Debian 12 and Ubuntu 23.04+
+    mark theirs as externally managed (PEP 668), so `pip install` there exits
+    with "error: externally-managed-environment" and the whole setup falls
+    over -- on precisely the OS most people host this on. A venv also means
+    the server's dependencies can never conflict with something apt installed,
+    and `sudo pip install` never has to enter the picture.
+    """
+    py = venv_python()
+    if not py.exists():
+        print(f"Creating a virtualenv at {venv_dir()} ...")
+        result = subprocess.run([sys.executable, "-m", "venv", str(venv_dir())])
+        if result.returncode != 0 or not py.exists():
+            # Ubuntu/Debian strip ensurepip out of the system python into a
+            # separate package, so `python3 -m venv` fails there until it is
+            # installed. Say which package, rather than leaving the operator
+            # with pip's "ensurepip is not available".
+            sys.exit(
+                f"Could not create a virtualenv at {venv_dir()}.\n"
+                "On Debian/Ubuntu this usually means the venv module is packaged\n"
+                "separately -- install it and re-run:\n"
+                "    sudo apt-get install -y python3-venv"
+            )
     print("Installing server dependencies (fastapi, uvicorn, openpyxl)...")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS)],
-        check=True,
-    )
+    subprocess.run([str(py), "-m", "pip", "install", "--upgrade", "pip"],
+                   check=False)
+    subprocess.run([str(py), "-m", "pip", "install", "-r", str(REQUIREMENTS)],
+                   check=True)
+    return str(py)
 
 
 # --------------------------------------------------------------------------- #
@@ -218,8 +269,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--service-user", default="",
                     help="Linux only: run the systemd service as this existing user")
+    # Installing the dependencies is the default because skipping it produces a
+    # setup that reports success and then cannot start: the old default left
+    # fastapi/uvicorn uninstalled, printed "Done. Run the server with ...", and
+    # that command died on ModuleNotFoundError. Accepted-but-redundant
+    # --install-deps is kept so existing docs and scripts keep working.
     ap.add_argument("--install-deps", action="store_true",
-                    help="pip install -r server/requirements.txt")
+                    help="(default) install server dependencies into server/.venv")
+    ap.add_argument("--no-install-deps", dest="skip_deps", action="store_true",
+                    help="skip dependency installation (you are managing them yourself)")
     ap.add_argument("--service", action="store_true",
                     help="register the server to start on boot (needs sudo/Administrator)")
     ns = ap.parse_args(argv)
@@ -260,21 +318,28 @@ def main(argv: list[str] | None = None) -> int:
         print("      login stays locked until you set LOGIX_ADMIN_PASSWORD in .env.")
         print("      Device ingest (logs/heartbeats) works already via the API key.")
 
-    if ns.install_deps:
+    python = server_python()
+    if not ns.skip_deps:
         print()
-        install_deps()
+        python = install_deps()
 
     if ns.service:
         print("\nRegistering the boot service...")
         try:
-            register_service(sys.executable, ns.host, ns.port, ns.service_user)
+            # The venv interpreter, not sys.executable: the service has to
+            # start from the one that actually has uvicorn installed.
+            register_service(python, ns.host, ns.port, ns.service_user)
         except PermissionError:
             sys.exit("Permission denied -- re-run with sudo (Linux/macOS) or an "
                      "elevated PowerShell (Windows) to register the service.")
 
     print("\nDone. Run the server in the foreground anytime with:")
     print(f"  cd {SERVER_DIR}")
-    print(f"  {Path(sys.executable).name} -m uvicorn main:app --host {ns.host} --port {ns.port}")
+    print(f"  {python} -m uvicorn main:app --host {ns.host} --port {ns.port}")
+    if python != sys.executable:
+        print(f"\nDependencies live in {venv_dir()}, so use that interpreter for")
+        print("the ops scripts too, e.g.:")
+        print(f"  {python} {REPO / 'ops' / 'serve.py'}")
     print(f"\nDashboard:  http://localhost:{ns.port}")
     print("\nPoint each device at this server (its installer asks for these):")
     print(f"  LOGIX_SERVER_URL     = http://<this-machine>:{ns.port}   (https:// in production)")

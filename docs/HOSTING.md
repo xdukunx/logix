@@ -103,16 +103,35 @@ Every value can also be passed as a flag (`--admin-emails`, `--ingest-key`,
 If the server host has no Node.js, the dashboard build is skipped and the
 server falls back to serving the legacy static UI automatically.
 
+Dependencies go into **`server/.venv`**, never the system Python. The `ops/`
+scripts find that venv on their own, so `python3 ops/serve.py` works whichever
+interpreter you type it with.
+
+### If it fails on Debian/Ubuntu
+
+| Message | Fix |
+|---|---|
+| `error: externally-managed-environment` | You are pip-installing into the system Python. Use the venv (`server/.venv/bin/pip`) or just re-run `install/setup_server.py`, which does it for you. |
+| `ensurepip is not available` | `sudo apt-get install -y python3-venv`, then re-run. Debian/Ubuntu package the venv module separately from `python3`. |
+| `ModuleNotFoundError: No module named 'uvicorn'` (or `fastapi`) | Dependencies were never installed. Re-run `python3 install/setup_server.py` — it installs them by default. |
+| `sudo: command not found` | Minimal images ship without sudo. Run the bootstrap as root, or `apt-get install -y sudo` first. |
+
 ---
 
 ## 2. Quick local trial (evaluation only)
 
 ```bash
 cd server
-pip install -r requirements.txt
+python3 -m venv .venv                     # Debian/Ubuntu: sudo apt install python3-venv
+.venv/bin/pip install -r requirements.txt
 cp .env.example .env      # fill in — main.py auto-loads server/.env on start
-uvicorn main:app --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+> **Why a venv?** Debian 12 and Ubuntu 23.04+ mark the system Python as
+> externally managed (PEP 668), so a plain `pip install` there fails with
+> `error: externally-managed-environment`. `install/setup_server.py` creates
+> this same `server/.venv` for you, so the paths below match either route.
 
 The defaults are deliberately locked down. Configure these before any
 shared/production use:

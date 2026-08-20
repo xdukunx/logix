@@ -19,6 +19,13 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _venv import ensure as _ensure_venv  # noqa: E402
+
+# Before anything imports fastapi/uvicorn: hop into server/.venv if that is
+# where they were installed (the normal case on Debian/Ubuntu).
+_ensure_venv("uvicorn")
+
 REPO = Path(__file__).resolve().parent.parent
 SERVER = REPO / "server"
 ENV_PATH = SERVER / ".env.production"

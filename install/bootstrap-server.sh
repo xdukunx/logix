@@ -7,12 +7,14 @@
 # use `bash -s --`:
 #   curl -fsSL .../bootstrap-server.sh | bash -s -- --admin-emails you@example.org --service
 #
-# What it does: makes sure git + python3 are present (best-effort install via
-# apt/dnf/pacman/brew, else prints manual instructions), clones or updates the
-# repo into $LOGIX_INSTALL_DIR, builds the React dashboard if npm is available
-# (optional -- the server falls back to the legacy static UI otherwise), then
-# hands off to the existing, fully-featured install/setup_server.py, forwarding
-# every argument you passed. Safe to re-run: git pull + upgrade in place.
+# What it does: makes sure git + python3 (and the venv module) are present
+# (best-effort install via apt/dnf/pacman/brew, else prints manual
+# instructions), clones or updates the repo into $LOGIX_INSTALL_DIR, builds the
+# React dashboard if npm is available (optional -- the server falls back to the
+# legacy static UI otherwise), then hands off to the existing, fully-featured
+# install/setup_server.py, forwarding every argument you passed. That step
+# installs the server's Python dependencies into server/.venv.
+# Safe to re-run: git pull + upgrade in place.
 #
 # Like any curl-pipe-bash installer, read it before you run it:
 #   curl -fsSL <url> -o bootstrap-server.sh && less bootstrap-server.sh
@@ -38,12 +40,23 @@ die()  { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
 # --- 1. Prerequisites: python3, then git (best-effort auto-install) ---------
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Root already has the privileges sudo would grant, and minimal cloud/container
+# images of Ubuntu and Debian frequently ship without sudo at all -- calling it
+# unconditionally turned "already root" into "sudo: command not found".
+if [ "$(id -u)" = "0" ]; then
+    SUDO=""
+elif have sudo; then
+    SUDO="sudo"
+else
+    SUDO=""
+fi
+
 pkg_install() {
     # Try the common package managers in turn; silently skip ones not present.
-    if have apt-get; then sudo apt-get update -qq && sudo apt-get install -y "$@"; return; fi
-    if have dnf;     then sudo dnf install -y "$@"; return; fi
-    if have yum;     then sudo yum install -y "$@"; return; fi
-    if have pacman;  then sudo pacman -Sy --noconfirm "$@"; return; fi
+    if have apt-get; then $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y "$@"; return; fi
+    if have dnf;     then $SUDO dnf install -y "$@"; return; fi
+    if have yum;     then $SUDO yum install -y "$@"; return; fi
+    if have pacman;  then $SUDO pacman -Sy --noconfirm "$@"; return; fi
     if have brew;    then brew install "$@"; return; fi
     return 1
 }
@@ -54,6 +67,20 @@ if ! have python3; then
     pkg_install python3 || die "Could not auto-install python3. Install Python 3.9+ yourself, then re-run."
 fi
 have python3 || die "python3 still not found after install attempt."
+
+# Debian and Ubuntu package the venv module separately from python3, and the
+# setup step below installs the server's dependencies into a venv (their system
+# python is marked externally managed, so pip cannot write to it). Without this,
+# `python3 -m venv` fails with "ensurepip is not available" on an otherwise
+# perfectly good Ubuntu server.
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+    if have apt-get; then
+        warn "the python3 venv module is missing; installing python3-venv"
+        pkg_install python3-venv || warn "Could not install python3-venv automatically -- if setup fails, run: $SUDO apt-get install -y python3-venv"
+    else
+        warn "the python3 venv module is missing; install your distribution's python3 venv package if setup fails."
+    fi
+fi
 
 if ! have git; then
     warn "git not found; attempting to install it"

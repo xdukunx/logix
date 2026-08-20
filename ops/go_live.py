@@ -35,6 +35,13 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _venv import ensure as _ensure_venv  # noqa: E402
+
+# init/register import server/main.py, which needs fastapi -- so hop into
+# server/.venv first if that is where it was installed.
+_ensure_venv("fastapi")
+
 REPO = Path(__file__).resolve().parent.parent
 SERVER = REPO / "server"
 ENV_PATH = SERVER / ".env.production"

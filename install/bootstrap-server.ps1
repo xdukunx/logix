@@ -110,7 +110,7 @@ if ($IngestKey)      { $pyArgs += @("--ingest-key", $IngestKey) }
 if ($AllowedOrigins) { $pyArgs += @("--allowed-origins", $AllowedOrigins) }
 if ($DevMode)        { $pyArgs += @("--dev-mode", $DevMode) }
 $pyArgs += @("--host", $BindHost, "--port", $Port)
-if ($InstallDeps) { $pyArgs += "--install-deps" }
+if (-not $InstallDeps) { $pyArgs += "--no-install-deps" }
 if ($Service)     { $pyArgs += "--service" }
 
 & $py install/setup_server.py @pyArgs
