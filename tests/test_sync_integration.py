@@ -48,6 +48,10 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+class PortUnavailable(RuntimeError):
+    """The chosen port was claimed by something else before uvicorn bound it."""
+
+
 class LiveServer:
     def __init__(self, app, port: int):
         config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
@@ -57,12 +61,20 @@ class LiveServer:
         self._thread = threading.Thread(target=self.server.run, daemon=True)
 
     def start(self):
+        """Raises PortUnavailable if the port was taken between _free_port()
+        picking it and uvicorn binding it -- see the retry in the fixture."""
         self._thread.start()
-        deadline = time.time() + 10
+        # A cold uvicorn import on a loaded CI runner is occasionally slower
+        # than the old 10s allowed, so this waits longer -- but exits the
+        # moment the serving thread dies, which is what a lost port race
+        # actually looks like, instead of burning the whole budget first.
+        deadline = time.time() + 30
         while not self.server.started and time.time() < deadline:
+            if not self._thread.is_alive():
+                raise PortUnavailable(f"server thread exited before binding {self.port}")
             time.sleep(0.02)
         if not self.server.started:
-            raise RuntimeError("live test server did not start within 10s")
+            raise RuntimeError("live test server did not start within 30s")
 
     def stop(self):
         self.server.should_exit = True
@@ -91,9 +103,20 @@ def live_server(monkeypatch, tmp_path):
     module.HEARTBEATS.clear()
     module.PENDING_COMMANDS.clear()
 
-    port = _free_port()
-    live = LiveServer(module.app, port)
-    live.start()
+    # _free_port() closes the probe socket before uvicorn binds it, so the
+    # port is only a hint -- anything else on the machine can claim it in
+    # between. That race is rare locally and regularly lost on a busy Windows
+    # CI runner, where it showed up as the same commit passing on one run and
+    # failing on the next. Retry with a fresh port instead of failing the
+    # suite over a coincidence.
+    for attempt in range(5):
+        live = LiveServer(module.app, _free_port())
+        try:
+            live.start()
+            break
+        except PortUnavailable:
+            if attempt == 4:
+                raise
     live.module = module
     try:
         yield live
