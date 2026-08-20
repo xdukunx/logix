@@ -3,7 +3,9 @@ name: CI
 # Light CI for a reference publication. Confirms the cross-platform core
 # (bridge + report + SQL helper) parses, imports, and round-trips a log entry
 # on Linux, macOS, and Windows — on a SYNTHETIC database only. Also runs the
-# server/main.py security-hardening smoke tests (tests/test_server_security.py).
+# server/main.py security-hardening smoke tests (tests/test_server_security.py),
+# and (server-install) actually runs the central-server install path on a bare
+# Ubuntu runner, through to a live /api/health.
 # Never point this at a real logix.db. No PII is ever used in CI.
 
 on:
@@ -109,3 +111,167 @@ jobs:
             "select event,session_type,nama from physical_log"
           sudo $(which python) /opt/software/logix/gsheet_sync.py --dry-run
           bash -n /opt/software/logix/logix-ssh-hook.sh && echo "generated hook is valid"
+
+  # The four bugs fixed in 3701e3b (deps never installed, PEP 668
+  # externally-managed-environment, missing python3-venv/ensurepip,
+  # unconditional sudo on a root image) all reached a real Ubuntu host
+  # because nothing here ever RAN the installer -- py_compile and pytest
+  # cover the pure builder logic in install/setup_server.py, not the part
+  # that shells out to pip. This job executes the actual server install path
+  # end to end: setup_server.py -> server/.venv -> go_live.py init ->
+  # ops/serve.py -> a live /api/health.
+  #
+  # Deliberately does NOT use actions/setup-python: the point is the runner's
+  # *system* python3 -- the interpreter a fresh Ubuntu host would use, and the
+  # one Debian/Ubuntu mark externally managed. Hermetic apart from PyPI, and
+  # no real credentials or PII: the values below are throwaway fixtures for
+  # one ephemeral runner.
+  server-install:
+    name: server install (ubuntu, venv + live server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI_ADMIN_EMAIL: ci@example.org
+      # Not a secret: never used outside this runner, and server/.env is
+      # gitignored. Long enough to clear the server's 12-character minimum.
+      CI_ADMIN_PASSWORD: ci-throwaway-not-a-secret-9f3a2b6c
+      CI_ORIGIN: http://localhost:8000
+      CI_PORT: "8791"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check the one-line bootstrap installer
+        run: bash -n install/bootstrap-server.sh
+
+      - name: Prerequisites (the same check bootstrap-server.sh makes)
+        run: |
+          python3 -VV
+          # Debian/Ubuntu package the venv module separately, so `python3 -m
+          # venv` fails with "ensurepip is not available" until it is
+          # installed. bootstrap-server.sh installs it for the operator;
+          # mirror that here so this job tests setup_server.py rather than the
+          # runner image's package list.
+          if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+            echo "python3-venv is missing on the runner; installing it"
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv
+          fi
+          python3 -c "import ensurepip; print('ensurepip OK')"
+
+      - name: Run install/setup_server.py
+        run: |
+          python3 install/setup_server.py \
+            --admin-emails "$CI_ADMIN_EMAIL" \
+            --admin-password "$CI_ADMIN_PASSWORD" \
+            --allowed-origins "$CI_ORIGIN" \
+            --dev-mode 0
+
+      - name: Assert server/.venv exists and holds the dependencies
+        run: |
+          test -x server/.venv/bin/python || { echo "server/.venv was not created"; exit 1; }
+          server/.venv/bin/python -c "import fastapi, uvicorn, openpyxl; print('deps OK')"
+          # The re-exec assertions below are only meaningful while the system
+          # interpreter does NOT have these. If a future runner image ships
+          # fastapi system-wide, ops/_venv.py correctly stays a no-op and this
+          # job quietly stops proving anything -- so say so loudly.
+          if python3 -c "import fastapi" >/dev/null 2>&1; then
+            echo "::warning::system python3 already has fastapi; the venv re-exec path is not exercised"
+          fi
+
+      - name: Assert server/.env was written with the expected keys
+        run: |
+          test -f server/.env || { echo "server/.env was not written"; exit 1; }
+          [ "$(stat -c %a server/.env)" = "600" ] || { echo "server/.env is not 0600"; exit 1; }
+          sed -E 's/(PASSWORD|API_KEY)=".*"/\1="<redacted>"/' server/.env
+
+          fail=0
+          check() {
+            if grep -qxF "$1" server/.env; then
+              echo "  ok   $2"
+            else
+              echo "  FAIL $2 -- expected line: $1"
+              fail=1
+            fi
+          }
+          check "ADMIN_EMAILS=\"$CI_ADMIN_EMAIL\"" "ADMIN_EMAILS"
+          check "LOGIX_ADMIN_PASSWORD=\"$CI_ADMIN_PASSWORD\"" "LOGIX_ADMIN_PASSWORD"
+          check "LOGIX_ALLOWED_ORIGINS=\"$CI_ORIGIN\"" "LOGIX_ALLOWED_ORIGINS"
+          check "LOGIX_DEV_MODE=\"0\"" "LOGIX_DEV_MODE"
+
+          # Generated rather than passed in, so match the shape it is
+          # generated with: secrets.token_hex(32).
+          if grep -qE '^LOGIX_INGEST_API_KEY="[0-9a-f]{64}"$' server/.env; then
+            echo "  ok   LOGIX_INGEST_API_KEY (generated, 64 hex chars)"
+          else
+            echo "  FAIL LOGIX_INGEST_API_KEY missing or not a generated 64-hex key"
+            fail=1
+          fi
+
+          # Seeded from .env.example and then merged in place: the inline docs
+          # must survive, and no key may be appended a second time.
+          grep -q '^# --- Ingest API key' server/.env \
+            || { echo "  FAIL .env was not seeded from .env.example"; fail=1; }
+          for key in ADMIN_EMAILS LOGIX_ADMIN_PASSWORD LOGIX_INGEST_API_KEY \
+                     LOGIX_ALLOWED_ORIGINS LOGIX_DEV_MODE; do
+            n="$(grep -cE "^$key=" server/.env || true)"
+            [ "$n" = "1" ] || { echo "  FAIL $key appears $n time(s), expected 1"; fail=1; }
+          done
+          exit $fail
+
+      - name: Production posture (ops/go_live.py init + check)
+        run: |
+          # Logs and probe output go to the runner's temp dir, never into the
+          # checkout -- the last step asserts the install leaves it pristine.
+          python3 ops/go_live.py init --admin-email "$CI_ADMIN_EMAIL" \
+            | tee "$RUNNER_TEMP/go_live.log"
+          # The ops/_venv.py re-exec, which was only verifiable on Windows
+          # locally: `python3 ops/go_live.py` runs under a system interpreter
+          # that has no fastapi, so it must hop into server/.venv by itself.
+          grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$RUNNER_TEMP/go_live.log" \
+            || { echo "ops/_venv.py did not re-exec into server/.venv"; exit 1; }
+          test -f server/.env.production || { echo ".env.production not written"; exit 1; }
+          test -f server/central_logix.db || { echo "clean database not created"; exit 1; }
+          [ "$(stat -c %a server/.env.production)" = "600" ] \
+            || { echo ".env.production is not 0600"; exit 1; }
+          grep -qx "LOGIX_DEV_MODE=0" server/.env.production
+          grep -qx "ADMIN_EMAILS=$CI_ADMIN_EMAIL" server/.env.production
+          python3 ops/go_live.py check
+
+      - name: Start the server (ops/serve.py) and probe /api/health
+        run: |
+          log="$RUNNER_TEMP/serve.log"
+          body="$RUNNER_TEMP/health.json"
+          python3 ops/serve.py --host 127.0.0.1 --port "$CI_PORT" > "$log" 2>&1 &
+          healthy=""
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:$CI_PORT/api/health" -o "$body"; then
+              healthy=1
+              break
+            fi
+            sleep 1
+          done
+          # serve.py re-execs into the venv the same way go_live.py does, so
+          # kill the child too -- the backgrounded parent is only waiting on it.
+          pkill -f "ops/serve.py" || true
+          echo "--- serve.log ---"
+          cat "$log"
+          [ -n "$healthy" ] || { echo "the server never answered /api/health"; exit 1; }
+          echo "--- /api/health ---"
+          cat "$body"
+          grep -qE '"status" *: *"ok"' "$body" \
+            || { echo "unexpected /api/health payload"; exit 1; }
+          grep -q "Using the server's virtualenv: .*server/.venv/bin/python" "$log" \
+            || { echo "ops/serve.py did not re-exec into server/.venv"; exit 1; }
+
+      - name: Nothing the install generated is committable
+        run: |
+          # .env, .env.production, the SQLite database, the logs and the venv
+          # all hold secrets or PII. If any of them turns up as untracked or
+          # modified here, a .gitignore rule has regressed.
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "the install left files that git would commit:"
+            echo "$dirty"
+            exit 1
+          fi
+          echo "working tree clean"
