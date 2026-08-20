@@ -54,8 +54,18 @@ def ensure(module: str = "fastapi") -> None:
     py = venv_python()
     if py is None:
         return
+
+    # "Am I already running as the venv interpreter?" must be answered with
+    # sys.prefix, NOT by comparing resolved executable paths. On Linux a
+    # venv's bin/python is a symlink to the base interpreter, so resolving
+    # both sides turns /usr/bin/python3 == /usr/bin/python3 and every re-exec
+    # is skipped -- which is exactly how ops/go_live.py reached `import main`
+    # under a system python with no fastapi on Ubuntu, while Windows (where
+    # venvs copy python.exe instead of symlinking it) looked fine.
+    # sys.prefix points at the venv for a venv interpreter and at /usr for the
+    # system one, which is the distinction actually being made here.
     try:
-        if Path(sys.executable).resolve() == py.resolve():
+        if Path(sys.prefix).resolve() == (REPO / "server" / ".venv").resolve():
             return
     except OSError:
         return
