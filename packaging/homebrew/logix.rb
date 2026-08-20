@@ -8,14 +8,14 @@
 # This formula lives in the main repo for reference; to publish, copy it into a
 # `homebrew-logix` tap repo under Formula/logix.rb and fill in `sha256` with the
 # release tarball's checksum:
-#   curl -fsSL https://github.com/xdukunx/logix/archive/refs/tags/v1.2.0.tar.gz | shasum -a 256
+#   curl -fsSL https://github.com/xdukunx/logix/archive/refs/tags/v1.2.1.tar.gz | shasum -a 256
 #
 # It installs the pure-Python core (stdlib only) -- NOT the Windows sign-in
 # agent. The at-keyboard sign-in prompt is Windows-only.
 class Logix < Formula
   desc "Privacy-first sign-in logbook for shared lab computers (core + CLI)"
   homepage "https://github.com/xdukunx/logix"
-  url "https://github.com/xdukunx/logix/archive/refs/tags/v1.2.0.tar.gz"
+  url "https://github.com/xdukunx/logix/archive/refs/tags/v1.2.1.tar.gz"
   sha256 "REPLACE_WITH_RELEASE_TARBALL_SHA256"
   license "MIT"
 

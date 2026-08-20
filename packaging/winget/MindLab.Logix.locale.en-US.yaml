@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: MindLab.Logix
-PackageVersion: 1.2.0
+PackageVersion: 1.2.1
 PackageLocale: en-US
 Publisher: MindLab
 PublisherUrl: https://github.com/xdukunx
@@ -26,6 +26,6 @@ Tags:
   - privacy
   - monitoring
   - admin
-ReleaseNotesUrl: https://github.com/xdukunx/logix/releases/tag/v1.2.0
+ReleaseNotesUrl: https://github.com/xdukunx/logix/releases/tag/v1.2.1
 ManifestType: defaultLocale
 ManifestVersion: 1.6.0

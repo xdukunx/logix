@@ -1,3 +1,20 @@
+logix (1.2.1) noble; urgency=medium
+
+  * Fixed: the server install did not work on a fresh Ubuntu host. Nothing
+    installed the Python dependencies; installing them into the system
+    interpreter would have failed anyway under PEP 668; python3-venv was
+    assumed present; and sudo was invoked even when already root. The
+    dependencies now go into server/.venv.
+  * Fixed: ops/serve.py and ops/go_live.py did not find that venv on Linux,
+    where a venv's bin/python is a symlink to the system interpreter, and
+    so died with ModuleNotFoundError: fastapi.
+  * Fixed: exporting from the local dashboard failed with Permission denied
+    on macOS and Linux, because reports were written to a root-owned
+    system directory. An explicitly configured reports directory is still
+    honoured exactly as given.
+
+ -- MindLab <noreply@github.com>  Thu, 20 Aug 2026 00:00:00 +0000
+
 logix (1.2.0) noble; urgency=medium
 
   * Local workstation dashboard: Overview (current session, live CPU/memory/

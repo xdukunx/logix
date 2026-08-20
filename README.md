@@ -133,11 +133,13 @@ Details: [docs/PRIVACY.md](docs/PRIVACY.md) &middot; [SECURITY.md](SECURITY.md) 
 | | Client (workstation) | Server (optional) |
 |---|---|---|
 | OS | Windows 10/11, x64 (full agent) · Linux/macOS (SSH-only capture) | Linux, macOS, or Windows |
-| Python | 3.8+ | 3.11+ |
+| Python | 3.8+ | 3.11+ (plus `python3-venv` on Debian/Ubuntu — the installer adds it) |
 | Hardware | None — no resident process; DB is ~7 MB per 10,000 sessions | **1 vCPU / 1 GB RAM / 10 GB disk** for a typical lab |
 
-No Docker, no external database, either side. Reasoning behind the VM numbers
-(and how they change for a bigger lab): [docs/HOSTING.md](docs/HOSTING.md#0-requirements--sizing-a-vm).
+No Docker, no external database, either side. Server dependencies install into
+`server/.venv`, never the system Python. Reasoning behind the VM numbers (and
+how they change for a bigger lab):
+[docs/HOSTING.md](docs/HOSTING.md#0-requirements--sizing-a-vm).
 
 ### Setup, step by step
 
@@ -267,7 +269,10 @@ python -m pytest tests/ -q     # redaction gate, upsert, server hardening
 ```
 
 CI runs this same suite on Linux, macOS, and Windows against a synthetic
-database only — never real data.
+database only — never real data. It also performs the **whole server install
+on a bare Ubuntu runner** on every push — `setup_server.py` → `server/.venv` →
+`go_live.py init` → a live `/api/health` — so "it installs on a fresh host" is
+a tested claim rather than a hopeful one.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
