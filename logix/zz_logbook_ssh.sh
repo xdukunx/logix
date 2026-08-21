@@ -1,5 +1,5 @@
 #!/bin/bash
-# MindLab Report Logbook: log SSH interactive login once per session.
+# Logix: log an SSH interactive login once per session.
 # Safe: no popup, no blocking, no bot.py dependency.
 case "$-" in
   *i*) ;;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MindLab Report Logbook bridge.
+Logix session logging bridge.
 Idempotent SQLite migration + robust JSON-based logging for Windows physical/AnyDesk sessions and SSH sessions.
 Designed not to overwrite or depend on bot.py.
 """

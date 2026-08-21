@@ -8,6 +8,7 @@ establish the true OS-default system location). Tests monkeypatch that
 function directly to redirect into tmp_path rather than relying on an env
 var install.py doesn't consult for this purpose.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -78,12 +79,56 @@ def test_non_interactive_completes_with_no_prompts(monkeypatch, tmp_path):
 
 
 def test_non_interactive_default_device_name_is_hostname(monkeypatch, tmp_path):
-    import socket
+    # machine_hostname(), not socket.gethostname(): on Windows the agent
+    # reports $env:COMPUTERNAME, and the two spellings differ (often only in
+    # case). Enrolling under one and heartbeating under the other is what
+    # produced two registry rows for one machine.
     install, rc = _run_install(monkeypatch, tmp_path, ["--non-interactive"])
     assert rc == 0
     cfg_text = (tmp_path / "config.env").read_text(encoding="utf-8")
-    assert f"LOGIX_DEVICE_NAME={socket.gethostname()}" in cfg_text
+    assert f"LOGIX_DEVICE_NAME={install.machine_hostname()}" in cfg_text
     assert "LOGIX_PRIVACY_MODE=local_only" in cfg_text  # the safe default
+
+
+def test_machine_hostname_matches_the_agent_on_windows(monkeypatch):
+    import install
+    monkeypatch.setattr(install.sys, "platform", "win32")
+    monkeypatch.setenv("COMPUTERNAME", "DESKTOP-8H2K1L")
+    assert install.machine_hostname() == "DESKTOP-8H2K1L"
+
+    # Non-Windows keeps the POSIX source it always had.
+    monkeypatch.setattr(install.sys, "platform", "linux")
+    assert install.machine_hostname() == install.socket.gethostname()
+
+
+def test_enrollment_sends_the_device_name(monkeypatch, tmp_path):
+    """The typed name used to be accepted, written to config.env, and then
+    dropped -- the enrol POST carried only the hostname, so the registry row
+    was created under the bare machine name."""
+    import install
+    sent = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"device_id": "d1", "api_key": "k1", "category": "custom"}'
+
+    def _fake_urlopen(req, timeout=None):
+        sent["body"] = json.loads(req.data.decode("utf-8"))
+        return _Resp()
+
+    monkeypatch.setattr(install.urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(install.paths, "write_device_identity",
+                        lambda *a, **kw: tmp_path / "device.json")
+
+    assert install.redeem_enrollment_code("http://example.invalid", "ABCD-1234", "WS-07") is True
+    assert sent["body"]["device_name"] == "WS-07"
+    assert sent["body"]["hostname"] == install.machine_hostname()
 
 
 def test_interactive_prompts_used_when_flags_absent(monkeypatch, tmp_path):
@@ -117,7 +162,7 @@ def test_enrollment_attempted_when_server_and_code_both_given(monkeypatch, tmp_p
         "--non-interactive", "--server-url", "http://example.invalid",
         "--enroll-code", "ABCD-1234",
     ])
-    assert calls == [("http://example.invalid", "ABCD-1234", install.socket.gethostname())]
+    assert calls == [("http://example.invalid", "ABCD-1234", install.machine_hostname())]
 
 
 def test_no_enrollment_attempted_without_enroll_code(monkeypatch, tmp_path):

@@ -1,8 +1,18 @@
 // Login gate shown when there's no session token. Local admin auth: email +
 // password checked against the server's ADMIN_EMAILS allowlist plus the
-// LOGIX_ADMIN_PASSWORD it was started with. The auth call itself is unchanged;
-// only the surface is restyled to v3 -- one centered card, flat, with the
-// always-visible privacy line the client surfaces also carry.
+// LOGIX_ADMIN_PASSWORD it was started with.
+//
+// ONE purpose: signing an administrator in. The previous version closed with
+// the client-side privacy notice ("Sesi mencatat waktu, durasi & tujuan --
+// tanpa perekaman layar"), which is written for the STUDENT at a workstation,
+// not the admin at this screen. Two audiences in one card read as two
+// different screens stacked on top of each other. That line belongs on the
+// sign-in popup the agent shows (windows/logbook_popup.ps1), where it already
+// is, and it is gone from here.
+//
+// The password field is the shared TextField too. It was a hand-rolled
+// <input> with its own copy of the label markup, so it drifted a pixel off the
+// email field above it -- the visual "off" that has no single cause.
 import { useState, type FormEvent } from "react";
 
 import { login } from "../api";
@@ -15,9 +25,11 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setBusy] = useState(false);
 
+  const canSubmit = Boolean(email.trim() && password) && !isBusy;
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password || isBusy) return;
+    if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
@@ -47,15 +59,23 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
           background: "var(--lx-card)",
           borderRadius: "var(--lx-radius-card)",
           boxShadow: "var(--lx-shadow-card)",
-          padding: "28px 30px",
+          padding: "30px 30px 26px",
         }}
       >
-        <div style={{ marginBottom: 20 }}>
-          <Wordmark />
-        </div>
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: "0 0 4px" }}>Masuk</h1>
-        <p style={{ fontSize: 13.5, color: "var(--lx-muted)", margin: "0 0 22px", lineHeight: 1.55 }}>
-          Dasbor admin Lab Komputasi FTMM.
+        {/* Wordmark and heading are one block: the product name IS the title
+            of this screen, so a separate 20px "Masuk" underneath it was the
+            same statement twice. The single muted line below says who the
+            screen is for. */}
+        <Wordmark />
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--lx-muted)",
+            margin: "10px 0 24px",
+            lineHeight: 1.5,
+          }}
+        >
+          Masuk sebagai admin Lab Komputasi FTMM.
         </p>
 
         <div style={{ display: "grid", gap: 14 }}>
@@ -64,82 +84,29 @@ export default function Login({ onAuthenticated }: { onAuthenticated: () => void
             value={email}
             onChange={setEmail}
             placeholder="admin@lab.ac.id"
+            autoComplete="username"
             autoFocus
           />
-          <div>
-            <label
-              htmlFor="lx-password"
-              style={{
-                display: "block",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: ".06em",
-                textTransform: "uppercase",
-                color: "var(--lx-muted)",
-                marginBottom: 6,
-              }}
-            >
-              Password
-            </label>
-            <input
-              id="lx-password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={Boolean(error)}
-              style={{
-                font: "inherit",
-                width: "100%",
-                fontSize: 13.5,
-                padding: "9px 14px",
-                borderRadius: "var(--lx-radius-control)",
-                border: `1px solid ${error ? "var(--lx-status-alert)" : "var(--lx-border)"}`,
-                background: "var(--lx-card)",
-                color: "var(--lx-text)",
-              }}
-            />
-          </div>
+          <TextField
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            autoComplete="current-password"
+            error={error ?? undefined}
+          />
         </div>
 
-        {error && (
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 10 }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: "var(--lx-status-alert)",
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ fontSize: 12 }}>{error}</span>
-          </div>
-        )}
-
-        <div style={{ marginTop: 20 }}>
+        <div style={{ marginTop: 22 }}>
           <Button
             label={isBusy ? "Memeriksa..." : "Masuk"}
             variant="primary"
             isFullWidth
-            disabled={isBusy || !email.trim() || !password}
+            disabled={!canSubmit}
             onClick={() => {}}
             type="submit"
           />
         </div>
-
-        <p
-          style={{
-            fontSize: 11,
-            lineHeight: 1.5,
-            color: "var(--lx-muted)",
-            textAlign: "center",
-            margin: "16px 0 0",
-          }}
-        >
-          Sesi mencatat waktu, durasi &amp; tujuan.
-          <br />
-          Tanpa perekaman layar.
-        </p>
       </form>
     </div>
   );

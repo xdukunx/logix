@@ -83,7 +83,7 @@ def test_schema_no_longer_lists_speculative_unimplemented_fields():
 # server_config.json is what the Windows agent actually paints itself with: the
 # client fetches /api/config and Get-LogbookTheme reads branding.colors straight
 # out of it. The v3 pass restyled every surface but left this file shipping the
-# pre-v3 MindLab palette, so a freshly installed workstation rendered a maroon
+# pre-v3 palette, so a freshly installed workstation rendered a maroon
 # sign-in card that no design document called for. Tokens are only the source of
 # truth if the thing that serves them agrees.
 #

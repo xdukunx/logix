@@ -127,13 +127,37 @@ def prompt_privacy_mode(default: str) -> str:
     return val
 
 
+def machine_hostname() -> str:
+    """The name this machine will heartbeat under, from the SAME source the
+    agent uses.
+
+    On Windows the agent (windows/logbook_common.ps1) always sends
+    $env:COMPUTERNAME. This script used socket.gethostname(), which returns the
+    DNS host name -- often spelled differently, sometimes only in case. The two
+    enrolment paths therefore registered under two spellings of one machine's
+    name, and the registry ended up with two devices: one under the raw PC
+    name, one under the name the admin typed. The server now compares
+    hostnames case-insensitively, and this makes the two paths agree outright.
+    """
+    if sys.platform.startswith("win"):
+        return os.environ.get("COMPUTERNAME") or socket.gethostname()
+    return socket.gethostname()
+
+
 def redeem_enrollment_code(server_url: str, enroll_code: str, device_name: str) -> bool:
     """POST to /api/enroll and persist the result via paths.write_device_identity()
  -- the same identity file windows/logbook_setup.ps1's Save button writes,
-    so either wizard path produces an agent in the same enrolled state."""
+    so either wizard path produces an agent in the same enrolled state.
+
+    device_name is what the operator typed at the "Device name" prompt. It used
+    to be accepted, written to config.env, and then NOT sent here -- so the
+    registry row was created under the bare hostname and only picked the real
+    name up on a later heartbeat. Sending it makes the row right immediately.
+    """
     body = json.dumps({
         "invite_code": enroll_code,
-        "hostname": socket.gethostname(),
+        "hostname": machine_hostname(),
+        "device_name": device_name,
         "os": sys.platform,
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -255,14 +279,14 @@ def main(argv: list[str] | None = None) -> int:
     # is attached (prompt() itself no-ops to the default in that case, same
     # as install/setup_sync.py).
     if ns.non_interactive:
-        device_name = ns.device_name or socket.gethostname()
+        device_name = ns.device_name or machine_hostname()
         server_url = ns.server_url
         server_api_key = ns.server_api_key
         enroll_code = ns.enroll_code
         privacy_mode = ns.privacy_mode
     else:
         print()
-        device_name = prompt("Device name (shown on the admin dashboard)", ns.device_name or socket.gethostname())
+        device_name = prompt("Device name (shown on the admin dashboard)", ns.device_name or machine_hostname())
         server_url = prompt("Central server URL (blank = fully local, no sync)", ns.server_url)
         enroll_code = ""
         server_api_key = ns.server_api_key

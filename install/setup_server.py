@@ -45,7 +45,10 @@ ENV_PATH = SERVER_DIR / ".env"
 REQUIREMENTS = SERVER_DIR / "requirements.txt"
 
 SERVICE_NAME = "logix-server"
-MACOS_LABEL = "com.mindlab.logix-server"
+MACOS_LABEL = "com.logix.logix-server"
+# Pre-rename label. Unloaded during install so an upgraded Mac does not
+# keep running the old LaunchAgent alongside the new one.
+LEGACY_MACOS_LABELS = ("com.mindlab.logix-server",)
 WINDOWS_TASK = "LogixServer"
 
 
@@ -224,6 +227,27 @@ def register_windows_jobs(python: str) -> None:
     print(f'  remove:  Get-ScheduledTask -TaskName "{WINDOWS_TASK}-*" | Unregister-ScheduledTask -Confirm:$false')
 
 
+
+def unload_legacy_macos_daemons() -> None:
+    """Unload and remove any launchd daemon registered under a pre-rename label.
+
+    Renaming the label alone would leave the old plist loaded, so an upgraded
+    Mac would run BOTH copies -- two servers fighting over the same port, or
+    two sync jobs writing the same rows. Best-effort: launchctl exits non-zero
+    for a label that was never loaded, which is the ordinary case.
+    """
+    for label in LEGACY_MACOS_LABELS:
+        stale = Path("/Library/LaunchDaemons") / f"{label}.plist"
+        if not stale.exists():
+            continue
+        subprocess.run(["launchctl", "unload", "-w", str(stale)], check=False)
+        try:
+            stale.unlink()
+            print(f"Removed the pre-rename launchd daemon '{label}'.")
+        except OSError as exc:
+            print(f"  could not remove {stale}: {exc}", file=sys.stderr)
+
+
 def register_service(python: str, host: str, port: int, user: str) -> None:
     if sys.platform.startswith("win"):
         ps1 = SERVER_DIR / "install_server_task.ps1"
@@ -234,6 +258,7 @@ def register_service(python: str, host: str, port: int, user: str) -> None:
         print(f'  remove:  Unregister-ScheduledTask -TaskName "{WINDOWS_TASK}" -Confirm:$false')
         register_windows_jobs(python)
     elif sys.platform == "darwin":
+        unload_legacy_macos_daemons()
         target = Path("/Library/LaunchDaemons") / f"{MACOS_LABEL}.plist"
         target.write_text(build_macos_plist(python, host, port), encoding="utf-8")
         os.chmod(target, 0o644)

@@ -27,6 +27,10 @@ logix.db
 
 # Windows session state — contains live usernames / session payloads
 session.json
+# Agent runtime state, in case a ProgramData directory is ever copied into
+# a checkout. Both the current name and the pre-rename one.
+*/Logix/session.json
+*/Logix/logbook_error.log
 */MindLabLogbook/*
 ProgramData/
 

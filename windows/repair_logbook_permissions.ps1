@@ -86,14 +86,14 @@ try {
     $healTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration (New-TimeSpan -Days 3650)
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUserSid -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger @($trigger, $healTrigger) -Principal $taskPrincipal -Settings $settings -Force | Out-Null
+    Register-ScheduledTask -TaskName 'Logix Agent Monitor' -Action $action -Trigger @($trigger, $healTrigger) -Principal $taskPrincipal -Settings $settings -Force | Out-Null
     Write-Host '  monitor task re-registered at RunLevel Limited' -ForegroundColor Green
 } catch { Write-Host "  task re-registration failed: $($_.Exception.Message)" -ForegroundColor Red }
 
 # 5. Launch the monitor via the task so it runs NON-elevated (do NOT Start-Process
 #    it from here -- this process is elevated and the child would inherit that).
 try {
-    Start-ScheduledTask -TaskName 'MindLab Report Logbook Monitor'
+    Start-ScheduledTask -TaskName 'Logix Agent Monitor'
     Write-Host '  monitor started (non-elevated) via scheduled task' -ForegroundColor Green
 } catch { Write-Host "  could not start monitor task: $($_.Exception.Message)" -ForegroundColor Red }
 

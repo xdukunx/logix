@@ -4,9 +4,9 @@
     <id>logix</id>
     <version>1.2.1</version>
     <packageSourceUrl>https://github.com/xdukunx/logix/tree/main/packaging/chocolatey</packageSourceUrl>
-    <owners>MindLab</owners>
+    <owners>Logix</owners>
     <title>Logix Agent</title>
-    <authors>MindLab</authors>
+    <authors>Logix</authors>
     <projectUrl>https://github.com/xdukunx/logix</projectUrl>
     <licenseUrl>https://github.com/xdukunx/logix/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>

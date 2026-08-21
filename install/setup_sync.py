@@ -98,7 +98,8 @@ def install_deps() -> None:
 # --------------------------------------------------------------------------- #
 # scheduling (per OS) — writes an artifact into the install dir and registers it
 # --------------------------------------------------------------------------- #
-MACOS_LABEL = "com.mindlab.logix-sync"
+MACOS_LABEL = "com.logix.logix-sync"
+LEGACY_MACOS_LABELS = ("com.mindlab.logix-sync",)
 
 
 def build_linux_units(dest: Path, python: str) -> tuple[str, str]:
@@ -159,7 +160,28 @@ def schedule_linux(dest: Path, python: str) -> None:
     print("  remove:  systemctl disable --now logix-sync.timer")
 
 
+def unload_legacy_macos_daemons() -> None:
+    """Unload and remove any launchd daemon registered under a pre-rename label.
+
+    Renaming the label alone would leave the old plist loaded, so an upgraded
+    Mac would run BOTH copies -- two servers fighting over the same port, or
+    two sync jobs writing the same rows. Best-effort: launchctl exits non-zero
+    for a label that was never loaded, which is the ordinary case.
+    """
+    for label in LEGACY_MACOS_LABELS:
+        stale = Path("/Library/LaunchDaemons") / f"{label}.plist"
+        if not stale.exists():
+            continue
+        subprocess.run(["launchctl", "unload", "-w", str(stale)], check=False)
+        try:
+            stale.unlink()
+            print(f"Removed the pre-rename launchd daemon '{label}'.")
+        except OSError as exc:
+            print(f"  could not remove {stale}: {exc}", file=sys.stderr)
+
+
 def schedule_macos(dest: Path, python: str) -> None:
+    unload_legacy_macos_daemons()
     plist = dest / f"{MACOS_LABEL}.plist"
     plist.write_text(build_macos_plist(dest, python), encoding="utf-8")
     target = Path("/Library/LaunchDaemons") / f"{MACOS_LABEL}.plist"

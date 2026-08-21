@@ -323,6 +323,8 @@ export const TextField = ({
   isMono = false,
   autoFocus,
   maxLength,
+  type = "text",
+  autoComplete,
 }: {
   label: string;
   value: string;
@@ -332,6 +334,10 @@ export const TextField = ({
   isMono?: boolean;
   autoFocus?: boolean;
   maxLength?: number;
+  /** "password" masks the value. The login screen used to hand-roll its own
+   *  <input> for this, which is why its field never matched the one above it. */
+  type?: "text" | "password";
+  autoComplete?: string;
 }) => {
   const id = useId();
   return (
@@ -352,6 +358,8 @@ export const TextField = ({
       </label>
       <input
         id={id}
+        type={type}
+        autoComplete={autoComplete}
         className={isMono ? "lx-mono" : undefined}
         value={value}
         autoFocus={autoFocus}

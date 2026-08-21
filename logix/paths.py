@@ -108,8 +108,8 @@ def default_session_json() -> Path:
         return Path(v)
     if sys.platform.startswith("win"):
         base = os.environ.get("ProgramData", r"C:\ProgramData")
-        return Path(base) / "MindLabLogbook" / "session.json"
-    return Path("/mnt/c/ProgramData/MindLabLogbook/session.json")
+        return Path(base) / "Logix" / "session.json"
+    return Path("/mnt/c/ProgramData/Logix/session.json")
 
 
 def server_url() -> str:

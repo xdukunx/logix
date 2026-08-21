@@ -133,11 +133,17 @@ Details: [docs/PRIVACY.md](docs/PRIVACY.md) &middot; [SECURITY.md](SECURITY.md) 
 | | Client (workstation) | Server (optional) |
 |---|---|---|
 | OS | Windows 10/11, x64 (full agent) · Linux/macOS (SSH-only capture) | Linux, macOS, or Windows |
-| Python | 3.8+ | 3.11+ (plus `python3-venv` on Debian/Ubuntu — the installer adds it) |
+| Python | 3.8+ | 3.9+, 3.12 recommended (plus `python3-venv` on Debian/Ubuntu — the installer adds it) |
+| Node.js | — | 18+, 20 LTS recommended — only to build the dashboard; the installer adds it, and the server falls back to a no-Node static UI without it |
 | Hardware | None — no resident process; DB is ~7 MB per 10,000 sessions | **1 vCPU / 1 GB RAM / 10 GB disk** for a typical lab |
 
-No Docker, no external database, either side. Server dependencies install into
-`server/.venv`, never the system Python. Reasoning behind the VM numbers (and
+No Docker, no external database, either side. The one-line server installer
+([`install/bootstrap-server.ps1`](install/bootstrap-server.ps1) /
+[`.sh`](install/bootstrap-server.sh)) installs Python, Node.js and git for you
+where the platform allows it (winget on Windows, apt/dnf/pacman/brew
+elsewhere), then builds the dashboard and hands off to `setup_server.py` — you
+should not have to install a prerequisite by hand. Server dependencies install
+into `server/.venv`, never the system Python. Reasoning behind the VM numbers (and
 how they change for a bigger lab):
 [docs/HOSTING.md](docs/HOSTING.md#0-requirements--sizing-a-vm).
 
@@ -148,6 +154,11 @@ how they change for a bigger lab):
 ```powershell
 irm https://raw.githubusercontent.com/xdukunx/logix/main/windows/bootstrap-client.ps1 | iex
 ```
+
+It asks two questions (WSL bridge or native Python; floating timer pill or a
+[YASB](https://github.com/amnweb/yasb) status-bar slot) and answers everything
+else itself. To skip the prompts, download it and pass the flags instead —
+`-UseWSL`, `-Yasb`, `-ServerUrl`, `-DeviceName`.
 
 **A whole lab** — one command on the server, one per workstation:
 
@@ -174,7 +185,7 @@ troubleshooting a device that will not connect): **[docs/LAB_SETUP.md](docs/LAB_
 | 🎩 **Fedora / RHEL** | core + `logix` CLI | `sudo dnf install "$(curl -fsSL https://api.github.com/repos/xdukunx/logix/releases/latest \| grep -oE 'https://[^"]+\.rpm')"` |
 | 🍺 **Homebrew** (macOS/Linux) | core + `logix` CLI | `brew install xdukunx/logix/logix` *(tap not published yet — formula's ready, see below)* |
 | 🍫 **Chocolatey** (Windows) | full sign-in agent | `choco install logix` *(pending community-feed moderation — see below)* |
-| 🪟 **Winget** (Windows) | full sign-in agent | `winget install MindLab.Logix` *(pending winget-pkgs PR — see below)* |
+| 🪟 **Winget** (Windows) | full sign-in agent | `winget install Logix.Logix` *(pending winget-pkgs PR — see below)* |
 
 `.deb`/`.rpm` are built and attached to every [Release][releases-url]
 automatically — grab the latest and run **`sudo logix configure`** once.

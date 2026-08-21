@@ -7,7 +7,7 @@
 |---|---|
 | **Product** | Logix |
 | **Document status** | Living document — reflects the shipped system as of this revision |
-| **Owner** | MindLab (lab operations) |
+| **Owner** | Lab operations |
 | **Repository** | https://github.com/xdukunx/logix |
 | **Primary deployment** | Shared workstations in a university faculty lab (physical + remote/AnyDesk access) |
 | **License** | MIT |

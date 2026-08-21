@@ -141,7 +141,7 @@ def repair_active_session_from_windows_state(con: sqlite3.Connection, session_pa
     """Ensure the currently active Windows popup session is present in SQLite.
 
     This fixes the real-world failure mode where the WPF form creates
-    C:\\ProgramData\\MindLabLogbook\\session.json and starts the timer, but the
+    C:\\ProgramData\\Logix\\session.json and starts the timer, but the
     START insert into WSL/SQLite is missed because WSL, Python, or permission
     handling was restarted. Report generation is allowed to do this small
     idempotent repair before reading rows, so an active user is never invisible

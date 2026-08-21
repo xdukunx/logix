@@ -28,7 +28,7 @@ Living plan for what's built and what's next. Privacy rules in
 
 - **Per-user popup customization.** The Windows WPF popup reads an optional
   cascading JSON config (built-in defaults <- `C:\lab\logbook_config.json` <-
-  `%APPDATA%\MindLabLogbook\logbook_config.json`). Rebrand (logo/title/colors),
+  `%APPDATA%\Logix\logbook_config.json`). Rebrand (logo/title/colors),
   relabel, change the access/purpose dropdowns, and set required fields without
   editing code; absent config = the original FTMM UI. Config + XAML generation
   live in `logbook_common.ps1`; covered by `windows/test_logbook_config.ps1`

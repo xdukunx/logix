@@ -56,7 +56,7 @@ $ErrorActionPreference = 'Stop'
 # the file -- swallowing the click entirely. A rename is atomic; there is no
 # moment at which the file exists but is empty.
 if ($PSCmdlet.ParameterSetName -eq 'Action') {
-    $dir = Join-Path $env:ProgramData 'MindLabLogbook'
+    $dir = Join-Path $env:ProgramData 'Logix'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     $dest = Join-Path $dir 'bar_action'
     $tmp = "$dest.tmp"

@@ -7,15 +7,15 @@
 // restyled.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { getJson, sendJson } from "../api";
+import { del, getJson, sendJson } from "../api";
 import { DEVICE_CATEGORIES, categoryLabel, type StationStatus } from "../tokens";
-import type { Device, DeviceDetail, SyncStatus } from "../types";
-import { Mono, PageHeader, SectionLabel, StatusDot } from "../ui/base";
+import type { Device, DeviceDetail, DeviceScreenshot, SyncStatus } from "../types";
+import { Mono, PageHeader, SectionLabel, Skeleton, StatusDot } from "../ui/base";
 import { Button, PillSelect, SearchChip } from "../ui/controls";
 import { useBreakpoint } from "../ui/hooks";
 import { Drawer, Modal, ModalActions, useToast } from "../ui/overlays";
 import { Table, type Column } from "../ui/table";
-import { splitDeviceName, timeAgo, useTicker } from "../util";
+import { formatLogTime, splitDeviceName, timeAgo, useTicker } from "../util";
 
 const SYNC_STATUS: Record<SyncStatus, StationStatus> = {
   online: "active",
@@ -54,6 +54,11 @@ export default function Devices() {
   const [inviteCategory, setInviteCategory] = useState("lab_workstation");
   const [invite, setInvite] = useState<{ invite_code: string; expires_at: string } | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<Device | null>(null);
+  // Last screenshot for the selected device. `undefined` = not loaded yet,
+  // `null` = the server has none (404), which is a normal state, not an error.
+  const [shot, setShot] = useState<DeviceScreenshot | null | undefined>(undefined);
+  const [isRequestingShot, setRequestingShot] = useState(false);
+  const [isShotOpen, setShotOpen] = useState(false);
 
   useTicker(1000); // keeps the invite countdown and the "X ago" column live
 
@@ -87,6 +92,24 @@ export default function Devices() {
     };
   }, [selected]);
 
+  // The capture the agent last uploaded. GET /api/devices/{id}/screenshot has
+  // existed since Logix Control shipped, but nothing in this dashboard ever
+  // called it -- so Monitoring's "Hasilnya muncul di Perangkat" toast pointed
+  // at a screen that did not show screenshots. This is that screen.
+  const loadShot = useCallback(async (deviceId: string) => {
+    try {
+      setShot(await getJson<DeviceScreenshot>(`/api/devices/${deviceId}/screenshot`, ""));
+    } catch {
+      setShot(null); // 404 = nothing captured yet, which the UI states plainly
+    }
+  }, []);
+
+  useEffect(() => {
+    setShot(undefined);
+    setShotOpen(false);
+    if (selected) loadShot(selected);
+  }, [selected, loadShot]);
+
   const rows = useMemo(() => {
     const list = devices ?? [];
     const needle = search.trim().toLowerCase();
@@ -112,15 +135,36 @@ export default function Devices() {
     }
   };
 
-  const revoke = async (device: Device) => {
+  // DELETE, not the old POST .../revoke. Revoke only nulled the API key: the
+  // row stayed in the registry, kept its last_seen, kept status 'active', and
+  // -- if the fleet still had a shared ingest key -- came straight back on the
+  // next heartbeat. The button said "Hapus" and did not delete.
+  const removeDevice = async (device: Device) => {
     try {
-      await sendJson(`/api/devices/${device.device_id}/revoke`, "POST", {}, "Gagal menghapus perangkat");
+      await del(`/api/devices/${device.device_id}`, "Gagal menghapus perangkat");
       toast("Perangkat dihapus dari registri.");
       setRevokeTarget(null);
       setSelected(null);
       refresh();
     } catch (err) {
       toast((err as Error).message, "alert");
+    }
+  };
+
+  const requestShot = async (device: Device) => {
+    setRequestingShot(true);
+    try {
+      await sendJson(
+        "/api/control/screenshot",
+        "POST",
+        { hostname: device.hostname, reason: "Pemeriksaan dari tab Perangkat" },
+        "Gagal meminta cuplikan",
+      );
+      toast("Permintaan dikirim. Cuplikan muncul di sini setelah client merespons.");
+    } catch (err) {
+      toast((err as Error).message, "alert");
+    } finally {
+      setRequestingShot(false);
     }
   };
 
@@ -266,6 +310,71 @@ export default function Devices() {
             </div>
 
             <div style={{ marginBottom: 10 }}>
+              <SectionLabel>Cuplikan layar terakhir</SectionLabel>
+            </div>
+            {shot === undefined ? (
+              <Skeleton height={124} />
+            ) : shot === null ? (
+              <div
+                style={{
+                  border: "1px dashed var(--lx-border-dashed)",
+                  borderRadius: "var(--lx-radius-menu)",
+                  padding: "18px 14px",
+                  textAlign: "center",
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: "var(--lx-muted)",
+                }}
+              >
+                Belum ada cuplikan untuk perangkat ini.
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShotOpen(true)}
+                title="Perbesar cuplikan"
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: 0,
+                  border: "1px solid var(--lx-border)",
+                  borderRadius: "var(--lx-radius-menu)",
+                  overflow: "hidden",
+                  background: "var(--lx-sunken)",
+                  cursor: "zoom-in",
+                }}
+              >
+                <img
+                  src={`data:${shot.content_type || "image/jpeg"};base64,${shot.image_base64}`}
+                  alt={`Cuplikan layar ${selectedName.id}`}
+                  style={{ display: "block", width: "100%", height: "auto" }}
+                />
+              </button>
+            )}
+            <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--lx-muted)", margin: "8px 0 10px" }}>
+              {shot
+                ? `Diambil ${formatLogTime(shot.captured_at)}. Pengguna selalu diberi tahu saat cuplikan diambil.`
+                : "Pengguna selalu diberi tahu saat cuplikan diambil. Tidak ada pengambilan diam-diam."}
+            </p>
+            <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+              <Button
+                label={isRequestingShot ? "Meminta..." : "Minta cuplikan"}
+                variant="secondary"
+                size="sm"
+                style={{ flex: 1 }}
+                disabled={isRequestingShot || !selectedDevice.currently_online}
+                onClick={() => requestShot(selectedDevice)}
+              />
+              <Button
+                label="Muat ulang"
+                variant="ghost"
+                size="sm"
+                style={{ flex: 1 }}
+                onClick={() => loadShot(selectedDevice.device_id)}
+              />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
               <SectionLabel>Invite code — sekali pakai</SectionLabel>
             </div>
             {invite && inviteBox(20)}
@@ -329,17 +438,42 @@ export default function Devices() {
         isOpen={revokeTarget !== null}
         onClose={() => setRevokeTarget(null)}
         title={`Hapus ${revokeTarget ? splitDeviceName(revokeTarget.display_name || revokeTarget.hostname).id : ""}?`}
-        description="Perangkat kehilangan kredensialnya dan berhenti melapor. Riwayat sesinya tetap tersimpan."
+        description="Perangkat hilang dari daftar, kehilangan kredensialnya, dan tidak bisa mendaftar ulang sendiri lewat heartbeat — hanya lewat kode undangan baru. Riwayat sesinya tetap tersimpan."
         accentEdge="alert"
         footer={
           <ModalActions
             onCancel={() => setRevokeTarget(null)}
             confirmLabel="Hapus perangkat"
             variant="danger"
-            onConfirm={() => revoke(revokeTarget!)}
+            onConfirm={() => removeDevice(revokeTarget!)}
           />
         }
       />
+
+      {/* Full-size capture. A 300px drawer thumbnail is enough to see THAT a
+          screenshot exists, never enough to read what is on the screen. */}
+      <Modal
+        isOpen={isShotOpen && shot !== null && shot !== undefined}
+        onClose={() => setShotOpen(false)}
+        title={`Cuplikan layar ${selectedName?.id ?? ""}`}
+        description={shot ? `Diambil ${formatLogTime(shot.captured_at)}` : undefined}
+        width={860}
+        footer={<Button label="Tutup" variant="secondary" size="sm" onClick={() => setShotOpen(false)} />}
+      >
+        {shot && (
+          <img
+            src={`data:${shot.content_type || "image/jpeg"};base64,${shot.image_base64}`}
+            alt={`Cuplikan layar ${selectedName?.id ?? shot.hostname}`}
+            style={{
+              display: "block",
+              width: "100%",
+              height: "auto",
+              borderRadius: "var(--lx-radius-menu)",
+              border: "1px solid var(--lx-border)",
+            }}
+          />
+        )}
+      </Modal>
     </>
   );
 }

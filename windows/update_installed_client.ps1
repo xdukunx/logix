@@ -81,10 +81,14 @@ $coreFiles = @('log_physical.py', 'paths.py', 'logbook_report.py', 'report_serve
 $coreDir = Join-Path $env:ProgramData 'Logix'
 
 # ---- stop the agent so nothing is mid-read while files change ---------------
-$taskName = 'MindLab Report Logbook Monitor'
-$task = Get-ScheduledTask | Where-Object { $_.TaskName -eq $taskName }
+# Both generations: this script's whole job is upgrading a machine that
+# predates the rename, so it has to be able to stop the task the OLD installer
+# registered as well as the one the new installer will.
+$taskName = 'Logix Agent Monitor'
+$legacyTaskName = 'MindLab Report Logbook Monitor'
+$task = Get-ScheduledTask | Where-Object { $_.TaskName -eq $taskName -or $_.TaskName -eq $legacyTaskName }
 if ($task -and -not $NoRestart) {
-    Say "stopping '$taskName'"
+    Say "stopping '$($task.TaskName)'"
     try { Stop-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath } catch { }
 }
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
@@ -136,7 +140,7 @@ if (Test-Path $version) {
 $serverCfg = Join-Path (Split-Path $repo -Parent) 'server\server_config.json'
 # Get-LogbookConfig caches the server's reply here (logbook_common.ps1) -- the
 # name is server_config_cache.json, not config.json.
-$localCfg = 'C:\ProgramData\MindLabLogbook\server_config_cache.json'
+$localCfg = 'C:\ProgramData\Logix\server_config_cache.json'
 if ((Test-Path $serverCfg) -and (Test-Path $localCfg)) {
     try {
         $want = (Get-Content -Raw $serverCfg | ConvertFrom-Json).branding.colors
@@ -155,11 +159,15 @@ if ((Test-Path $serverCfg) -and (Test-Path $localCfg)) {
 
 # ---- restart -------------------------------------------------------------------
 if ($task -and -not $NoRestart) {
-    Say "starting '$taskName'"
+    Say "starting '$($task.TaskName)'"
     Start-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath
     Start-Sleep -Seconds 2
     $state = (Get-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath).State
     Say "task state: $state" 'Green'
+    if ($task.TaskName -eq $legacyTaskName) {
+        Say "this machine still runs the pre-rename task '$legacyTaskName'." 'Yellow'
+        Say "re-run install_logbook_tasks.ps1 (elevated) to re-register it as '$taskName'." 'Yellow'
+    }
 } elseif (-not $task) {
     Say "scheduled task '$taskName' not found -- files updated, nothing restarted." 'Yellow'
 }

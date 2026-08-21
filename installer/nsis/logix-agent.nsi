@@ -21,7 +21,7 @@ Unicode true
 ; Paths are anchored to this script's folder so compile CWD doesn't matter.
 !define SRC      "${__FILEDIR__}\..\.."
 !define INSTDIRR "${__FILEDIR__}\.."
-!define TASKNAME "MindLab Report Logbook Monitor"
+!define TASKNAME "Logix Agent Monitor"
 
 Name "Logix"
 !ifdef PREVIEW
@@ -174,7 +174,7 @@ Section "Logix" SecMain
   WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "Logix"
   WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\logix.ico"
-  WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "MindLab"
+  WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "Logix"
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
 !else

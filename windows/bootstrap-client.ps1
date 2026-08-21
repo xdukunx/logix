@@ -41,6 +41,10 @@ param(
     [string]$ServerApiKey = "",
     [string]$DeviceName = "",
     [switch]$UseWSL,
+    # Render the session timer in a YASB status bar instead of the floating
+    # pill. Forwarded to install_logbook_tasks.ps1, which copies and runs
+    # logix_yasb.ps1 -Enable.
+    [switch]$Yasb,
     [switch]$SkipAnyDesk,
     [switch]$NoRunNow
 )
@@ -90,7 +94,7 @@ function Write-Outro {
     Write-Host ""
     Write-Host "    Program files : C:\Program Files\Logix" -ForegroundColor DarkGray
     Write-Host "    Server config : C:\ProgramData\Logix\config.env" -ForegroundColor DarkGray
-    Write-Host "    Runtime state : C:\ProgramData\MindLabLogbook" -ForegroundColor DarkGray
+    Write-Host "    Runtime state : C:\ProgramData\Logix" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "    Next: lock and unlock this PC (Win+L) -- the sign-in" -ForegroundColor White
     Write-Host "    popup should appear, and the device shows up on the" -ForegroundColor White
@@ -216,6 +220,10 @@ if ($ServerUrl -and $ServerApiKey) {
     Write-Warn2 "(or re-run install_logbook_tasks.ps1 -NonInteractive later)."
 }
 if ($UseWSL)         { $taskArgs['UseWSL'] = $true }
+# -Yasb is forwarded as a switch the same way; passing it here also suppresses
+# install_logbook_tasks.ps1's interactive question, which is what makes an
+# unattended bar install possible at all.
+if ($Yasb)           { $taskArgs['Yasb'] = $true }
 if ($SkipAnyDesk)    { $taskArgs['SkipAnyDesk'] = $true }
 if (-not $NoRunNow)  { $taskArgs['RunNow'] = $true }
 

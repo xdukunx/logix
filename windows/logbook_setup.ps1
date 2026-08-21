@@ -185,7 +185,12 @@ $saveBtn.Add_Click({
         }
         try {
             $enrollUrl = $url.TrimEnd('/') + '/api/enroll'
-            $body = @{ invite_code = $enrollCode; hostname = $env:COMPUTERNAME; os = 'windows'; os_version = [System.Environment]::OSVersion.VersionString } | ConvertTo-Json
+            # device_name rides along. Without it the server created the
+            # registry row under the bare $env:COMPUTERNAME and the name typed
+            # into the box above only arrived on a later heartbeat -- so the
+            # dashboard showed the default PC name and the typed name as two
+            # separate things.
+            $body = @{ invite_code = $enrollCode; hostname = $env:COMPUTERNAME; device_name = $name; os = 'windows'; os_version = [System.Environment]::OSVersion.VersionString } | ConvertTo-Json
             $enrolled = Invoke-RestMethod -Uri $enrollUrl -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 10 -UseBasicParsing
 
             $identityPath = 'C:\ProgramData\Logix\device.json'

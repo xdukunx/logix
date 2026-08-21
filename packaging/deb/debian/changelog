@@ -13,7 +13,7 @@ logix (1.2.1) noble; urgency=medium
     system directory. An explicitly configured reports directory is still
     honoured exactly as given.
 
- -- MindLab <noreply@github.com>  Thu, 20 Aug 2026 00:00:00 +0000
+ -- Logix <noreply@github.com>  Thu, 20 Aug 2026 00:00:00 +0000
 
 logix (1.2.0) noble; urgency=medium
 
@@ -33,14 +33,14 @@ logix (1.2.0) noble; urgency=medium
     of at the boot/cap boundary, which could turn an overnight lock into a
     25-hour session.
 
- -- MindLab <noreply@github.com>  Wed, 19 Aug 2026 00:00:00 +0000
+ -- Logix <noreply@github.com>  Wed, 19 Aug 2026 00:00:00 +0000
 
 logix (1.1.1) noble; urgency=medium
 
   * Re-tag to attach the .deb/.rpm to the GitHub Release -- the packaging
     work landed on main after v1.1.0 was already cut.
 
- -- MindLab <noreply@github.com>  Mon, 21 Jul 2026 00:00:00 +0000
+ -- Logix <noreply@github.com>  Mon, 21 Jul 2026 00:00:00 +0000
 
 logix (1.1.0) noble; urgency=medium
 
@@ -49,4 +49,4 @@ logix (1.1.0) noble; urgency=medium
     sync, the SSH-login hook, and the "logix" command. Run "sudo logix
     configure" once after install.
 
- -- MindLab <noreply@github.com>  Mon, 21 Jul 2026 00:00:00 +0000
+ -- Logix <noreply@github.com>  Mon, 21 Jul 2026 00:00:00 +0000

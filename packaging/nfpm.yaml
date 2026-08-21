@@ -17,14 +17,14 @@ version: ${VERSION}
 release: "1"
 section: utils
 priority: optional
-maintainer: MindLab <noreply@github.com>
+maintainer: Logix <noreply@github.com>
 description: |
   Privacy-first sign-in logbook for shared lab computers (core + CLI).
   Records who/how/when -- never screen contents or keystrokes. This package
   installs the cross-platform logging core, report generator, Google Sheets
   sync, the SSH-login hook, and the `logix` command. Run `sudo logix
   configure` once after install. Physical at-keyboard sign-in is Windows-only.
-vendor: MindLab
+vendor: Logix
 homepage: https://github.com/xdukunx/logix
 license: MIT
 

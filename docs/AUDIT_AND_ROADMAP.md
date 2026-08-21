@@ -37,9 +37,15 @@ Added in batch 1: `SECURITY.md`, `docs/PRIVACY.md`, `CONTRIBUTING.md`,
 hardening.
 
 Still open:
-- Rebrand remaining hardcoded `MindLab` / `C:\lab` occurrences in the
-  Windows scripts into config (the popup/branding layer is already
-  config-driven; the paths and task names are not).
+- ~~Rebrand remaining hardcoded `MindLab` / `C:\lab` occurrences in the
+  Windows scripts~~ **Done.** Runtime state moved from
+  `%ProgramData%\MindLabLogbook` to `%ProgramData%\Logix` (one directory,
+  alongside `config.env`/`device.json`); the scheduled task is
+  `Logix Agent Monitor`, the HKCU Run value `LogixAgentMonitor`, the mutex
+  `Global\LogixAgentMonitor`, and the launchd labels `com.logix.*`. Existing
+  installs migrate on the first agent start (`Move-LogbookLegacyState`) and the
+  pre-rename task/Run value are unregistered by the installer. `MindLab` now
+  survives only in `LICENSE` (copyright holder) and this history.
 - `server/central_logix.db` exists in working trees that ran the server
   (gitignored, confirmed untracked).
 

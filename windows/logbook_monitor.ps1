@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 Ensure-LogbookDirs
 
 $created = $false
-$mutex = New-Object System.Threading.Mutex($true, 'Global\MindLabReportLogbookMonitor', [ref]$created)
+$mutex = New-Object System.Threading.Mutex($true, 'Global\LogixAgentMonitor', [ref]$created)
 if (-not $created) {
     Write-LogbookInfo 'Monitor already running; exiting duplicate instance.'
     exit 0
@@ -66,8 +66,8 @@ Invoke-InitialPopupOrTimer
 $action = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: SessionSwitch reason=$reason" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
-    $lockedFlag = 'C:\ProgramData\MindLabLogbook\workstation_locked.flag'
+    try { "$stamp INFO: SessionSwitch reason=$reason" | Out-File -FilePath 'C:\ProgramData\Logix\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    $lockedFlag = 'C:\ProgramData\Logix\workstation_locked.flag'
     if ($reason -in @('ConsoleDisconnect','RemoteDisconnect','SessionLogoff')) {
         # A real departure signal (user switch, RDP disconnect, sign-out) --
         # unlike a plain lock, ends the session outright.
@@ -105,13 +105,13 @@ $action = {
             # disk (already closed via sign-out/idle-timeout/SELESAI/reboot).
             Start-Process "$env:SystemRoot\System32\conhost.exe" -WindowStyle Hidden -ArgumentList @('--headless','powershell.exe','-NoProfile','-STA','-ExecutionPolicy','Bypass','-File','"C:\Program Files\Logix\logbook_popup.ps1"') | Out-Null
         } else {
-            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
+            try { "$stamp INFO: skipped spawning popup, one is already open" | Out-File -FilePath 'C:\ProgramData\Logix\logbook_error.log' -Append -Encoding UTF8 } catch {}
         }
     }
 }
 
 try {
-    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionSwitch -SourceIdentifier MindLabLogbookSessionSwitch -Action $action | Out-Null
+    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionSwitch -SourceIdentifier LogixSessionSwitch -Action $action | Out-Null
 } catch {
     Write-LogbookError "Register session switch failed: $($_.Exception.Message)"
 }
@@ -125,11 +125,11 @@ try {
 $endingAction = {
     $reason = $Event.SourceEventArgs.Reason.ToString()
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    try { "$stamp INFO: SessionEnding reason=$reason" | Out-File -FilePath 'C:\ProgramData\Logix\logbook_error.log' -Append -Encoding UTF8 } catch {}
     Start-Process "$env:SystemRoot\System32\conhost.exe" -WindowStyle Hidden -ArgumentList @('--headless','powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File','"C:\Program Files\Logix\logbook_end.ps1"','-Reason','END') | Out-Null
 }
 try {
-    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionEnding -SourceIdentifier MindLabLogbookSessionEnding -Action $endingAction | Out-Null
+    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName SessionEnding -SourceIdentifier LogixSessionEnding -Action $endingAction | Out-Null
 } catch {
     Write-LogbookError "Register session ending failed: $($_.Exception.Message)"
 }
@@ -148,8 +148,8 @@ try {
 $powerAction = {
     $mode = $Event.SourceEventArgs.Mode
     $stamp = (Get-Date).ToString('o')
-    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath 'C:\ProgramData\MindLabLogbook\logbook_error.log' -Append -Encoding UTF8 } catch {}
-    $lockedFlag = 'C:\ProgramData\MindLabLogbook\workstation_locked.flag'
+    try { "$stamp INFO: PowerModeChanged mode=$mode" | Out-File -FilePath 'C:\ProgramData\Logix\logbook_error.log' -Append -Encoding UTF8 } catch {}
+    $lockedFlag = 'C:\ProgramData\Logix\workstation_locked.flag'
     if ($mode -eq [Microsoft.Win32.PowerModes]::Suspend) {
         try { '' | Out-File -FilePath $lockedFlag -Force -Encoding UTF8 } catch {}
     } elseif ($mode -eq [Microsoft.Win32.PowerModes]::Resume) {
@@ -167,7 +167,7 @@ $powerAction = {
     }
 }
 try {
-    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName PowerModeChanged -SourceIdentifier MindLabLogbookPowerModeChanged -Action $powerAction | Out-Null
+    Register-ObjectEvent -InputObject ([Microsoft.Win32.SystemEvents]) -EventName PowerModeChanged -SourceIdentifier LogixPowerModeChanged -Action $powerAction | Out-Null
 } catch {
     Write-LogbookError "Register power mode changed failed: $($_.Exception.Message)"
 }

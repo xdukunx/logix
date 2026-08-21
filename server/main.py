@@ -216,6 +216,27 @@ CLOSING_EVENTS = {"END", "LOCK", "AUTO_FINISH", "AUTO_CLOSE", "DISCONNECT", "LOG
 # from under a student who is still sitting there.
 ORPHAN_SESSION_SILENCE_MINUTES = 30
 
+# devices.status. 'active' is the default the column has always carried;
+# 'deleted' is a TOMBSTONE, not a soft "hidden" flag -- the row survives only
+# so the hostname cannot silently re-register itself on the next heartbeat.
+# Every read surface filters it out, and re-enrolment with a fresh invite is
+# what brings a hostname back.
+DEVICE_STATUS_DELETED = "deleted"
+
+
+class DeviceDeleted(Exception):
+    """Raised by upsert_device() when the hostname has been deleted by an admin.
+
+    A distinct exception rather than a return value: every caller must decide
+    explicitly what to do, and the heartbeat path in particular has to turn it
+    into a 403 so the agent stops talking instead of retrying forever.
+    """
+
+    def __init__(self, hostname: str):
+        super().__init__(f"device {hostname} has been deleted")
+        self.hostname = hostname
+
+
 # Logix Control: persisted device registry. See docs/LOGIX_CONTROL.md §5.
 # device_id is still assigned as a stopgap on first-seen hostname via
 # upsert_device() for devices that never go through /api/enroll (e.g. an
@@ -647,6 +668,85 @@ def init_db():
         conn.close()
 
 
+def _merge_case_duplicate_devices(conn) -> int:
+    """Collapse registry rows that differ only in the CASE of their hostname.
+
+    Every device lookup used a case-sensitive `hostname = ?`, while the two
+    enrolment paths disagreed about where the hostname came from -- install.py
+    used socket.gethostname() (which Windows may report lowercase), the
+    PowerShell paths used $env:COMPUTERNAME (uppercase). One machine therefore
+    ended up with two rows: one under the raw PC name, one under the name the
+    admin typed, each treated as a separate device.
+
+    The comparisons are NOCASE now, so new duplicates cannot form. This is the
+    one-time cleanup for databases that already have them. Returns the number
+    of rows removed. Deliberately conservative: only rows whose hostnames are
+    EQUAL ignoring case are merged -- two genuinely different names may be two
+    genuinely different machines, and are left for an admin to delete.
+    """
+    rows = conn.execute(
+        "SELECT device_id, hostname, display_name, display_name_set_by_admin, category, "
+        "api_key, enrolled_at, last_seen, created_at, status FROM devices"
+    ).fetchall()
+    groups: Dict[str, List[Any]] = {}
+    for row in rows:
+        groups.setdefault((row["hostname"] or "").lower(), []).append(row)
+
+    removed = 0
+    for _, members in groups.items():
+        if len(members) < 2:
+            continue
+        # The enrolled row wins -- it holds the credential the agent is
+        # actually using. Failing that, the one that heartbeated most recently.
+        members.sort(key=lambda r: (r["api_key"] is not None, r["last_seen"] or "", r["created_at"] or ""))
+        survivor = members[-1]
+        losers = members[:-1]
+
+        display_name = survivor["display_name"]
+        set_by_admin = survivor["display_name_set_by_admin"] or 0
+        category = survivor["category"]
+        api_key = survivor["api_key"]
+        enrolled_at = survivor["enrolled_at"]
+        last_seen = survivor["last_seen"]
+        for loser in losers:
+            # An admin-set name outranks anything; otherwise take a name that
+            # is not just the hostname over one that is.
+            if loser["display_name_set_by_admin"] and not set_by_admin:
+                display_name, set_by_admin = loser["display_name"], 1
+            elif not set_by_admin and (display_name or "").lower() == (survivor["hostname"] or "").lower():
+                if loser["display_name"] and (loser["display_name"] or "").lower() != (loser["hostname"] or "").lower():
+                    display_name = loser["display_name"]
+            if category in (None, "", "custom") and loser["category"]:
+                category = loser["category"]
+            if not api_key and loser["api_key"]:
+                api_key, enrolled_at = loser["api_key"], loser["enrolled_at"]
+            if (loser["last_seen"] or "") > (last_seen or ""):
+                last_seen = loser["last_seen"]
+
+            conn.execute("UPDATE device_screenshots SET device_id = ? WHERE device_id = ?",
+                         (survivor["device_id"], loser["device_id"]))
+            conn.execute("UPDATE device_replies SET device_id = ? WHERE device_id = ?",
+                         (survivor["device_id"], loser["device_id"]))
+            conn.execute("UPDATE remote_actions SET target_device_id = ? WHERE target_device_id = ?",
+                         (survivor["device_id"], loser["device_id"]))
+            conn.execute("UPDATE enrollment_invites SET used_by_device_id = ? WHERE used_by_device_id = ?",
+                         (survivor["device_id"], loser["device_id"]))
+            conn.execute("DELETE FROM devices WHERE device_id = ?", (loser["device_id"],))
+            removed += 1
+
+        conn.execute(
+            "UPDATE devices SET display_name = ?, display_name_set_by_admin = ?, category = ?, "
+            "api_key = ?, enrolled_at = ?, last_seen = ?, updated_at = ? WHERE device_id = ?",
+            (display_name, set_by_admin, category, api_key, enrolled_at, last_seen,
+             datetime.now().isoformat(), survivor["device_id"]),
+        )
+        logger.warning(
+            "devices: merged %d case-duplicate row(s) into %s (%s)",
+            len(losers), survivor["hostname"], survivor["device_id"],
+        )
+    return removed
+
+
 # Logix Control tables, kept separate from init_db() so this file's diff for
 # each Control milestone stays isolated and reviewable. See docs/LOGIX_CONTROL.md.
 def init_control_tables():
@@ -722,6 +822,18 @@ def init_control_tables():
         if "retry_of_action_id" not in existing_action_cols:
             conn.execute("ALTER TABLE remote_actions ADD COLUMN retry_of_action_id INTEGER")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_remote_actions_command_id ON remote_actions(command_id)")
+
+        # Runs here, once every table it repoints rows in exists. The NOCASE
+        # index that replaces the case-sensitive one cannot be created while
+        # duplicates are still present, which is exactly the guarantee wanted:
+        # if the merge is ever wrong the index creation fails loudly instead
+        # of leaving a half-cleaned registry.
+        _merge_case_duplicate_devices(conn)
+        conn.execute("DROP INDEX IF EXISTS idx_devices_hostname")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_hostname_nocase "
+            "ON devices(hostname COLLATE NOCASE)"
+        )
 
         now = datetime.now().isoformat()
         for policy_name, description, privacy_mode_default in SYSTEM_POLICY_PROFILES:
@@ -800,15 +912,25 @@ def upsert_device(conn, hostname: str, display_name: str,
     extra_sql = ("".join(f", {s}" for s in extra_sets))
 
     existing = conn.execute(
-        "SELECT device_id, display_name_set_by_admin, display_name FROM devices WHERE hostname = ?", (hostname,)
+        "SELECT device_id, display_name_set_by_admin, display_name, status "
+        "FROM devices WHERE hostname = ? COLLATE NOCASE", (hostname,)
     ).fetchone()
     if existing:
+        if existing["status"] == DEVICE_STATUS_DELETED:
+            # Deleted means deleted. This branch used to be the reason a
+            # removed device came straight back: the row was still there, the
+            # agent still had the SHARED ingest key, and the next heartbeat's
+            # unconditional "status = 'active'" put it back on the dashboard
+            # 30 seconds later -- reported, correctly, as "sudah dihapus tapi
+            # masih aktif". Re-enrolling with a fresh invite is the only way
+            # back in; see delete_device() and post_heartbeat().
+            raise DeviceDeleted(hostname)
         if existing["display_name_set_by_admin"]:
             # An admin renamed this device from the dashboard -- that name
             # is authoritative until explicitly changed again, regardless
             # of what this heartbeat's agent-reported name says.
             conn.execute(
-                f"UPDATE devices SET last_seen = ?, status = 'active', updated_at = ?{extra_sql} WHERE hostname = ?",
+                f"UPDATE devices SET last_seen = ?, status = 'active', updated_at = ?{extra_sql} WHERE hostname = ? COLLATE NOCASE",
                 (now, now, *extra_args, hostname),
             )
             conn.commit()
@@ -816,7 +938,7 @@ def upsert_device(conn, hostname: str, display_name: str,
         else:
             conn.execute(
                 f"UPDATE devices SET display_name = ?, last_seen = ?, status = 'active', updated_at = ?{extra_sql} "
-                "WHERE hostname = ?",
+                "WHERE hostname = ? COLLATE NOCASE",
                 (display_name, now, now, *extra_args, hostname),
             )
     else:
@@ -836,7 +958,7 @@ def log_remote_action(conn, actor_email: str, target_device: str, action_type: s
                        status: str, reason: str = "", param: str = "",
                        error_message: str = "", result_summary: str = "",
                        command_id: str = ""):
-    device_row = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (target_device,)).fetchone()
+    device_row = conn.execute("SELECT device_id FROM devices WHERE hostname = ? COLLATE NOCASE", (target_device,)).fetchone()
     target_device_id = device_row["device_id"] if device_row else None
     conn.execute(
         "INSERT INTO remote_actions "
@@ -1680,6 +1802,18 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
             )
         finally:
             conn.close()
+    except DeviceDeleted:
+        # Not swallowed like the failures below: an admin deleted this device,
+        # and the agent needs to hear that rather than keep heartbeating into
+        # a registry that will not have it. 403 (not 401) so the agent's own
+        # logs distinguish "my key is wrong" from "I was removed".
+        HEARTBEATS.pop(payload.hostname, None)
+        PENDING_COMMANDS.pop(payload.hostname, None)
+        logger.info("heartbeat: rejected deleted device %s", payload.hostname)
+        raise HTTPException(
+            status_code=403,
+            detail="This device has been removed from the registry. Re-enroll with a new invite code.",
+        )
     except Exception:
         logger.warning("heartbeat: upsert_device failed for %s", payload.hostname, exc_info=True)
 
@@ -1748,12 +1882,21 @@ def get_active_workstations(email: str = Depends(verify_token)):
     now = datetime.now()
     conn = get_db()
     try:
-        categories = {r["hostname"]: r["category"] for r in conn.execute("SELECT hostname, category FROM devices")}
+        registry = {
+            r["hostname"].lower(): r
+            for r in conn.execute("SELECT hostname, category, status FROM devices")
+        }
     finally:
         conn.close()
     active_pcs = []
     for host, info in HEARTBEATS.items():
-        if compute_sync_status(categories.get(host), info["last_seen"], now) == "online":
+        row = registry.get(host.lower())
+        # A tombstoned hostname must not reappear here either. HEARTBEATS is
+        # in-memory and delete_device() clears it, but a heartbeat racing the
+        # delete can put it straight back.
+        if row is not None and row["status"] == DEVICE_STATUS_DELETED:
+            continue
+        if compute_sync_status(row["category"] if row else None, info["last_seen"], now) == "online":
             status_since = info.get("status_since")
             active_pcs.append({
                 "hostname": host,
@@ -1778,7 +1921,10 @@ def get_active_workstations(email: str = Depends(verify_token)):
 def get_devices(email: str = Depends(require_permission("devices_read"))):
     conn = get_db()
     try:
-        rows = conn.execute("SELECT * FROM devices ORDER BY last_seen DESC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM devices WHERE status != ? ORDER BY last_seen DESC",
+            (DEVICE_STATUS_DELETED,),
+        ).fetchall()
         now = datetime.now()
         devices = []
         for r in rows:
@@ -1807,7 +1953,7 @@ def get_device_detail(device_id: str, email: str = Depends(require_permission("d
         reconcile_expired_actions(conn)
 
         row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
-        if not row:
+        if not row or row["status"] == DEVICE_STATUS_DELETED:
             raise HTTPException(status_code=404, detail="Device not found")
         device = dict(row)
         device.pop("api_key", None)
@@ -2021,6 +2167,16 @@ class EnrollRequest(BaseModel):
     os: Optional[str] = ""
     os_version: Optional[str] = ""
     agent_version: Optional[str] = ""
+    # What the person at the workstation typed into the setup wizard's "Nama
+    # device" box. Every enrolment path collected this and then threw it away,
+    # so the registry row was created under the machine's raw hostname and the
+    # typed name only arrived on the FIRST HEARTBEAT -- which, if the two
+    # enrolment paths disagreed about the hostname's spelling (install.py used
+    # socket.gethostname(), the PowerShell paths used $env:COMPUTERNAME),
+    # landed on a SECOND row. One machine, two entries: the default PC name
+    # and the name the admin actually typed. Accepting it here is what makes
+    # the row correct from the moment it is created.
+    device_name: Optional[str] = ""
 
 
 # Naive in-memory sliding-window rate limit for POST /api/enroll, keyed by
@@ -2137,20 +2293,30 @@ def _redeem_enroll_invite(payload: EnrollRequest, client_ip: str):
         api_key = secrets.token_hex(32)
         now = datetime.now().isoformat()
 
-        existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (payload.hostname,)).fetchone()
+        # Name precedence: an admin who put a name on the invite outranks
+        # whatever was typed at the workstation, which in turn outranks the
+        # bare hostname. Never blank -- a nameless row shows up on the
+        # dashboard as an empty cell.
+        enrolled_name = (
+            (invite["display_name"] or "").strip()
+            or (payload.device_name or "").strip()
+            or payload.hostname
+        )
+
+        existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ? COLLATE NOCASE", (payload.hostname,)).fetchone()
         if existing:
             conn.execute(
                 "UPDATE devices SET api_key = ?, category = ?, enrolled_at = ?, "
                 "display_name = COALESCE(NULLIF(?, ''), display_name), status = 'active', updated_at = ? "
-                "WHERE hostname = ?",
-                (api_key, category, now, invite["display_name"], now, payload.hostname),
+                "WHERE hostname = ? COLLATE NOCASE",
+                (api_key, category, now, enrolled_name, now, payload.hostname),
             )
             device_id = existing["device_id"]
         else:
             conn.execute(
                 "INSERT INTO devices (device_id, hostname, display_name, category, api_key, "
                 "enrolled_at, last_seen, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (device_id, payload.hostname, invite["display_name"] or payload.hostname, category,
+                (device_id, payload.hostname, enrolled_name, category,
                  api_key, now, now, now, now),
             )
 
@@ -2193,6 +2359,54 @@ def revoke_device(device_id: str, email: str = Depends(require_permission("devic
     return {"status": "success", "detail": f"Revoked API key for device {device_id}"}
 
 
+# Deleting is NOT revoking, and conflating the two is what made the Devices
+# tab's "Hapus" button lie. Revoke takes the credential away and leaves the
+# device on the board (deliberately: an admin may want to see that a machine
+# they cut off is still trying). Delete removes it from every surface, drops
+# everything that only existed to describe a live device (its screenshot, its
+# unread replies, its queued commands), and TOMBSTONES the row so the next
+# heartbeat -- which may still hold a valid shared ingest key -- cannot
+# recreate it. What survives is the history that is not about the device
+# being present: physical_log sessions and the remote_actions audit trail.
+@app.delete("/api/devices/{device_id}")
+def delete_device(device_id: str, email: str = Depends(require_permission("devices_revoke"))):
+    conn = get_db()
+    try:
+        existing = conn.execute(
+            "SELECT device_id, hostname, status FROM devices WHERE device_id = ?", (device_id,)
+        ).fetchone()
+        if not existing or existing["status"] == DEVICE_STATUS_DELETED:
+            raise HTTPException(status_code=404, detail="Device not found")
+        hostname = existing["hostname"]
+        now = datetime.now().isoformat()
+        conn.execute(
+            "UPDATE devices SET status = ?, api_key = NULL, updated_at = ? WHERE device_id = ?",
+            (DEVICE_STATUS_DELETED, now, device_id),
+        )
+        conn.execute("DELETE FROM device_screenshots WHERE device_id = ?", (device_id,))
+        conn.execute("DELETE FROM device_replies WHERE device_id = ?", (device_id,))
+        # Anything still queued would be delivered on a heartbeat this device
+        # is no longer allowed to make; expire it so it does not sit 'queued'
+        # forever and trip the command_expired alert later.
+        conn.execute(
+            "UPDATE remote_actions SET status = 'expired', error_message = 'device deleted' "
+            "WHERE target_device = ? COLLATE NOCASE AND status = 'queued'",
+            (hostname,),
+        )
+        conn.commit()
+        log_remote_action(conn, email, hostname, "DELETE_DEVICE", "done",
+                          result_summary="Device removed from the registry")
+    finally:
+        conn.close()
+    # The in-memory mirrors, or the device stays on Monitoring until the
+    # process restarts.
+    for key in [h for h in HEARTBEATS if h.lower() == hostname.lower()]:
+        HEARTBEATS.pop(key, None)
+    for key in [h for h in PENDING_COMMANDS if h.lower() == hostname.lower()]:
+        PENDING_COMMANDS.pop(key, None)
+    return {"status": "success", "detail": f"Deleted device {hostname}"}
+
+
 class RenameDeviceRequest(BaseModel):
     hostname: str
     display_name: str
@@ -2210,11 +2424,14 @@ def rename_device(payload: RenameDeviceRequest, email: str = Depends(require_per
         raise HTTPException(status_code=400, detail="display_name cannot be empty")
     conn = get_db()
     try:
-        existing = conn.execute("SELECT device_id FROM devices WHERE hostname = ?", (payload.hostname,)).fetchone()
+        existing = conn.execute(
+            "SELECT device_id FROM devices WHERE hostname = ? COLLATE NOCASE AND status != ?",
+            (payload.hostname, DEVICE_STATUS_DELETED),
+        ).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Device not found")
         conn.execute(
-            "UPDATE devices SET display_name = ?, display_name_set_by_admin = 1, updated_at = ? WHERE hostname = ?",
+            "UPDATE devices SET display_name = ?, display_name_set_by_admin = 1, updated_at = ? WHERE hostname = ? COLLATE NOCASE",
             (name, datetime.now().isoformat(), payload.hostname),
         )
         conn.commit()
@@ -2246,7 +2463,7 @@ def enforce_command_policy(hostname: str, command_type: str, reason: str) -> Non
         conn = get_db()
         try:
             device = conn.execute(
-                "SELECT policy_profile FROM devices WHERE hostname = ?", (hostname,)
+                "SELECT policy_profile FROM devices WHERE hostname = ? COLLATE NOCASE", (hostname,)
             ).fetchone()
             if device:
                 rule = conn.execute(
@@ -2272,6 +2489,24 @@ def enforce_command_policy(hostname: str, command_type: str, reason: str) -> Non
     if rule["requires_reason"] and not (reason or "").strip():
         raise HTTPException(status_code=400,
                             detail=f"Device policy requires a reason for {command_type}")
+
+
+def assert_device_not_deleted(hostname: str) -> None:
+    """404 a control command aimed at a hostname an admin has deleted.
+
+    Without this the command is queued into PENDING_COMMANDS for a device that
+    can no longer heartbeat, so the dashboard reports "terkirim" for something
+    that will never be delivered and the audit row sits 'queued' until it
+    expires."""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT status FROM devices WHERE hostname = ? COLLATE NOCASE", (hostname,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is not None and row["status"] == DEVICE_STATUS_DELETED:
+        raise HTTPException(status_code=404, detail=f"Device {hostname} has been deleted")
 
 
 def queue_command(email: str, hostname: str, command_type: str, param: str = "",
@@ -2303,6 +2538,7 @@ def queue_command(email: str, hostname: str, command_type: str, param: str = "",
 
 @app.post("/api/control/lock")
 def queue_lock_command(payload: ControlRequest, email: str = Depends(require_permission("lock"))):
+    assert_device_not_deleted(payload.hostname)
     enforce_command_policy(payload.hostname, "LOCK", payload.reason)
     queue_command(email, payload.hostname, "LOCK", reason=payload.reason)
     return {"status": "success", "detail": f"Lock command queued for {payload.hostname}"}
@@ -2349,6 +2585,7 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
             logger.warning("broadcast: audit write failed for ALL", exc_info=True)
         return {"status": "success", "detail": detail}
 
+    assert_device_not_deleted(host)
     enforce_command_policy(host, "BROADCAST", payload.reason)
     queue_command(email, host, "BROADCAST", param=msg, reason=payload.reason)
     return {"status": "success", "detail": f"Broadcast queued for {host}"}
@@ -2371,6 +2608,7 @@ def queue_power_command(payload: PowerRequest, email: str = Depends(require_perm
     action_type = POWER_ACTIONS.get((payload.action or "").lower())
     if not action_type:
         raise HTTPException(status_code=400, detail="action must be one of: shutdown, restart, logoff")
+    assert_device_not_deleted(payload.hostname)
     enforce_command_policy(payload.hostname, action_type, payload.reason)
     queue_command(email, payload.hostname, action_type, reason=payload.reason)
     return {"status": "success", "detail": f"{action_type} queued for {payload.hostname}"}
@@ -2383,6 +2621,7 @@ def queue_power_command(payload: PowerRequest, email: str = Depends(require_perm
 # Only the latest capture per device is stored, never a history.
 @app.post("/api/control/screenshot")
 def queue_screenshot_command(payload: ControlRequest, email: str = Depends(require_permission("screenshot"))):
+    assert_device_not_deleted(payload.hostname)
     enforce_command_policy(payload.hostname, "SCREENSHOT", payload.reason)
     command_id = queue_command(email, payload.hostname, "SCREENSHOT", reason=payload.reason)
     return {"status": "success", "detail": f"Screenshot request queued for {payload.hostname}",
@@ -2418,7 +2657,7 @@ def upload_screenshot(payload: ScreenshotUpload, _: None = Depends(verify_api_ke
         if not action:
             raise HTTPException(status_code=400, detail="Unknown screenshot command_id for this hostname")
         device = conn.execute(
-            "SELECT device_id FROM devices WHERE hostname = ?", (payload.hostname,)
+            "SELECT device_id FROM devices WHERE hostname = ? COLLATE NOCASE", (payload.hostname,)
         ).fetchone()
         if not device:
             raise HTTPException(status_code=404, detail="Device not found")
@@ -2473,7 +2712,7 @@ def post_reply(payload: ReplyPayload, _: None = Depends(verify_api_key)):
     conn = get_db()
     try:
         device = conn.execute(
-            "SELECT device_id, display_name FROM devices WHERE hostname = ?", (payload.hostname,)
+            "SELECT device_id, display_name FROM devices WHERE hostname = ? COLLATE NOCASE", (payload.hostname,)
         ).fetchone()
         conn.execute(
             "INSERT INTO device_replies (device_id, hostname, device_name, message, command_id, created_at) "

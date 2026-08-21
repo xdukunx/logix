@@ -55,7 +55,7 @@ Run with no flags to be prompted for each value interactively. What it does:
   [`requirements-sync.txt`](../requirements-sync.txt));
 - `--check` verifies it can authenticate and open the sheet;
 - `--schedule` registers an **hourly** job for your OS: a systemd timer
-  (`logix-sync.timer`), a launchd daemon (`com.mindlab.logix-sync`), or a Task
+  (`logix-sync.timer`), a launchd daemon (`com.logix.logix-sync`), or a Task
   Scheduler task (`LogixGSheetSync`). Removal commands are printed after setup.
 
 ## 4. Verify

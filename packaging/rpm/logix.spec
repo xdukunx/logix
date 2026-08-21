@@ -78,17 +78,17 @@ echo "Privacy: records who/how/when only -- see %{_docdir}/logix/PRIVACY.md"
 echo ""
 
 %changelog
-* Thu Aug 20 2026 MindLab <noreply@github.com> - 1.2.1-1
+* Thu Aug 20 2026 Logix <noreply@github.com> - 1.2.1-1
 - Fixes for hosting on Linux and macOS: install the server's dependencies
   into server/.venv (Debian/Ubuntu mark the system Python externally
   managed), locate that venv correctly from the ops scripts, and write
   exported reports somewhere an ordinary user can actually write.
-* Wed Aug 19 2026 MindLab <noreply@github.com> - 1.2.0-1
+* Wed Aug 19 2026 Logix <noreply@github.com> - 1.2.0-1
 - Local workstation dashboard (Overview/Logs/Server), optional job metadata,
   YASB status contract v1, structured sync failure classification, and two
   correctness fixes (BOM handling in device identity, auto-close timestamps).
-* Mon Jul 21 2026 MindLab <noreply@github.com> - 1.1.1-1
+* Mon Jul 21 2026 Logix <noreply@github.com> - 1.1.1-1
 - Attach deb/rpm to the GitHub Release on this tag (packaging work merged
   after v1.1.0 was cut).
-* Mon Jul 21 2026 MindLab <noreply@github.com> - 1.1.0-1
+* Mon Jul 21 2026 Logix <noreply@github.com> - 1.1.0-1
 - Initial RPM packaging of the Logix core + CLI.

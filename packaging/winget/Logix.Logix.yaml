@@ -1,10 +1,10 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.6.0.schema.json
 # Version manifest. Submit this trio (version + installer + defaultLocale) to
-# microsoft/winget-pkgs under manifests/m/MindLab/Logix/1.2.1/ to enable:
-#   winget install MindLab.Logix
+# microsoft/winget-pkgs under manifests/m/Logix/Logix/1.2.1/ to enable:
+#   winget install Logix.Logix
 # Locally testable without submission:
 #   winget install --manifest packaging/winget
-PackageIdentifier: MindLab.Logix
+PackageIdentifier: Logix.Logix
 PackageVersion: 1.2.1
 DefaultLocale: en-US
 ManifestType: version

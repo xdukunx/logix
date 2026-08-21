@@ -1,4 +1,4 @@
-# MindLab Report Logbook common helpers v5.7
+# Logix agent common helpers v5.8
 $ErrorActionPreference = 'Stop'
 
 # Program scripts live in $Global:InstallDir (Program Files) -- read-only at
@@ -9,7 +9,14 @@ $ErrorActionPreference = 'Stop'
 # because Program Files is not writable by the standard-user runtime.
 $Global:InstallDir = 'C:\Program Files\Logix'
 $Global:LabDir = $Global:InstallDir   # back-compat alias for older references
-$Global:StateDir = Join-Path $env:ProgramData 'MindLabLogbook'
+# %ProgramData%\Logix, which is also where config.env and device.json already
+# live -- so the agent now keeps everything under ONE directory instead of
+# splitting state across two. The previous name, MindLabLogbook, was the last
+# of the old lab's branding baked into a path; $Global:LegacyStateDir is that
+# directory, kept only so Move-LogbookLegacyState can migrate an existing
+# install off it.
+$Global:StateDir = Join-Path $env:ProgramData 'Logix'
+$Global:LegacyStateDir = Join-Path $env:ProgramData 'MindLabLogbook'
 $Global:SessionFile = Join-Path $Global:StateDir 'session.json'
 $Global:ErrorLog = Join-Path $Global:StateDir 'logbook_error.log'
 $Global:PopupLock = Join-Path $Global:StateDir 'popup.lock'
@@ -45,8 +52,52 @@ function Write-LogbookInfo {
 
 # Only the writable StateDir is created at runtime; InstallDir (Program Files)
 # is provisioned by the elevated installer, not here.
+# One-way move of an existing install's runtime state from the old
+# %ProgramData%\MindLabLogbook directory to %ProgramData%\Logix.
+#
+# Runs from Ensure-LogbookDirs, which every agent entry point already calls, so
+# an upgraded workstation migrates on the first process that starts -- there is
+# no separate migration step for an operator to forget. Idempotent and
+# best-effort throughout: a file that cannot be moved (locked by a running
+# process) is left where it is and simply not migrated, which is strictly
+# better than throwing out of a helper whose whole job is "make sure the
+# directory exists".
+#
+# Only ever copies a file the new location does not already have. The new
+# directory may legitimately be non-empty before this runs (config.env and
+# device.json have always lived there), and a fresh session.json written since
+# the upgrade must never be clobbered by a stale one from before it.
+function Move-LogbookLegacyState {
+    if (-not (Test-Path $Global:LegacyStateDir)) { return }
+    if ($Global:LegacyStateDir -ieq $Global:StateDir) { return }
+    $moved = 0
+    try {
+        foreach ($item in @(Get-ChildItem -Path $Global:LegacyStateDir -Force -ErrorAction SilentlyContinue)) {
+            $target = Join-Path $Global:StateDir $item.Name
+            if (Test-Path $target) { continue }
+            try {
+                Move-Item -LiteralPath $item.FullName -Destination $target -Force -ErrorAction Stop
+                $moved += 1
+            } catch { }
+        }
+        # Removed only when genuinely empty: anything still in there is a file
+        # that could not be moved, and deleting it would be data loss.
+        if (-not (Get-ChildItem -Path $Global:LegacyStateDir -Force -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $Global:LegacyStateDir -Force -Recurse -ErrorAction SilentlyContinue
+        }
+        if ($moved -gt 0) {
+            Write-LogbookInfo "Migrated $moved state file(s) from $Global:LegacyStateDir to $Global:StateDir."
+        }
+    } catch {
+        # Write-LogbookError itself writes into StateDir, so it must not be the
+        # thing that fails here; the try/catch above already contains per-file
+        # failures and this is the outer belt-and-braces.
+    }
+}
+
 function Ensure-LogbookDirs {
     New-Item -ItemType Directory -Force -Path $Global:StateDir | Out-Null
+    Move-LogbookLegacyState
 }
 
 function Test-AnyDeskInteractiveWindow {
@@ -572,7 +623,7 @@ function Find-LogixPython {
 
 function Invoke-WSLBridge {
     param([string]$PayloadPath, [string]$Event, [string]$SessionId)
-    $wslPayloadPath = '/mnt/c/ProgramData/MindLabLogbook/' + (Split-Path $PayloadPath -Leaf)
+    $wslPayloadPath = '/mnt/c/ProgramData/Logix/' + (Split-Path $PayloadPath -Leaf)
     $output = & wsl.exe -u root -e /usr/bin/python3 /opt/software/logix/log_physical.py --json-file $wslPayloadPath 2>&1
     $rc = $LASTEXITCODE
     if ($rc -ne 0) {
@@ -1284,29 +1335,104 @@ function Set-LogbookIncomingMessage {
 # Device -> admin message (Logix Control replies). Posts to /api/replies with the
 # same credential order as the heartbeat (per-device key first, shared key
 # fallback). command_id links a reply back to the broadcast it answers.
+# Failed replies wait here and are flushed on the next heartbeat. Exactly the
+# pattern pending_acks.json already uses, and for the same reason: the reply
+# was typed by a person who has been told it went somewhere.
+$Global:PendingRepliesFile = 'pending_replies.json'
+$Global:PendingRepliesMax = 50
+
+function Get-LogbookPendingReplies {
+    $path = Join-Path $Global:StateDir $Global:PendingRepliesFile
+    if (-not (Test-Path $path)) { return @() }
+    try {
+        $loaded = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($loaded) { return @($loaded) }
+    } catch {}
+    return @()
+}
+
+function Set-LogbookPendingReplies($Replies) {
+    Ensure-LogbookDirs
+    $path = Join-Path $Global:StateDir $Global:PendingRepliesFile
+    $items = @($Replies)
+    if ($items.Count -eq 0) {
+        Remove-Item $path -Force -ErrorAction SilentlyContinue
+        return
+    }
+    # Newest wins if the queue ever runs away (server down for a long stretch);
+    # an unbounded file on a shared workstation is its own problem.
+    if ($items.Count -gt $Global:PendingRepliesMax) {
+        $items = $items[($items.Count - $Global:PendingRepliesMax)..($items.Count - 1)]
+    }
+    # The leading comma forces an array even for a single item: without it
+    # ConvertTo-Json emits a bare object, which loads back as one object
+    # rather than a one-element list.
+    ,$items | ConvertTo-Json -Depth 4 | Out-File -FilePath $path -Encoding UTF8 -Force
+}
+
+# Post one reply. Throws on any failure, so the caller decides whether to
+# surface it, queue it, or both.
+function Invoke-LogbookReplyPost {
+    param([string]$Text, [string]$CommandId)
+    $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+    if (-not $serverUrl) { throw 'LOGIX_SERVER_URL is not configured' }
+    $serverKey = Get-LogbookDeviceApiKey
+    if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
+    $payload = @{
+        hostname    = $env:COMPUTERNAME
+        device_name = Get-LogbookDeviceDisplayName
+        message     = $Text
+        command_id  = $CommandId
+    }
+    $headers = @{ 'Content-Type' = 'application/json' }
+    if ($serverKey) { $headers['X-API-Key'] = $serverKey }
+    $apiUrl = $serverUrl.TrimEnd('/') + '/api/replies'
+    Invoke-RestMethod -Uri $apiUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 3) -Headers $headers -TimeoutSec 5 -UseBasicParsing | Out-Null
+}
+
 function Send-LogbookReply {
     param([Parameter(Mandatory=$true)][string]$Text, [string]$CommandId = '')
     try {
-        $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
-        if (-not $serverUrl) { return $false }
-        $serverKey = Get-LogbookDeviceApiKey
-        if (-not $serverKey) { $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY' }
-        $payload = @{
-            hostname    = $env:COMPUTERNAME
-            device_name = Get-LogbookDeviceDisplayName
-            message     = $Text
-            command_id  = $CommandId
-        }
-        $headers = @{ 'Content-Type' = 'application/json' }
-        if ($serverKey) { $headers['X-API-Key'] = $serverKey }
-        $apiUrl = $serverUrl.TrimEnd('/') + '/api/replies'
-        Invoke-RestMethod -Uri $apiUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 3) -Headers $headers -TimeoutSec 5 -UseBasicParsing | Out-Null
+        Invoke-LogbookReplyPost -Text $Text -CommandId $CommandId
         Write-LogbookInfo "Reply sent to server (command_id: $CommandId)."
         return $true
     } catch {
-        Write-LogbookError "Reply send failed: $($_.Exception.Message)"
+        # The widget tells the user "akan dicoba lagi" when this returns
+        # $false. It used to be a lie -- the text was dropped on the floor and
+        # nothing ever retried, so a reply typed while the server was briefly
+        # unreachable was simply gone. Queue it; the next heartbeat flushes it.
+        Write-LogbookError "Reply send failed, queued for retry: $($_.Exception.Message)"
+        try {
+            $queued = @(Get-LogbookPendingReplies)
+            $queued += @{ text = $Text; command_id = $CommandId; created_at = (Get-Date).ToString('o') }
+            Set-LogbookPendingReplies $queued
+        } catch {
+            Write-LogbookError "Could not queue reply for retry: $($_.Exception.Message)"
+        }
         return $false
     }
+}
+
+# Drain the retry queue. Called from Send-LogbookHeartbeat, which already runs
+# on the device's heartbeat cadence and already knows the server is reachable
+# by the time it gets there. Stops at the first failure and keeps the rest --
+# a queue that keeps hammering a dead server is worse than one that waits.
+function Send-LogbookPendingReplies {
+    $queued = @(Get-LogbookPendingReplies)
+    if ($queued.Count -eq 0) { return }
+    $remaining = @()
+    $sent = 0
+    foreach ($item in $queued) {
+        if ($remaining.Count -gt 0) { $remaining += $item; continue }
+        try {
+            Invoke-LogbookReplyPost -Text ([string]$item.text) -CommandId ([string]$item.command_id)
+            $sent += 1
+        } catch {
+            $remaining += $item
+        }
+    }
+    Set-LogbookPendingReplies $remaining
+    if ($sent -gt 0) { Write-LogbookInfo "Flushed $sent queued repl$(if ($sent -eq 1) { 'y' } else { 'ies' }) to the server." }
 }
 
 # Screen capture lives in its own on-demand script (logbook_screenshot.ps1),
@@ -1318,8 +1444,32 @@ function Invoke-LogbookScreenshotCapture {
     param([Parameter(Mandatory=$true)][string]$CommandId)
     $script = Join-Path $Global:LabDir 'logbook_screenshot.ps1'
     if (-not (Test-Path $script)) { throw "logbook_screenshot.ps1 not found at $script" }
+
+    # Clear any previous run's marker first, so a stale success from an earlier
+    # capture cannot be mistaken for this one's.
+    $resultPath = Join-Path $Global:StateDir 'screenshot_result.json'
+    Remove-Item $resultPath -Force -ErrorAction SilentlyContinue
+
     Start-HiddenPowerShell -Wait -ArgumentList @(
         '-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$script,'-CommandId',$CommandId) | Out-Null
+
+    # Throwing here is the point: the SCREENSHOT branch of the command
+    # dispatcher wraps this in a try/catch that acks 'failed' with the message,
+    # which is what puts a real outcome on the dashboard. Before this, the ack
+    # was an unconditional 'done' -- so a capture that never happened was
+    # indistinguishable from one that did, and the only symptom was a Perangkat
+    # tab that stayed empty.
+    if (-not (Test-Path $resultPath)) {
+        throw 'screenshot helper produced no result (it may have been blocked from starting)'
+    }
+    $result = $null
+    try { $result = Get-Content $resultPath -Raw | ConvertFrom-Json } catch { }
+    if (-not $result -or [string]$result.command_id -ne $CommandId) {
+        throw 'screenshot helper wrote a result for a different command'
+    }
+    if (-not $result.ok) {
+        throw ("screenshot capture failed: " + [string]$result.error)
+    }
 }
 
 function Send-LogbookHeartbeat {
@@ -1408,6 +1558,14 @@ function Send-LogbookHeartbeat {
             Remove-Item $acksPath -Force -ErrorAction SilentlyContinue
         }
 
+        # The server is demonstrably reachable right now, which is the only
+        # moment worth retrying a queued reply in. Best-effort: a reply that
+        # still cannot be delivered must never break the heartbeat that
+        # carries LOCK/BROADCAST to this workstation.
+        try { Send-LogbookPendingReplies } catch {
+            Write-LogbookError "Pending reply flush failed: $($_.Exception.Message)"
+        }
+
         $newAcks = @()
         if ($res -and $res.commands) {
             foreach ($cmd in $res.commands) {
@@ -1451,12 +1609,20 @@ function Send-LogbookHeartbeat {
                             Write-LogbookInfo "Remote SHUTDOWN trigger execution."
                             Set-LogbookIncomingMessage -Text 'Perangkat ini akan dimatikan oleh admin dalam 30 detik. Simpan pekerjaan Anda sekarang.' -Reason 'Emergency Alert' -AllowReply $false
                             & shutdown.exe /s /t 30 /c 'Logix: perangkat dimatikan oleh admin. Simpan pekerjaan Anda.' | Out-Null
+                            # shutdown.exe reports refusal (no privilege, a
+                            # shutdown already pending) through its exit code
+                            # and nothing else. Unchecked, every power command
+                            # acked 'done' whether or not anything was
+                            # scheduled -- so the dashboard could not tell an
+                            # executed action from a rejected one.
+                            if ($LASTEXITCODE -ne 0) { throw "shutdown.exe exited $LASTEXITCODE" }
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'shutdown scheduled (30s)' }
                         }
                         'RESTART' {
                             Write-LogbookInfo "Remote RESTART trigger execution."
                             Set-LogbookIncomingMessage -Text 'Perangkat ini akan dimulai ulang oleh admin dalam 30 detik. Simpan pekerjaan Anda sekarang.' -Reason 'Emergency Alert' -AllowReply $false
                             & shutdown.exe /r /t 30 /c 'Logix: perangkat dimulai ulang oleh admin. Simpan pekerjaan Anda.' | Out-Null
+                            if ($LASTEXITCODE -ne 0) { throw "shutdown.exe exited $LASTEXITCODE" }
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'restart scheduled (30s)' }
                         }
                         'LOGOFF' {
@@ -1465,6 +1631,7 @@ function Send-LogbookHeartbeat {
                             Write-LogbookInfo "Remote LOGOFF trigger execution."
                             Start-HiddenPowerShell -Wait -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $Global:LabDir 'logbook_end.ps1'),'-Reason','END') | Out-Null
                             & shutdown.exe /l /f | Out-Null
+                            if ($LASTEXITCODE -ne 0) { throw "shutdown.exe exited $LASTEXITCODE" }
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'user logged off' }
                         }
                         default {
@@ -1576,7 +1743,7 @@ function Get-LogbookConfig {
     }
     
     $machine = Join-Path $Global:LabDir 'logbook_config.json'
-    $perUser = Join-Path (Join-Path $env:APPDATA 'MindLabLogbook') 'logbook_config.json'
+    $perUser = Join-Path (Join-Path $env:APPDATA 'Logix') 'logbook_config.json'
     foreach ($path in @($machine, $perUser)) {
         $override = Read-LogbookConfigFile $path
         if ($override) {
@@ -3144,24 +3311,42 @@ $res
                      Foreground="{StaticResource LxText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
         </StackPanel>
 
-        <!-- Quick replies: two one-tap answers plus a free-text escape. -->
-        <StackPanel Name="CardQuickReply" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,2">
-          <Button Name="QuickOkBtn" Content="OK" Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5" Margin="0,0,6,0"/>
-          <Button Name="QuickWaitBtn" Content="Butuh 10 mnt" Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5" Margin="0,0,6,0"/>
-          <Button Name="QuickFreeBtn" Content="Balas..." Style="{StaticResource LxPill}" Padding="13,6" FontSize="11.5"
-                  Foreground="{StaticResource LxMuted}"/>
-        </StackPanel>
+        <!-- Quick replies: two one-tap answers plus a free-text escape.
+             A WRAP panel, not a horizontal StackPanel. The card is 260px wide
+             and 222px inside its padding; these three pills measure ~233px
+             together, so the last one ("Balas...") was being CLIPPED at the
+             card's edge; a horizontal StackPanel gives its children infinite
+             width and lets the parent cut them off rather than wrapping. That
+             is the whole of "layout buat mbales chatnya jelek", and it gets
+             worse the moment any of this copy is translated or lengthened.
+             Wrapping also makes the row safe for labels this file does not
+             control. -->
+        <WrapPanel Name="CardQuickReply" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,2">
+          <Button Name="QuickOkBtn" Content="OK" Style="{StaticResource LxPill}" Padding="12,6" FontSize="11.5" Margin="0,0,6,6"/>
+          <Button Name="QuickWaitBtn" Content="Butuh 10 mnt" Style="{StaticResource LxPill}" Padding="12,6" FontSize="11.5" Margin="0,0,6,6"/>
+          <Button Name="QuickFreeBtn" Content="Balas..." Style="{StaticResource LxPill}" Padding="12,6" FontSize="11.5"
+                  Margin="0,0,0,6" Foreground="{StaticResource LxMuted}"/>
+        </WrapPanel>
 
         <!-- Free-text reply. Enter sends; the card will not auto-collapse while
              this field has focus. -->
         <Grid Name="CardReplyRow" Visibility="Collapsed" Margin="0,0,0,2">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <Border CornerRadius="999" BorderBrush="{StaticResource LxAccent}" BorderThickness="1" Padding="13,6" Margin="0,0,6,0">
-            <TextBox Name="ReplyInput" Background="Transparent" BorderThickness="0" FontSize="12"
-                     Foreground="{StaticResource LxText}" CaretBrush="{StaticResource LxAccent}"
-                     MaxLength="140" VerticalContentAlignment="Center"/>
+          <Border CornerRadius="999" BorderBrush="{StaticResource LxAccent}" BorderThickness="1" Padding="13,5" Margin="0,0,6,0"
+                  MinHeight="30" VerticalAlignment="Center">
+            <Grid>
+              <!-- Placeholder. Without it the field is a bare outlined pill
+                   with no indication of what it wants. Collapsed from code the
+                   moment the box has any text in it. -->
+              <TextBlock Name="ReplyPlaceholder" Text="Tulis balasan..." FontSize="12" IsHitTestVisible="False"
+                         Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
+              <TextBox Name="ReplyInput" Background="Transparent" BorderThickness="0" FontSize="12"
+                       Foreground="{StaticResource LxText}" CaretBrush="{StaticResource LxAccent}"
+                       MaxLength="140" VerticalContentAlignment="Center"/>
+            </Grid>
           </Border>
           <Button Name="ReplySendBtn" Grid.Column="1" Width="30" Height="30" Cursor="Hand"
+                  VerticalAlignment="Center"
                   Background="{StaticResource LxAccent}" BorderThickness="0">
             <Button.Template>
               <ControlTemplate TargetType="Button">
@@ -3175,13 +3360,18 @@ $res
           </Button>
         </Grid>
 
-        <!-- Reply confirmation. Dot returns to green, card auto-collapses in 5s. -->
+        <!-- Reply confirmation. Dot returns to green, card auto-collapses in 5s.
+             The tick is Path-based and fixed-size; the label WRAPS, because
+             the queued-for-retry wording is longer than one 222px line and
+             used to run off the card the same way the pills above did. The
+             stray Collapsed 1px Border that sat first in this horizontal
+             stack (a copy/paste of the divider above) is gone; it did
+             nothing but occupy the first slot of the row. -->
         <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal">
-          <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10" Visibility="Collapsed"/>
           <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
                 StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Center" Margin="0,0,8,0"/>
-          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12"
+                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Top" Margin="0,3,8,0"/>
+          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12" TextWrapping="Wrap" MaxWidth="190"
                      Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
         </StackPanel>
 

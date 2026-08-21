@@ -7,11 +7,10 @@
 # use `bash -s --`:
 #   curl -fsSL .../bootstrap-server.sh | bash -s -- --admin-emails you@example.org --service
 #
-# What it does: makes sure git + python3 (and the venv module) are present
-# (best-effort install via apt/dnf/pacman/brew, else prints manual
-# instructions), clones or updates the repo into $LOGIX_INSTALL_DIR, builds the
-# React dashboard if npm is available (optional -- the server falls back to the
-# legacy static UI otherwise), then hands off to the existing, fully-featured
+# What it does: installs every prerequisite it can (python3 + the venv module,
+# Node.js 18+, git -- best-effort via apt/dnf/pacman/brew, else it prints
+# manual instructions), clones or updates the repo into $LOGIX_INSTALL_DIR,
+# builds the React dashboard, then hands off to the existing, fully-featured
 # install/setup_server.py, forwarding every argument you passed. That step
 # installs the server's Python dependencies into server/.venv.
 # Safe to re-run: git pull + upgrade in place.
@@ -82,6 +81,45 @@ if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
     fi
 fi
 
+# Node.js is a real dependency of the dashboard, not a nice-to-have. It used
+# to be treated as one: if npm happened to exist the React UI was built, and
+# otherwise the script printed a warning and quietly served the legacy
+# vanilla-JS UI instead -- so which dashboard an install ended up with came
+# down to what the machine already had. Install it like everything else.
+#
+# Vite 7 / React 19 need Node 18+; CI builds on 20 LTS. Distro packages are
+# often older than that, so the major version is checked, not just presence.
+NODE_MIN=18
+node_major() {
+    have node || { echo 0; return; }
+    local raw major
+    raw="$(node --version 2>/dev/null)" || { echo 0; return; }
+    major="${raw#v}"; major="${major%%.*}"
+    case "$major" in ''|*[!0-9]*) echo 0 ;; *) echo "$major" ;; esac
+}
+
+if [ "$(node_major)" -lt "$NODE_MIN" ]; then
+    if have node; then warn "Node $(node --version) is older than the required v$NODE_MIN."; fi
+    warn "Node.js $NODE_MIN+ not found; attempting to install it"
+    # nodejs and npm are separate packages on Debian/Ubuntu and on Arch; brew
+    # ships one formula. pkg_install skips managers that are not present.
+    if have apt-get || have pacman; then
+        pkg_install nodejs npm || warn "Could not auto-install Node.js."
+    elif have brew; then
+        pkg_install node || warn "Could not auto-install Node.js."
+    else
+        pkg_install nodejs || warn "Could not auto-install Node.js."
+    fi
+fi
+
+if [ "$(node_major)" -ge "$NODE_MIN" ]; then
+    say "Using Node $(node --version)"
+else
+    warn "Node.js $NODE_MIN+ is still unavailable (distro packages are often older)."
+    warn "Install a current LTS from https://nodejs.org or via nodesource/nvm, then re-run"
+    warn "this script to get the full dashboard. The legacy static UI works meanwhile."
+fi
+
 if ! have git; then
     warn "git not found; attempting to install it"
     pkg_install git || warn "Could not auto-install git; will fall back to downloading a tarball."
@@ -109,14 +147,21 @@ fi
 
 cd "$INSTALL_DIR"
 
-# --- 3. Build the dashboard (optional -- falls back to the legacy static UI) -
-if have npm; then
+# --- 3. Build the dashboard --------------------------------------------------
+if [ "$(node_major)" -ge "$NODE_MIN" ] && have npm; then
     say "Building the React dashboard"
-    (cd frontend && npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund) \
-        && (cd frontend && npm run build) \
-        || warn "Dashboard build failed; the server will serve the legacy static UI instead."
+    # `set -e` is on, so each step is guarded explicitly: a build failure must
+    # degrade to the legacy UI with a message that names the retry commands,
+    # not abort the whole install and not vanish into /dev/null the way the
+    # previous `2>/dev/null ||` chain did.
+    if (cd frontend && { npm ci --no-audit --no-fund || npm install --no-audit --no-fund; } && npm run build); then
+        say "Dashboard built into frontend/dist"
+    else
+        warn "Dashboard build failed; the server will serve the legacy static UI instead."
+        warn "To retry:  cd $INSTALL_DIR/frontend && npm install && npm run build"
+    fi
 else
-    warn "npm not found; skipping the React dashboard build (legacy static UI will be served). Install Node.js and run 'cd frontend && npm install && npm run build' later to upgrade it."
+    warn "Skipping the dashboard build (no usable Node.js). The legacy static UI will be served."
 fi
 
 # --- 4. Hand off to the real installer, forwarding all arguments ------------

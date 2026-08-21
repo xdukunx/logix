@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { clearToken, fetchWithAuth, getToken, setOnSessionExpired } from "./api";
 import AlertsBell from "./chrome/AlertsBell";
 import Login from "./chrome/Login";
+import RepliesInbox from "./chrome/RepliesInbox";
 import Wordmark from "./components/Wordmark";
 import { useThemeMode } from "./theme/ThemeMode";
 import { useBreakpoint } from "./ui/hooks";
@@ -108,6 +109,7 @@ const Utilities = ({ onLogout, isCompact }: { onLogout: () => void; isCompact?: 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
       <AlertsBell />
+      <RepliesInbox />
       <button type="button" style={button} onClick={cycleMode} title={THEME_LABEL[mode]}>
         {THEME_LABEL[mode]}
       </button>

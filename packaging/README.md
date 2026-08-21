@@ -18,7 +18,7 @@ Single source of version truth: the top-level [`VERSION`](../VERSION) file
 
 | Ecosystem | Payload | Command | Status |
 |---|---|---|---|
-| **Winget** (Windows) | Agent `.exe` | `winget install MindLab.Logix` | Manifest ready ([winget/](winget/)); submit to `microsoft/winget-pkgs` |
+| **Winget** (Windows) | Agent `.exe` | `winget install Logix.Logix` | Manifest ready ([winget/](winget/)); submit to `microsoft/winget-pkgs` |
 | **Chocolatey** (Windows) | Agent `.exe` | `choco install logix` | Package ready ([chocolatey/](chocolatey/)); push to community feed |
 | **.deb / .rpm** (Linux) | Core + CLI | `apt install ./logix_*.deb` / `dnf install ./logix-*.rpm` | Built by CI, attached to each `v*` Release ([nfpm.yaml](nfpm.yaml)) |
 | **PPA** (Ubuntu) | Core + CLI | `apt install logix` (after `add-apt-repository`) | Source packaging ready ([deb/debian/](deb/debian/)); upload to Launchpad |
@@ -111,9 +111,9 @@ Each of these is the *last* step; the artifacts above are already prepared.
 
 ### Winget (`microsoft/winget-pkgs`)
 1. Fork `microsoft/winget-pkgs`; copy [`winget/`](winget/) to
-   `manifests/m/MindLab/Logix/1.1.0/`.
+   `manifests/l/Logix/Logix/1.1.0/`.
 2. `InstallerSha256` is already set to the v1.1.0 release asset's hash. Open a
-   PR; the pipeline validates + merges. Then `winget install MindLab.Logix`.
+   PR; the pipeline validates + merges. Then `winget install Logix.Logix`.
 
 ### Chocolatey (chocolatey.org community feed)
 1. Get an API key from chocolatey.org.

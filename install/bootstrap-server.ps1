@@ -35,26 +35,94 @@ function Warn($msg) { Write-Warning $msg }
 
 function Test-Cmd($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
-# --- 1. Prerequisites: python, then git (best-effort via winget) ------------
-Say "Checking prerequisites"
-$py = if (Test-Cmd "py") { "py" } elseif (Test-Cmd "python") { "python" } else { $null }
-if (-not $py) {
-    if (Test-Cmd "winget") {
-        Warn "Python not found; attempting 'winget install Python.Python.3.12'"
-        winget install --id Python.Python.3.12 -e --silent --accept-package-agreements --accept-source-agreements
-        $py = if (Test-Cmd "py") { "py" } elseif (Test-Cmd "python") { "python" } else { $null }
+# A winget install lands on disk immediately but is invisible to THIS process
+# until PATH is re-read: the environment block was captured when the shell
+# started. Without this the script installed Python correctly and then decided
+# Python was not installed -- which is exactly why a "one-line installer" had
+# to be finished by hand.
+function Update-SessionPath {
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                [System.Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+function Install-WithWinget($id, $label) {
+    if (-not (Test-Cmd "winget")) {
+        Warn "winget is not available, so $label cannot be installed automatically."
+        return $false
     }
-    if (-not $py) { throw "Python 3 not found and could not auto-install it. Install Python 3.9+ from python.org, then re-run." }
+    Say "Installing $label (winget: $id)"
+    winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements
+    Update-SessionPath
+    return $true
+}
+
+# --- 1. Prerequisites: python, node, git ------------------------------------
+# Every version this project actually needs is pinned and checked here, so
+# nothing is left to work out by hand afterwards:
+#   Python  >= 3.9   (3.12 is what gets installed; server/.venv is built from it)
+#   Node.js >= 18    (Vite 7 / React 19; CI builds the dashboard on Node 20 LTS)
+#   git              (optional -- a zip download is the fallback)
+$PYTHON_MIN = [Version]"3.9"
+$NODE_MIN = 18
+
+Say "Checking prerequisites"
+
+function Get-PythonCmd {
+    foreach ($candidate in @("py", "python3", "python")) {
+        if (-not (Test-Cmd $candidate)) { continue }
+        try {
+            $raw = & $candidate -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $raw) {
+                $version = [Version]($raw.Trim())
+                if ($version -ge $PYTHON_MIN) { return @{ Cmd = $candidate; Version = $version } }
+                Warn "$candidate is Python $version; Logix needs $PYTHON_MIN or newer."
+            }
+        } catch { }
+    }
+    return $null
+}
+
+$pyInfo = Get-PythonCmd
+if (-not $pyInfo) {
+    Warn "No Python $PYTHON_MIN+ on PATH."
+    [void](Install-WithWinget "Python.Python.3.12" "Python 3.12")
+    $pyInfo = Get-PythonCmd
+}
+if (-not $pyInfo) {
+    throw "Python $PYTHON_MIN+ not found and could not be installed automatically. Install Python 3.12 from python.org (tick 'Add python.exe to PATH'), then re-run."
+}
+$py = $pyInfo.Cmd
+Say "Using Python $($pyInfo.Version) ($py)"
+
+# Node is no longer optional-by-omission. It used to be: if npm happened to be
+# on PATH the React dashboard got built, and if it was not, the script printed
+# a warning and quietly shipped the legacy vanilla-JS UI instead -- so whether
+# an install ended up with the real dashboard came down to what the machine
+# already had lying around. It is installed here like any other dependency.
+function Get-NodeMajor {
+    if (-not (Test-Cmd "node")) { return 0 }
+    try {
+        $raw = (& node --version 2>$null)   # "v20.11.1"
+        if ($raw -match '^v?(\d+)\.') { return [int]$Matches[1] }
+    } catch { }
+    return 0
+}
+
+$nodeMajor = Get-NodeMajor
+if ($nodeMajor -lt $NODE_MIN) {
+    if ($nodeMajor -gt 0) { Warn "Node $nodeMajor is older than the required $NODE_MIN." }
+    [void](Install-WithWinget "OpenJS.NodeJS.LTS" "Node.js LTS")
+    $nodeMajor = Get-NodeMajor
+}
+if ($nodeMajor -ge $NODE_MIN) {
+    Say "Using Node $nodeMajor"
+} else {
+    Warn "Node.js $NODE_MIN+ is still not available. The dashboard build will be skipped and the server will serve the legacy static UI."
+    Warn "Install Node.js LTS from nodejs.org, then re-run this script to get the full dashboard."
 }
 
 if (-not (Test-Cmd "git")) {
-    if (Test-Cmd "winget") {
-        Warn "git not found; attempting 'winget install Git.Git'"
-        winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
-        # winget installs need a fresh PATH in this session.
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("Path", "User")
-    }
+    [void](Install-WithWinget "Git.Git" "git")
     if (-not (Test-Cmd "git")) { Warn "git still not found; will fall back to downloading a zip archive." }
 }
 
@@ -84,21 +152,32 @@ if (Test-Cmd "git") {
 
 Set-Location $InstallDir
 
-# --- 3. Build the dashboard (optional -- falls back to the legacy static UI) -
-if (Test-Cmd "npm") {
+# --- 3. Build the dashboard --------------------------------------------------
+if ((Get-NodeMajor) -ge $NODE_MIN -and (Test-Cmd "npm")) {
     Say "Building the React dashboard"
     Push-Location frontend
     try {
-        npm ci --no-audit --no-fund 2>$null
-        if ($LASTEXITCODE -ne 0) { npm install --no-audit --no-fund }
+        npm ci --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) {
+            Warn "npm ci failed (usually a lockfile/registry mismatch); retrying with npm install"
+            npm install --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
+        }
         npm run build
+        if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE" }
+        Say "Dashboard built into frontend\dist"
     } catch {
-        Warn "Dashboard build failed; the server will serve the legacy static UI instead."
+        # Loud, and it names the two commands to run by hand. The previous
+        # version swallowed npm's real error entirely, so a failed build looked
+        # identical to a machine that simply had no Node on it.
+        Warn "Dashboard build failed: $($_.Exception.Message)"
+        Warn "The server will serve the legacy static UI. To retry:"
+        Warn "    cd $InstallDir\frontend; npm install; npm run build"
     } finally {
         Pop-Location
     }
 } else {
-    Warn "npm not found; skipping the React dashboard build (legacy static UI will be served). Install Node.js and run 'cd frontend; npm install; npm run build' later to upgrade it."
+    Warn "Skipping the dashboard build (no usable Node.js). The legacy static UI will be served."
 }
 
 # --- 4. Hand off to the real installer --------------------------------------

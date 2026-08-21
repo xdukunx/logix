@@ -174,6 +174,7 @@ $cardQuick   = $window.FindName('CardQuickReply')
 $cardReplyRw = $window.FindName('CardReplyRow')
 $replyInput  = $window.FindName('ReplyInput')
 $replySend   = $window.FindName('ReplySendBtn')
+$replyHint   = $window.FindName('ReplyPlaceholder')
 $cardSent    = $window.FindName('CardSent')
 $sentText    = $window.FindName('SentText')
 $selesaiBtn  = $window.FindName('SelesaiBtn')
@@ -320,6 +321,40 @@ function Update-LogbookWidgetStatus {
 $script:EASE = New-Object System.Windows.Media.Animation.QuinticEase
 $script:EASE.EasingMode = 'EaseOut'
 
+# WPF's dependency-property precedence, and the single cause of the widget's
+# two worst symptoms.
+#
+# BeginAnimation() with the default FillBehavior=HoldEnd does NOT stop when the
+# animation ends -- the clock keeps HOLDING the property at its final value,
+# and an animated value outranks a local value forever after. So every plain
+# `$element.Opacity = x` written after any animation on that element was
+# silently discarded:
+#
+#   * Reset-LogbookSelesai fades the SELESAI ring to 0 on release. The next
+#     hold's Set-LogbookRingProgress set Opacity = 1 -- ignored, held at 0.
+#     The ring drew nothing. "Kali kedua udah gaada animasinya lagi."
+#   * Hide-LogbookSurface's Completed handler restores Opacity = 1 -- ignored,
+#     held at 0. Update-LogbookWidgetView's own `$pillView.Opacity = ...` at
+#     the end of every tick -- ignored too. A pill that had been hidden once
+#     could come back invisible: the window was Shown, sized, topmost and
+#     painting, at zero opacity. "Timernya hilang-hilangan."
+#
+# Handing the property a $null animation releases the clock and hands control
+# back to the local value. Every direct opacity/transform write in this file
+# goes through these two helpers so the bug cannot be reintroduced one
+# assignment at a time.
+function Set-LogbookOpacity($Element, [double]$Value) {
+    if (-not $Element) { return }
+    $Element.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $null)
+    $Element.Opacity = $Value
+}
+
+function Set-LogbookTransformValue($Transform, $Property, [double]$Value) {
+    if (-not $Transform) { return }
+    $Transform.BeginAnimation($Property, $null)
+    $Transform.SetValue($Property, $Value)
+}
+
 # Fade a surface out and only then collapse it. Update-LogbookWidgetView has
 # already set it Collapsed by the time this runs, so it is briefly made visible
 # again -- both surfaces share the same top-centre anchor and the window is
@@ -328,12 +363,17 @@ function Hide-LogbookSurface($Element, [int]$Ms = 120) {
     if (-not $Element) { return }
     if ($script:reduceMotion) { $Element.Visibility = 'Collapsed'; return }
     $Element.Visibility = 'Visible'
-    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(1.0, 0.0, [TimeSpan]::FromMilliseconds($Ms))
+    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation($Element.Opacity, 0.0, [TimeSpan]::FromMilliseconds($Ms))
     $fade.EasingFunction = $script:EASE
-    $fade.Add_Completed({
-        $Element.Visibility = 'Collapsed'
-        $Element.Opacity = 1
-    }.GetNewClosure())
+    # FillBehavior=Stop is the whole fix. The default (HoldEnd) leaves the
+    # clock pinning Opacity at 0 for the rest of the process's life, above any
+    # later assignment -- so the "restore it to 1 when the fade finishes" line
+    # that used to live in the Completed handler did nothing, and the surface
+    # came back INVISIBLE the next time it was shown. With Stop the property
+    # reverts to its LOCAL value the instant the animation ends, which is
+    # exactly the value Update-LogbookWidgetView maintains.
+    $fade.FillBehavior = [System.Windows.Media.Animation.FillBehavior]::Stop
+    $fade.Add_Completed({ $Element.Visibility = 'Collapsed' }.GetNewClosure())
     $Element.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
 }
 
@@ -341,17 +381,28 @@ function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160, [dou
     if (-not $Element) { return }
     $shift = $Element.RenderTransform
     if ($script:reduceMotion) {
-        $Element.Opacity = 1
-        if ($shift -is [System.Windows.Media.TranslateTransform]) { $shift.Y = 0 }
-        if ($shift -is [System.Windows.Media.ScaleTransform]) { $shift.ScaleX = 1; $shift.ScaleY = 1 }
+        Set-LogbookOpacity $Element 1
+        if ($shift -is [System.Windows.Media.TranslateTransform]) {
+            Set-LogbookTransformValue $shift ([System.Windows.Media.TranslateTransform]::YProperty) 0
+        }
+        if ($shift -is [System.Windows.Media.ScaleTransform]) {
+            Set-LogbookTransformValue $shift ([System.Windows.Media.ScaleTransform]::ScaleXProperty) 1
+            Set-LogbookTransformValue $shift ([System.Windows.Media.ScaleTransform]::ScaleYProperty) 1
+        }
         return
     }
-    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0, [TimeSpan]::FromMilliseconds($Ms))
+    # Animate TO the element's own local opacity, not to a hardcoded 1: the
+    # pill rests at PILL_REST_OPACITY (0.72 by default), so fading it in to 1.0
+    # and then stopping would snap it dimmer at the end of its own entrance.
+    # Same FillBehavior=Stop rule as Hide-LogbookSurface above.
+    $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $Element.Opacity, [TimeSpan]::FromMilliseconds($Ms))
     $fade.EasingFunction = $script:EASE
+    $fade.FillBehavior = [System.Windows.Media.Animation.FillBehavior]::Stop
     $Element.BeginAnimation([System.Windows.UIElement]::OpacityProperty, $fade)
     if ($shift -is [System.Windows.Media.TranslateTransform]) {
         $slide = New-Object System.Windows.Media.Animation.DoubleAnimation($FromY, 0.0, [TimeSpan]::FromMilliseconds($Ms))
         $slide.EasingFunction = $script:EASE
+        $slide.FillBehavior = [System.Windows.Media.Animation.FillBehavior]::Stop
         $shift.BeginAnimation([System.Windows.Media.TranslateTransform]::YProperty, $slide)
     }
     # A macOS popover unfolds from its anchor rather than fading in place. The
@@ -360,6 +411,7 @@ function Show-LogbookSurface($Element, [double]$FromY = -8, [int]$Ms = 160, [dou
     if ($FromScale -gt 0 -and $shift -is [System.Windows.Media.ScaleTransform]) {
         $grow = New-Object System.Windows.Media.Animation.DoubleAnimation($FromScale, 1.0, [TimeSpan]::FromMilliseconds($Ms))
         $grow.EasingFunction = $script:EASE
+        $grow.FillBehavior = [System.Windows.Media.Animation.FillBehavior]::Stop
         $shift.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $grow)
         $shift.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $grow)
     }
@@ -379,6 +431,19 @@ function Update-LogbookWidgetView {
     $cardView.Visibility   = if ($showCard)   { 'Visible' } else { 'Collapsed' }
     $pillView.Visibility   = if ($showPill)   { 'Visible' } else { 'Collapsed' }
     $sliverView.Visibility = if ($showSliver) { 'Visible' } else { 'Collapsed' }
+
+    # The pill's resting opacity is settled HERE, before the transition block
+    # below, because Show-LogbookSurface animates towards whatever local value
+    # the element already carries. Setting it afterwards (where it used to
+    # live) meant the entrance faded to the PREVIOUS target and the correct
+    # value only took effect on the following tick.
+    #
+    # At rest the pill is deliberately faded so it reads as ambient rather than
+    # as a window. Unread is the one thing worth interrupting for, so that
+    # state goes fully opaque and solid.
+    $badgeVisible = ($script:msgState -eq 'unread' -and $script:msgUnread -gt 0)
+    $pillView.Opacity = if ($badgeVisible) { 1.0 } else { $script:PILL_REST_OPACITY }
+    $pillView.Background = $brushConv.ConvertFromString($(if ($badgeVisible) { '#F50B1017' } else { '#EB0B1017' }))
 
     if ($showCard -or $showPill -or $showSliver) {
         if (-not $window.IsVisible) { $window.Show() }
@@ -453,7 +518,6 @@ function Update-LogbookWidgetView {
     # A message card is the wider 260px variant (design M1-M3).
     $cardView.Width = if ($hasMsg -or $isSent) { 260 } else { 240 }
 
-    $badgeVisible = ($script:msgState -eq 'unread' -and $script:msgUnread -gt 0)
     $pillBadge.Visibility = if ($badgeVisible) { 'Visible' } else { 'Collapsed' }
     $sliverBadge.Visibility = if ($badgeVisible) { 'Visible' } else { 'Collapsed' }
     if ($badgeVisible) {
@@ -464,11 +528,6 @@ function Update-LogbookWidgetView {
     # exactly as much as the badge needs. A fixed 150px box was mostly padding,
     # and every one of those pixels sits on top of the user's title bar.
     $pillView.Width = [double]::NaN
-    # At rest the pill is deliberately faded so it reads as ambient rather than
-    # as a window. Unread is the one thing worth interrupting for, so that state
-    # goes fully opaque and solid.
-    $pillView.Opacity = if ($badgeVisible) { 1.0 } else { $script:PILL_REST_OPACITY }
-    $pillView.Background = $brushConv.ConvertFromString($(if ($badgeVisible) { '#F50B1017' } else { '#EB0B1017' }))
 
     Update-LogbookWidgetStatus
     Update-LogbookWidgetPosition
@@ -545,7 +604,9 @@ function Set-LogbookRingProgress([double]$Frac) {
     $r = $rh / 2.0
     $topRun = ($selesaiTrack.ActualWidth - $t) - (2.0 * $r)
     $selesaiRing.StrokeDashOffset = -(($topRun / 2.0) / $t)
-    $selesaiRing.Opacity = 1
+    # Releases the fade-out clock Reset-LogbookSelesai left holding this at 0.
+    # A bare `= 1` here is what made the SECOND hold draw nothing at all.
+    Set-LogbookOpacity $selesaiRing 1
 }
 
 function Reset-LogbookSelesai {
@@ -559,7 +620,7 @@ function Reset-LogbookSelesai {
     # Deliberately not animating the LENGTH back down -- rewinding would look
     # like the gesture is still running, backwards.
     if ($script:reduceMotion) {
-        $selesaiRing.Opacity = 0
+        Set-LogbookOpacity $selesaiRing 0
     } else {
         $fade = New-Object System.Windows.Media.Animation.DoubleAnimation(
             $selesaiRing.Opacity, 0.0, [TimeSpan]::FromMilliseconds(160))
@@ -916,10 +977,15 @@ function Send-LogbookWidgetReply([string]$Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return }
     $ok = Send-LogbookReply -Text $Text -CommandId $script:msgCommandId
     $script:msgState = 'sent'
+    # The failure wording says "antre" (queued), not "akan dicoba lagi"
+    # (will be retried), because that is now literally what happened:
+    # Send-LogbookReply writes the text to pending_replies.json and the next
+    # successful heartbeat flushes it. The old wording promised a retry that
+    # no code performed.
     $sentText.Text = if ($ok) {
         'Terkirim ke admin ' + [char]0x00B7 + ' ' + (Get-Date).ToString('HH:mm')
     } else {
-        'Gagal terkirim -- akan dicoba lagi'
+        'Server tidak terjangkau ' + [char]0x00B7 + ' balasan diantre, terkirim otomatis nanti'
     }
     $replyInput.Text = ''
     Update-LogbookWidgetView
@@ -937,6 +1003,12 @@ $replySend.Add_Click({ Send-LogbookWidgetReply $replyInput.Text })
 $replyInput.Add_KeyDown({
     param($s, $e)
     if ($e.Key -eq 'Return') { Send-LogbookWidgetReply $replyInput.Text; $e.Handled = $true }
+})
+# The placeholder is a sibling TextBlock behind the (transparent) TextBox, so
+# it has to be hidden by hand the moment anything is typed. WPF has no native
+# placeholder on TextBox.
+$replyInput.Add_TextChanged({
+    $replyHint.Visibility = if ([string]::IsNullOrEmpty($replyInput.Text)) { 'Visible' } else { 'Collapsed' }
 })
 
 function Show-LogbookPendingMessage {

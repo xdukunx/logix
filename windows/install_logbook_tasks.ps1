@@ -11,6 +11,13 @@ param(
     [switch]$RunNow,
     [switch]$TestPopup,
     [switch]$UseWSL,
+    # Render the session timer inside a YASB status bar instead of as the
+    # floating pill (windows/logix_yasb.ps1). The script has existed since the
+    # bar posture shipped, but no installer path ever copied it or offered it,
+    # so the only way to reach the feature was to know the file was there and
+    # run it by hand out of a git checkout. Prompted for interactively, same
+    # as the WSL question below, and settable unattended with -Yasb.
+    [switch]$Yasb,
     # Path to the AnyDesk 7 installer to deploy so the "Remote" action works.
     # Defaults to an AnyDesk*.exe sitting next to this script. -SkipAnyDesk opts out.
     [string]$AnyDeskInstaller = "",
@@ -46,7 +53,7 @@ if (-not $__principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::A
 }
 
 # Program scripts install here (read-only at runtime). Runtime state stays in
-# %ProgramData%\MindLabLogbook. $oldLab is the legacy location we migrate away
+# %ProgramData%\Logix. $oldLab is the legacy location we migrate away
 # from and remove at the end.
 $installDir = 'C:\Program Files\Logix'
 $oldLab = 'C:\lab'
@@ -89,6 +96,24 @@ if (-not $PSBoundParameters.ContainsKey('UseWSL') -and -not $NonInteractive) {
 Set-LogixConfigValue -Key 'LOGIX_USE_WSL' -Value $(if ($useWsl) { '1' } else { '0' })
 Write-Host "Logging bridge: $(if ($useWsl) { 'WSL' } else { 'native Python' })" -ForegroundColor Green
 
+# Status-bar posture. Asked the same way as the WSL question above, and only
+# when the operator did not already decide with -Yasb. Detecting an existing
+# YASB config makes the default the right one on a machine that has a bar.
+$yasbWanted = $Yasb.IsPresent
+if (-not $PSBoundParameters.ContainsKey('Yasb') -and -not $NonInteractive) {
+    $yasbInstalled = Test-Path (Join-Path $env:USERPROFILE '.config\yasb\config.yaml')
+    Write-Host ''
+    Write-Host 'Show the session timer inside a YASB status bar instead of the floating pill?' -ForegroundColor Cyan
+    if ($yasbInstalled) {
+        Write-Host '  A YASB config was found on this machine.' -ForegroundColor DarkGray
+    } else {
+        Write-Host '  No YASB config found; pick No unless you are about to install YASB.' -ForegroundColor DarkGray
+    }
+    Write-Host '  The bar reserves its own space, so nothing is ever covered by an overlay.' -ForegroundColor DarkGray
+    $ansYasb = Read-Host "Use the YASB bar? (y/N)"
+    $yasbWanted = $ansYasb -match '^(y|yes)$'
+}
+
 # Server config passed by the wizard (or CLI) -> config.env, so the agent knows
 # where to report and with what key without the interactive settings popup.
 if ($ServerUrl)    { Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value $ServerUrl }
@@ -120,9 +145,14 @@ if ($InviteCode) {
         $identityPath = Join-Path $identityDir 'device.json'
         try {
             New-Item -ItemType Directory -Force -Path $identityDir | Out-Null
+            # device_name is sent at enrolment, not left for the first
+            # heartbeat to supply -- see the same change in logbook_setup.ps1
+            # and install/install.py. All three enrolment paths now agree on
+            # both the hostname source and the display name.
             $body = @{
                 invite_code   = $InviteCode
                 hostname      = $env:COMPUTERNAME
+                device_name   = $DeviceName
                 os            = 'windows'
                 os_version    = [System.Environment]::OSVersion.VersionString
                 agent_version = 'installer'
@@ -163,6 +193,7 @@ $files = @(
     'cleanup_logbook_state.ps1',
     'debug_logbook_detection.ps1',
     'repair_logbook_permissions.ps1',
+    'logix_yasb.ps1',
     'uninstall_logbook.ps1'
 )
 foreach ($f in $files) {
@@ -196,6 +227,24 @@ Grant-LogbookTaskMgrGateAccess
 # user-owned so ending a session (removing session.json) can never fail. See
 # Grant-LogbookStateDirAccess in logbook_common.ps1.
 Grant-LogbookStateDirAccess
+
+# Deliberately AFTER Grant-LogbookStateDirAccess: logix_yasb.ps1 -Enable writes
+# widget_prefs.json into the state dir, and this installer runs elevated. With
+# the inheritable Modify ACE already on the directory, the new file is writable
+# by the (non-elevated) widget, which is what lets a later posture change stick
+# instead of failing silently the way admin-owned state files do.
+if ($yasbWanted) {
+    Write-Host ''
+    Write-Host 'Enabling the YASB status-bar posture...' -ForegroundColor Cyan
+    try {
+        & (Join-Path $installDir 'logix_yasb.ps1') -Enable
+    } catch {
+        Write-LogbookError "YASB enable failed: $($_.Exception.Message)"
+        Write-Host "Run it yourself later:  & '$installDir\logix_yasb.ps1' -Enable" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "Timer posture: floating pill. To switch later:  & '$installDir\logix_yasb.ps1' -Enable" -ForegroundColor DarkGray
+}
 
 # Auto-deploy AnyDesk 7 so the dashboard's "Remote" action works out of the box.
 # The agent already reports this device's AnyDesk ID on every heartbeat
@@ -300,18 +349,25 @@ $principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive
 # the next logon. RestartCount/RestartInterval additionally restart the
 # task automatically if the monitor process dies abnormally.
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-try { Unregister-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Confirm:$false -ErrorAction SilentlyContinue } catch {}
-Register-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' -Action $action -Trigger @($trigger, $healTrigger) -Principal $principal -Settings $settings -Force | Out-Null
+# The pre-rename task name is unregistered alongside the new one. Without
+# this an upgraded workstation keeps the old registration and ends up with
+# TWO monitors racing for the same session files.
+foreach ($legacyTask in @('MindLab Report Logbook Monitor', 'Logix Agent Monitor')) {
+    try { Unregister-ScheduledTask -TaskName $legacyTask -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+}
+Register-ScheduledTask -TaskName 'Logix Agent Monitor' -Action $action -Trigger @($trigger, $healTrigger) -Principal $principal -Settings $settings -Force | Out-Null
 
 # HKCU Run is a fallback if Task Scheduler policy does not fire.
 try {
     $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     New-Item -Path $runPath -Force | Out-Null
-    Set-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -Value "`"$env:SystemRoot\System32\conhost.exe`" $monitorCmd"
+    # The pre-rename value is removed first, or both fire at logon.
+    Remove-ItemProperty -Path $runPath -Name 'MindLabReportLogbookMonitor' -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $runPath -Name 'LogixAgentMonitor' -Value "`"$env:SystemRoot\System32\conhost.exe`" $monitorCmd"
 } catch { Write-LogbookError "HKCU Run registration failed: $($_.Exception.Message)" }
 
 Write-Host 'OK: single monitor installed. Old duplicate Start/End tasks removed.' -ForegroundColor Green
-Get-ScheduledTask -TaskName 'MindLab Report Logbook Monitor' | Select-Object TaskName, State
+Get-ScheduledTask -TaskName 'Logix Agent Monitor' | Select-Object TaskName, State
 
 if (-not $NonInteractive) {
     Write-Host 'Launching settings popup to configure server credentials...' -ForegroundColor Cyan
@@ -338,7 +394,7 @@ if ($RunNow) {
     # elevated, and a Start-Process child would inherit that elevation, which is
     # exactly what makes state files admin-owned and unremovable. The task's
     # RunLevel Limited principal launches the monitor as the plain user.
-    Start-ScheduledTask -TaskName 'MindLab Report Logbook Monitor'
+    Start-ScheduledTask -TaskName 'Logix Agent Monitor'
     Write-Host 'Monitor launched (non-elevated via scheduled task).' -ForegroundColor Green
 }
 if ($TestPopup) {

@@ -1,15 +1,15 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
-PackageIdentifier: MindLab.Logix
+PackageIdentifier: Logix.Logix
 PackageVersion: 1.2.1
 PackageLocale: en-US
-Publisher: MindLab
+Publisher: Logix
 PublisherUrl: https://github.com/xdukunx
 PublisherSupportUrl: https://github.com/xdukunx/logix/issues
 PackageName: Logix Agent
 PackageUrl: https://github.com/xdukunx/logix
 License: MIT
 LicenseUrl: https://github.com/xdukunx/logix/blob/main/LICENSE
-Copyright: MindLab
+Copyright: Logix
 ShortDescription: Privacy-first sign-in logbook agent for shared Windows lab computers.
 Description: |-
   Logix records who used a shared computer, when, and for what purpose --

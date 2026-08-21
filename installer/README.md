@@ -29,7 +29,7 @@ AnyDesk step self-skips; install AnyDesk separately to enable the dashboard
 |---|---|
 | `C:\Program Files\Logix\` | agent scripts + bundled AnyDesk installer (read-only) |
 | `C:\ProgramData\Logix\` | native Python core (`log_physical.py`, `paths.py`), `config.env` |
-| `C:\ProgramData\MindLabLogbook\` | runtime state (created by the agent) |
+| `C:\ProgramData\Logix\` | runtime state (created by the agent) |
 
 The wizard runs `install_logbook_tasks.ps1 -NonInteractive -RunNow` under the
 hood, which registers the monitor as a **non-elevated** scheduled task, installs
@@ -108,7 +108,7 @@ then reinstall. Run elevated:
 
 This removes the scheduled task, the HKCU Run fallback, the program files
 (`C:\Program Files\Logix`, legacy `C:\lab`), the runtime state
-(`%ProgramData%\MindLabLogbook`), and the server config — and re-enables Task
+(`%ProgramData%\Logix`), and the server config — and re-enables Task
 Manager in case a popup left it gated. Add `-KeepConfig` to preserve the server
 binding. AnyDesk is left installed (it's a separate app). Then reinstall with
 the command above (or the wizard) pointing at the new server.

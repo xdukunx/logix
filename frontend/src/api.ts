@@ -77,3 +77,9 @@ export const postEmpty = async (url: string, fallbackError: string): Promise<Res
   if (!res.ok) throw new Error(await errorDetail(res, fallbackError));
   return res;
 };
+
+export const del = async (url: string, fallbackError: string): Promise<Response> => {
+  const res = await fetchWithAuth(url, { method: "DELETE" });
+  if (!res.ok) throw new Error(await errorDetail(res, fallbackError));
+  return res;
+};

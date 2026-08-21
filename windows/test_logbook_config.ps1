@@ -431,7 +431,7 @@ $yasbSourceIdx = $yasbSrc.IndexOf(". (Join-Path `$PSScriptRoot 'logbook_common.p
 Assert ($yasbActionIdx -ge 0 -and $yasbSourceIdx -ge 0) "the callback branch and the dot-source are both present"
 Assert ($yasbActionIdx -lt $yasbSourceIdx) `
     "the click callback is answered BEFORE logbook_common.ps1 is dot-sourced"
-Assert ($yasbSrc -match "Join-Path \`$env:ProgramData 'MindLabLogbook'") `
+Assert ($yasbSrc -match "Join-Path \`$env:ProgramData 'Logix'") `
     "the fast path derives the state dir the same way logbook_common.ps1 does"
 # At a 100ms poll a reader really does arrive between create and write.
 Assert ($yasbSrc -match 'Move-Item -LiteralPath \$tmp') "the request is renamed into place, never written in place"
@@ -1174,6 +1174,150 @@ Assert ($warmFn -match 'catch') "a failed warm-up degrades to slow, never to bro
 # Both lookups it warms have to actually STAY warm, or warming them is theatre.
 Assert ($commonSrc -match '\$script:logixPythonResolved') "the interpreter lookup is cached for the process"
 Assert ($commonSrc -match '\$script:logixUseWslCached') "so is the WSL-vs-native decision"
+
+# ---------------------------------------------------------------------------
+# WPF animation fill behaviour.
+#
+# The bug: BeginAnimation() defaults to FillBehavior=HoldEnd, which does not
+# release the property when the animation ends -- the clock keeps HOLDING it,
+# above any later local assignment. Every plain `$element.Opacity = x` written
+# after an animation on that element was therefore discarded, which is what
+# made the SELESAI ring draw nothing on the second hold and could leave the
+# pill Shown-but-invisible after it had been faded out once.
+Write-Host "widget animations release the properties they animate"
+$fadeDecls = [regex]::Matches($timerSrc, '(?s)New-Object System\.Windows\.Media\.Animation\.DoubleAnimation.*?BeginAnimation')
+Assert ($fadeDecls.Count -ge 4) "the timer still builds the surface/ring animations this section guards ($($fadeDecls.Count) found)"
+
+# Every surface animation (the ones whose property is also written directly by
+# Update-LogbookWidgetView) must stop rather than hold.
+$hideFn = [regex]::Match($timerSrc, '(?s)function Hide-LogbookSurface.*?\n\}').Value
+$showFn = [regex]::Match($timerSrc, '(?s)function Show-LogbookSurface.*?\n\}\r?\n\r?\n').Value
+Assert ($hideFn -match 'FillBehavior\]::Stop') "Hide-LogbookSurface stops its fade instead of holding opacity at 0"
+Assert ($showFn -match 'FillBehavior\]::Stop') "Show-LogbookSurface stops its fade instead of pinning opacity at 1"
+Assert ($hideFn -notmatch '\$Element\.Opacity = 1') `
+    "Hide's Completed handler no longer relies on an assignment the held clock ignored"
+Assert ($showFn -match 'DoubleAnimation\(0\.0, \$Element\.Opacity') `
+    "Show fades in to the element's own resting opacity, not to a hardcoded 1"
+
+# The ring's fade-out is deliberately HoldEnd (stopping it would snap a
+# cancelled ring back to full), so the next hold must clear it explicitly.
+Assert ($timerSrc -match 'function Set-LogbookOpacity') "there is one helper that clears an animation before assigning opacity"
+$ringProgressFn = [regex]::Match($timerSrc, '(?s)function Set-LogbookRingProgress.*?\n\}').Value
+Assert ($ringProgressFn -match 'Set-LogbookOpacity \$selesaiRing 1') `
+    "the SELESAI ring releases the previous hold's fade clock, so a SECOND hold animates"
+Assert ($ringProgressFn -notmatch '\$selesaiRing\.Opacity = 1') `
+    "and does not use the bare assignment the animation outranked"
+
+# The pill's resting opacity is a local value, so it has to be set BEFORE the
+# entrance animation reads it -- not after, where it used to sit.
+$viewFn = [regex]::Match($timerSrc, '(?s)function Update-LogbookWidgetView.*?\n\}\r?\n').Value
+$opacityIdx = $viewFn.IndexOf('$pillView.Opacity =')
+$transitionIdx = $viewFn.IndexOf('Show-LogbookSurface $pillView')
+Assert ($opacityIdx -ge 0 -and $transitionIdx -ge 0) "both the pill opacity write and its entrance are in Update-LogbookWidgetView"
+Assert ($opacityIdx -lt $transitionIdx) `
+    "the pill's resting opacity is set before the entrance animates towards it"
+
+# ---------------------------------------------------------------------------
+# Reply card layout and delivery.
+Write-Host "admin message reply path"
+$timerXamlSrc = Build-LogbookTimerXaml (Get-LogbookDefaultConfig) '00:00:00' 'WS-01' 'Nama' 'Tujuan' 'WS-01'
+$timerDoc2 = [xml]$timerXamlSrc
+$quick = $timerDoc2.SelectNodes("//*[local-name()='WrapPanel']") | Where-Object { $_.Name -eq 'CardQuickReply' }
+# A horizontal StackPanel gives its children infinite width and lets the parent
+# clip them; the three quick-reply pills measure wider than the card's 222px of
+# inner space, so the last one was cut off.
+Assert ($null -ne $quick) "the quick-reply pills wrap instead of being clipped at the card edge"
+$replyHint = $timerDoc2.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'ReplyPlaceholder' }
+Assert ($null -ne $replyHint) "the free-text reply box has a placeholder"
+Assert ($timerSrc -match '\$replyInput\.Add_TextChanged') "and the placeholder is hidden once anything is typed"
+$sentText = $timerDoc2.SelectNodes("//*[local-name()='TextBlock']") | Where-Object { $_.Name -eq 'SentText' }
+Assert ($sentText.TextWrapping -eq 'Wrap') "the send confirmation wraps rather than running off the card"
+
+# A failed reply used to be dropped while the widget said it would be retried.
+Assert ($commonSrc -match 'function Send-LogbookPendingReplies') "failed replies have a flush path"
+$sendReplyFn = [regex]::Match($commonSrc, '(?s)function Send-LogbookReply.*?\n\}').Value
+Assert ($sendReplyFn -match 'Set-LogbookPendingReplies') "a failed reply is queued, not discarded"
+$heartbeatFn = [regex]::Match($commonSrc, '(?s)function Send-LogbookHeartbeat.*?\n\}\r?\n\r?\n').Value
+Assert ($heartbeatFn -match 'Send-LogbookPendingReplies') "and the queue is flushed on the next successful heartbeat"
+# Comments stripped: the comment above this code names the wording it
+# replaced, on purpose, and matching against it would defeat the check.
+$sentWording = (([regex]::Match($timerSrc, '(?s)function Send-LogbookWidgetReply.*?\n\}').Value -split "`n") |
+    Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n" 
+Assert ($sentWording.Length -gt 0) "the send-confirmation wording is where this check expects it"
+Assert ($sentWording -notmatch 'akan dicoba lagi') `
+    "the widget no longer promises a retry in wording that had no code behind it"
+Assert ($sentWording -match 'diantre') "it says the reply was queued, which is what now happens"
+
+# ---------------------------------------------------------------------------
+# Remote commands report what actually happened.
+#
+# Every SCREENSHOT and power command used to ack 'done' unconditionally, so a
+# capture that never uploaded and a shutdown the OS refused both showed on the
+# dashboard as successful. That is why "yang bekerja cuman lock": the others
+# were failing silently and reporting success.
+Write-Host "control commands ack their real outcome"
+$shotSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_screenshot.ps1')
+Assert ($shotSrc -match 'function Write-LogbookScreenshotResult') "the capture helper records its outcome"
+Assert ($shotSrc -match "Write-LogbookScreenshotResult -Ok \`$true") "on success"
+Assert ($shotSrc -match "Write-LogbookScreenshotResult -Ok \`$false") "and on failure"
+$captureFn = [regex]::Match($commonSrc, '(?s)function Invoke-LogbookScreenshotCapture.*?\n\}').Value
+Assert ($captureFn -match 'screenshot_result\.json') "the caller reads that outcome"
+Assert ($captureFn -match 'Remove-Item \$resultPath') "after clearing the previous run's marker, so a stale success cannot be reused"
+Assert ($captureFn -match 'throw') "and throws on failure, which is what makes the ack say 'failed'"
+$powerAcks = [regex]::Matches($commonSrc, "shutdown\.exe /[srl][^\r\n]*\r?\n\s*(#[^\r\n]*\r?\n\s*)*if \(\`$LASTEXITCODE -ne 0\)")
+Assert ($powerAcks.Count -eq 3) "all three power commands check shutdown.exe's exit code ($($powerAcks.Count)/3)"
+
+# ---------------------------------------------------------------------------
+# Branding: no MindLab identifier survives in a path, task name or registry key.
+Write-Host "runtime identifiers carry no MindLab branding"
+Assert ($commonSrc -match "Global:StateDir = Join-Path .+ProgramData 'Logix'") `
+    "state lives in %ProgramData%\Logix"
+Assert ($commonSrc -match 'function Move-LogbookLegacyState') "there is a migration off the old state directory"
+$ensureFn = [regex]::Match($commonSrc, '(?s)function Ensure-LogbookDirs.*?\n\}').Value
+Assert ($ensureFn -match 'Move-LogbookLegacyState') "and every entry point runs it, via Ensure-LogbookDirs"
+$migrateFn = [regex]::Match($commonSrc, '(?s)function Move-LogbookLegacyState.*?\n\}\r?\n\r?\n').Value
+Assert ($migrateFn -match 'if \(Test-Path \$target\) \{ continue \}') `
+    "the migration never overwrites a file the new location already has"
+
+$installSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'install_logbook_tasks.ps1')
+Assert ($installSrc -match "Register-ScheduledTask -TaskName 'Logix Agent Monitor'") "the scheduled task is named Logix Agent Monitor"
+Assert ($installSrc -match "foreach \(\`$legacyTask in @\('MindLab Report Logbook Monitor', 'Logix Agent Monitor'\)\)") `
+    "and the pre-rename task is unregistered, so an upgrade cannot end up with two monitors"
+Assert ($installSrc -match "Remove-ItemProperty -Path \`$runPath -Name 'MindLabReportLogbookMonitor'") `
+    "the pre-rename HKCU Run value is removed before the new one is written"
+Assert ($installSrc -match "Set-ItemProperty -Path \`$runPath -Name 'LogixAgentMonitor'") "the Run value is renamed too"
+Assert ($monitorSrc -match "'Global\\LogixAgentMonitor'") "the single-instance mutex is renamed with it"
+foreach ($f in @('logbook_common.ps1','logbook_timer.ps1','logbook_monitor.ps1',
+                 'logbook_popup.ps1','logix_yasb.ps1','logbook_screenshot.ps1',
+                 'logbook_end.ps1','logbook_setup.ps1')) {
+    $stray = @(Get-Content (Join-Path $PSScriptRoot $f) | Where-Object {
+        $_ -match 'MindLab' -and $_.TrimStart() -notmatch '^#' -and $_ -notmatch 'LegacyStateDir'
+    })
+    Assert ($stray.Count -eq 0) "$f has no MindLab identifier in code (got: $($stray -join ' | '))"
+}
+
+# ---------------------------------------------------------------------------
+# The YASB posture is reachable from the installer.
+Write-Host "YASB posture is an installer option"
+Assert ($installSrc -match '\[switch\]\$Yasb') "install_logbook_tasks.ps1 takes -Yasb"
+Assert ($installSrc -match "'logix_yasb\.ps1',") "and copies logix_yasb.ps1 into the install dir, so the option can be used at all"
+Assert ($installSrc -match "logix_yasb\.ps1'\) -Enable") "and enables the bar posture when asked"
+$grantIdx = $installSrc.IndexOf('Grant-LogbookStateDirAccess')
+$yasbIdx = $installSrc.IndexOf("logix_yasb.ps1') -Enable")
+Assert ($grantIdx -ge 0 -and $yasbIdx -gt $grantIdx) `
+    "and does so AFTER the state-dir ACL grant, so widget_prefs.json is not left admin-owned"
+Assert ($installSrc -match "Read-Host `"Use the YASB bar\? \(y/N\)`"") "an interactive install is asked the question, same as the WSL one"
+$bootstrapSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'bootstrap-client.ps1')
+Assert ($bootstrapSrc -match '\[switch\]\$Yasb') "the one-liner client bootstrap takes -Yasb"
+Assert ($bootstrapSrc -match "\`$taskArgs\['Yasb'\] = \`$true") "and forwards it as a switch (hashtable splat, not array)"
+
+# ---------------------------------------------------------------------------
+# Enrolment sends the name the operator typed.
+Write-Host "enrolment carries the device name"
+$setupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_setup.ps1')
+Assert ($setupSrc -match 'device_name = \$name') "the setup wizard sends the typed name at enrolment"
+Assert ($installSrc -match 'device_name   = \$DeviceName') "so does the unattended installer path"
+
 
 # The summary lives at the END of the file, which sounds too obvious to write
 # down until you notice it did not: it sat at what was once the last line, and

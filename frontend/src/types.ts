@@ -65,6 +65,14 @@ export interface Reply {
   message: string;
   created_at: string;
   read_at: string | null;
+  /** The broadcast this answers, when the reply carried its command_id. */
+  in_reply_to: string | null;
+}
+
+export interface RepliesPage {
+  total: number;
+  unread: number;
+  replies: Reply[];
 }
 
 export interface Alert {

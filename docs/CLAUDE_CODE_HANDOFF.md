@@ -1,6 +1,6 @@
 # Handoff: Logix
 
-You're working in the `logix` repo on Mindlab-01. This repo holds the lab
+You're working in the `logix` repo. This repo holds the lab
 access logbook: SSH/AnyDesk/physical session capture, a SQLite bridge, and
 Excel reporting. It is being published to GitHub.
 

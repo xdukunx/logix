@@ -13,10 +13,34 @@ $ErrorActionPreference = 'Stop'
 # common; common itself is safe to load here.)
 . 'C:\Program Files\Logix\logbook_common.ps1'
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA' -and -not $STAChild) {
+    # The STA child writes screenshot_result.json itself, so this shim has
+    # nothing to report and nothing to hide: it waits, and the caller reads the
+    # marker. (It used to `exit 0` unconditionally, which would have discarded
+    # the child's exit code even if anything had been reading it.)
     Start-HiddenPowerShell -Wait -ArgumentList @(
         '-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-CommandId',$CommandId,'-STAChild') | Out-Null
     exit 0
 }
+
+# Outcome marker, read by Invoke-LogbookScreenshotCapture in
+# logbook_common.ps1. Written on BOTH paths, because the caller has to be able
+# to tell "this failed" from "this has not finished yet", and it previously
+# could tell neither: it fired this script, ignored everything about how it
+# went, and acked the command as 'done'. A capture that threw -- no display on
+# a headless/RDP session, AV blocking the encoder, the upload rejected --
+# showed up on the dashboard as a successful screenshot that simply was not
+# there.
+function Write-LogbookScreenshotResult {
+    param([bool]$Ok, [string]$Error = '')
+    try {
+        Ensure-LogbookDirs
+        @{ command_id = $CommandId; ok = $Ok; error = $Error; at = (Get-Date).ToString('o') } |
+            ConvertTo-Json | Out-File -FilePath (Join-Path $Global:StateDir 'screenshot_result.json') `
+                -Encoding UTF8 -Force
+    } catch { }
+}
+
+try {
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -63,3 +87,10 @@ $payload = @{
 $apiUrl = $serverUrl.TrimEnd('/') + '/api/control/screenshot/upload'
 Invoke-RestMethod -Uri $apiUrl -Method Post -Body ($payload | ConvertTo-Json -Depth 3) -Headers $headers -TimeoutSec 15 -UseBasicParsing | Out-Null
 Write-LogbookInfo "Screenshot uploaded (command_id: $CommandId)."
+Write-LogbookScreenshotResult -Ok $true
+
+} catch {
+    Write-LogbookError "Screenshot capture failed (command_id: ${CommandId}): $($_.Exception.Message)"
+    Write-LogbookScreenshotResult -Ok $false -Error $_.Exception.Message
+    exit 1
+}

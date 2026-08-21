@@ -26,9 +26,14 @@ if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Adm
 
 $installDir = 'C:\Program Files\Logix'
 $legacyDir  = 'C:\lab'
-$stateDir   = Join-Path $env:ProgramData 'MindLabLogbook'
+$stateDir   = Join-Path $env:ProgramData 'Logix'
+# Pre-rename location. Still removed so uninstalling a machine that was
+# never upgraded (or whose migration could not move a locked file) does
+# not leave state behind.
+$oldStateDir = Join-Path $env:ProgramData 'MindLabLogbook'
 $configDir  = Join-Path $env:ProgramData 'Logix'
-$perUserCfg = Join-Path $env:APPDATA 'MindLabLogbook'
+$perUserCfg = Join-Path $env:APPDATA 'Logix'
+$oldPerUserCfg = Join-Path $env:APPDATA 'MindLabLogbook'
 
 Write-Host 'Uninstalling the Logix agent...' -ForegroundColor Cyan
 
@@ -74,6 +79,7 @@ try {
 
 # 2. Scheduled tasks (current + legacy names).
 foreach ($t in @(
+    'Logix Agent Monitor',
     'MindLab Report Logbook Monitor',
     'MindLab Report Logbook Start', 'MindLab Report Logbook End',
     'Lab Logbook Start', 'Lab Logbook End')) {
@@ -82,13 +88,15 @@ foreach ($t in @(
 Write-Host '  Removed scheduled tasks.' -ForegroundColor Green
 
 # 3. HKCU Run fallback.
-try {
-    Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
-        -Name 'MindLabReportLogbookMonitor' -ErrorAction SilentlyContinue
-} catch {}
+foreach ($runValue in @('LogixAgentMonitor', 'MindLabReportLogbookMonitor')) {
+    try {
+        Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
+            -Name $runValue -ErrorAction SilentlyContinue
+    } catch {}
+}
 
 # 4. Files: program dir, legacy dir, runtime state, per-user config.
-foreach ($d in @($installDir, $legacyDir, $stateDir, $perUserCfg)) {
+foreach ($d in @($installDir, $legacyDir, $stateDir, $oldStateDir, $perUserCfg, $oldPerUserCfg)) {
     if (Test-Path $d) {
         try { Remove-Item -Path $d -Recurse -Force -ErrorAction Stop; Write-Host "  Removed $d" -ForegroundColor Green }
         catch { Write-Host "  Could not fully remove $d ($($_.Exception.Message))" -ForegroundColor Yellow }
