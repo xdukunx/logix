@@ -1,3 +1,8 @@
+> **SUPERSEDED.** This brief describes the v1/v2 design set and the Astryx
+> design system, both replaced by `docs/design_handoff_logix_v3/` and by
+> in-repo primitives. Read [README.md](README.md) in this directory before
+> acting on anything below.
+
 # LogiX — Claude Code Build Brief (from final designs)
 
 **Purpose.** The 16 `.dc.html` design canvases are now the **visual source of truth**. This brief locks the design tokens, maps each design file to the repo files that must implement it, and sets the rules + sequence. Hand this file to Claude Code together with the design files.

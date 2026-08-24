@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, sqlite3, sys, os
-from pathlib import Path
+import argparse, sqlite3, sys
 import paths
 DB=paths.default_db()
 

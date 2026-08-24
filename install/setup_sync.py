@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
 
     email = validate_creds(Path(creds))
     print(f"\nService account: {email}")
-    print(f">> Share your Google Sheet with this address (Editor), or the sync can't write.\n")
+    print(">> Share your Google Sheet with this address (Editor), or the sync can't write.\n")
 
     try:
         update_config(cfg, {

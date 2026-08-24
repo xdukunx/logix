@@ -15,6 +15,39 @@ contributions are welcome as long as they respect its scope and privacy stance.
   come from environment variables. `.gitignore` already blocks the usual
   offenders; verify before pushing.
 
+## Branches
+
+`main` is the only long-lived branch, and it is always releasable: CI is green
+on every commit and the tip is what a one-liner installer clones. Everything
+else is short-lived.
+
+- **Name a branch for its change, prefixed by kind:** `fix/`, `feat/`,
+  `docs/`, `chore/`, `ci/` — e.g. `fix/device-duplicate-on-enrol`. The prefix
+  is the same vocabulary as the commit subject, so a branch and its commits
+  read as one thing.
+- **One branch, one change.** A branch that accumulates three unrelated
+  features is a branch nobody can review or revert cleanly.
+- **Delete it the moment it merges.** Four branches were once left behind this
+  way; three had already been fully merged and the fourth had been superseded
+  months earlier, so the only thing they still communicated was uncertainty
+  about whether they contained something.
+- **Rebase on `main` rather than merging `main` into your branch**, so history
+  stays linear and a revert is one commit.
+
+Nothing has to be preserved just because it was pushed once. A branch whose
+commits are ancestors of `main` (`git branch -r --merged origin/main`) can be
+deleted with no loss at all. A branch with unique commits that are *superseded*
+gets a tag before deletion, so the commit stays reachable without a dead branch
+implying live work:
+
+```bash
+git tag -a archive/<branch> <sha> -m "why this was superseded"
+git push origin archive/<branch>
+git push origin --delete <branch>
+```
+
+`archive/*` tags are history, not releases; release tags are `v*`.
+
 ## Development setup
 
 ```bash

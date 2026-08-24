@@ -79,7 +79,7 @@ def cmd_init(ns) -> int:
             "\n  A development database must never become a production one: it holds\n"
             "  load-test devices, test sessions with real names/NIMs, and keys that\n"
             "  have been sitting in a working tree.\n\n"
-            f"  Move it aside and re-run, or pass --force to archive it automatically."
+            "  Move it aside and re-run, or pass --force to archive it automatically."
         )
         return 1
 

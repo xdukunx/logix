@@ -122,7 +122,6 @@ def test_windows_jobs_cover_every_systemd_timer():
     """If a timer is added to ops/systemd/ without a Windows counterpart, the
     two platforms silently diverge. Compare the sets rather than trusting that
     whoever added one remembered the other."""
-    from pathlib import Path
 
     timers = {p.stem.replace("logix-", "")
               for p in (sv.REPO / "ops" / "systemd").glob("*.timer")}

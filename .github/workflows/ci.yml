@@ -78,6 +78,24 @@ jobs:
             exit $rc
           fi
 
+  lint:
+    name: lint (dead code + syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Deliberately a narrow rule set, not a style police. F catches the
+      # things that are genuinely wrong -- unused imports, dead locals,
+      # f-strings with no placeholders, undefined names -- and E9 catches
+      # syntax and IO errors. Formatting stays a human call; a job that fails
+      # on line length is a job people learn to ignore.
+      - name: Ruff (pyflakes rules)
+        run: |
+          python -m pip install --quiet ruff
+          python -m ruff check --select F,E9 --exclude frontend .
+
   dashboard:
     name: dashboard (typecheck + build)
     runs-on: ubuntu-latest

@@ -491,7 +491,6 @@ def write_xlsx(rows, jobs, output: Path, period_label: str):
     ws.sheet_view.showGridLines = False
 
     dark = PatternFill("solid", fgColor="0B1220")
-    teal = PatternFill("solid", fgColor="14B8A6")
     header = PatternFill("solid", fgColor="E5E7EB")
     white = PatternFill("solid", fgColor="FFFFFF")
     active_fill = PatternFill("solid", fgColor="ECFDF5")

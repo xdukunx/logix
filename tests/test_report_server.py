@@ -278,7 +278,6 @@ def test_url_file_is_written_and_removed(tmp_path):
     stale invitation.
     """
     import threading
-    import time
 
     import report_server as rs
 

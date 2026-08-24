@@ -148,9 +148,11 @@ def test_rename_creates_audit_row(monkeypatch, tmp_path):
     ("auditor", False),
 ])
 def test_devices_write_permission(monkeypatch, tmp_path, role, permitted):
-    module = _load_main(monkeypatch, tmp_path, admin_emails=f"bootstrap@test.org:super_admin")
+    module = _load_main(monkeypatch, tmp_path, admin_emails="bootstrap@test.org:super_admin")
     with TestClient(module.app) as client:
-        boot_headers = _login(client)
+        # No admin session needed to seed the device: the heartbeat is
+        # agent-authenticated, and the role under test gets its own token
+        # minted directly into ACTIVE_TOKENS below.
         client.post("/api/heartbeat", json={"hostname": "LAB-PC-06", "status": "ACTIVE"})
 
         token = f"test-token-{role}"

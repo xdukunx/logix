@@ -8,8 +8,6 @@ import sqlite3
 import subprocess
 import secrets
 import hmac
-import urllib.request
-import urllib.parse
 import uuid
 from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
@@ -17,9 +15,9 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Query, Body, Cookie, Request
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 

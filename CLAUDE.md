@@ -19,11 +19,13 @@ behavior only and does not apply to Claude Code sessions.
 ## Stack
 
 - Backend: Python (`server/`, `logix/`) — FastAPI app in `server/main.py`.
-- Frontend: React 19 + TypeScript + Vite in `frontend/`, built on the Astryx
-  design system (`@astryxdesign/core`). Conventions for UI work live in
-  [frontend/.claude/CLAUDE.md](frontend/.claude/CLAUDE.md) — read it before
-  touching UI code (discover components via `npx astryx build/component`,
-  no raw `<div>` layout, tokens only).
+- Frontend: React 19 + TypeScript + Vite in `frontend/`. **No component
+  library** — the Astryx design system was removed in the v3 "Clean
+  Calibration" pass and must not be reintroduced. Screens are built from the
+  in-repo primitives in `frontend/src/ui/` against the tokens in
+  `frontend/src/tokens.css`. Conventions and the grep-checkable guard rails
+  live in [frontend/.claude/CLAUDE.md](frontend/.claude/CLAUDE.md) — read it
+  before touching UI code.
   - Dev: `npm run dev` in `frontend/` (proxies `/api` to `localhost:8791`).
   - Prod: `npm run build`; `server/main.py` serves `frontend/dist/` when it
     exists, else falls back to the legacy vanilla-JS UI in `server/static/`.
