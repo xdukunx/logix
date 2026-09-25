@@ -122,37 +122,88 @@ const Utilities = ({ onLogout, isCompact }: { onLogout: () => void; isCompact?: 
   );
 };
 
-const NavItem = ({
+const NAV_ITEM_H = 42;
+const NAV_GAP = 4;
+
+/**
+ * Desktop sidebar nav. The active pill is ONE element that slides between
+ * items (spring easing) rather than each item toggling its own background --
+ * the move itself tells you where you went.
+ */
+const SideNav = ({
   tab,
-  isActive,
+  keys,
   onSelect,
 }: {
   tab: TabKey;
-  isActive: boolean;
-  onSelect: () => void;
+  keys: TabKey[];
+  onSelect: (key: TabKey) => void;
 }) => (
-  <button
-    type="button"
-    className="lx-tap"
-    aria-current={isActive ? "page" : undefined}
-    onClick={onSelect}
+  <nav aria-label="Navigasi utama" style={{ position: "relative", display: "grid", gap: NAV_GAP }}>
+    <span
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top: 0,
+        height: NAV_ITEM_H,
+        borderRadius: "var(--lx-radius-pill)",
+        background: "var(--lx-accent)",
+        transform: `translateY(${keys.indexOf(tab) * (NAV_ITEM_H + NAV_GAP)}px)`,
+        transition: "transform var(--lx-motion-enter) var(--lx-ease-spring)",
+      }}
+    />
+    {keys.map((key) => {
+      const isActive = key === tab;
+      const color = isActive ? "var(--lx-on-accent)" : "var(--lx-muted)";
+      return (
+        <button
+          key={key}
+          type="button"
+          className="lx-tap"
+          aria-current={isActive ? "page" : undefined}
+          onClick={() => onSelect(key)}
+          style={{
+            font: "inherit",
+            position: "relative",
+            height: NAV_ITEM_H,
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            width: "100%",
+            textAlign: "left",
+            fontSize: 13.5,
+            fontWeight: isActive ? 650 : 500,
+            padding: "0 16px",
+            borderRadius: "var(--lx-radius-pill)",
+            border: "none",
+            background: "transparent",
+            color,
+            cursor: "pointer",
+          }}
+        >
+          <NavIcon tab={key} color={color} />
+          {TABS[key].title}
+        </button>
+      );
+    })}
+  </nav>
+);
+
+/** The light canvas the pages sit on, inset into the dark frame. */
+const Canvas = ({ children, style }: { children: ReactNode; style?: React.CSSProperties }) => (
+  <main
     style={{
-      font: "inherit",
-      display: "block",
-      width: "100%",
-      textAlign: "left",
-      fontSize: 13.5,
-      fontWeight: isActive ? 600 : 400,
-      padding: "9px 14px",
-      borderRadius: "var(--lx-radius-control)",
-      border: "none",
-      background: isActive ? "var(--lx-pill-active-bg)" : "transparent",
-      color: isActive ? "var(--lx-pill-active-fg)" : "var(--lx-muted)",
-      cursor: "pointer",
+      flex: 1,
+      minWidth: 0,
+      background: "var(--lx-bg)",
+      color: "var(--lx-text)",
+      ...style,
     }}
   >
-    {TABS[tab].title}
-  </button>
+    {children}
+  </main>
 );
 
 const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
@@ -181,15 +232,13 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
   const ActiveView = TABS[tab].view;
   const keys = Object.keys(TABS) as TabKey[];
 
-  // Phone: header + bottom tab bar. Tablet: top bar with inline nav pills.
-  // Desktop: the 216px persistent sidebar.
+  // Phone: frame header + frame bottom tab bar around a full-bleed canvas.
   if (breakpoint === "phone") {
     return (
       <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
         <header
+          className="lx-frame-scope"
           style={{
-            background: "var(--lx-card)",
-            borderBottom: "1px solid var(--lx-border)",
             padding: "14px 18px",
             display: "flex",
             alignItems: "center",
@@ -205,16 +254,15 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
             <Utilities onLogout={onLogout} isCompact />
           </span>
         </header>
-        <main style={{ flex: 1, padding: 12, minWidth: 0 }}>
+        <Canvas style={{ padding: 12, borderRadius: "22px 22px 0 0" }}>
           <ActiveView />
-        </main>
+        </Canvas>
         <nav
           aria-label="Navigasi utama"
+          className="lx-frame-scope"
           style={{
             position: "sticky",
             bottom: 0,
-            background: "var(--lx-card)",
-            borderTop: "1px solid var(--lx-border)",
             padding: "8px 10px",
             display: "flex",
             gap: 4,
@@ -223,7 +271,7 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
         >
           {keys.map((key) => {
             const isActive = key === tab;
-            const color = isActive ? "var(--lx-pill-active-fg)" : "var(--lx-muted)";
+            const color = isActive ? "var(--lx-on-accent)" : "var(--lx-muted)";
             return (
               <button
                 key={key}
@@ -241,14 +289,14 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
                   justifyContent: "center",
                   gap: 3,
                   padding: "7px 0",
-                  borderRadius: 12,
+                  borderRadius: 16,
                   border: "none",
-                  background: isActive ? "var(--lx-pill-active-bg)" : "transparent",
+                  background: isActive ? "var(--lx-accent)" : "transparent",
                   cursor: "pointer",
                 }}
               >
                 <NavIcon tab={key} color={color} />
-                <span style={{ fontSize: 9.5, fontWeight: 600, color }}>{TABS[key].short}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 650, color }}>{TABS[key].short}</span>
               </button>
             );
           })}
@@ -261,9 +309,8 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
     return (
       <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
         <header
+          className="lx-frame-scope"
           style={{
-            background: "var(--lx-card)",
-            borderBottom: "1px solid var(--lx-border)",
             padding: "12px 20px",
             display: "flex",
             alignItems: "center",
@@ -285,12 +332,12 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
                   style={{
                     font: "inherit",
                     fontSize: 12.5,
-                    fontWeight: 600,
-                    padding: "6px 14px",
+                    fontWeight: 650,
+                    padding: "7px 15px",
                     borderRadius: "var(--lx-radius-pill)",
                     border: "none",
-                    background: isActive ? "var(--lx-pill-active-bg)" : "transparent",
-                    color: isActive ? "var(--lx-pill-active-fg)" : "var(--lx-muted)",
+                    background: isActive ? "var(--lx-accent)" : "transparent",
+                    color: isActive ? "var(--lx-on-accent)" : "var(--lx-muted)",
                     cursor: "pointer",
                   }}
                 >
@@ -303,9 +350,9 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
             <Utilities onLogout={onLogout} />
           </span>
         </header>
-        <main style={{ flex: 1, padding: 20, minWidth: 0 }}>
+        <Canvas style={{ padding: 20, margin: "0 10px 10px", borderRadius: 26 }}>
           <ActiveView />
-        </main>
+        </Canvas>
       </div>
     );
   }
@@ -313,12 +360,11 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
   return (
     <div style={{ minHeight: "100dvh", display: "flex" }}>
       <aside
+        className="lx-frame-scope"
         style={{
-          width: 216,
+          width: 232,
           flexShrink: 0,
-          background: "var(--lx-card)",
-          borderRight: "1px solid var(--lx-border)",
-          padding: "22px 14px",
+          padding: "24px 14px 20px",
           display: "flex",
           flexDirection: "column",
           position: "sticky",
@@ -326,28 +372,30 @@ const Dashboard = ({ onLogout }: { onLogout: () => void }) => {
           height: "100dvh",
         }}
       >
-        <div style={{ padding: "0 10px", marginBottom: 28 }}>
+        <div style={{ padding: "0 12px", marginBottom: 30 }}>
           <Wordmark />
         </div>
-        <nav aria-label="Navigasi utama" style={{ display: "grid", gap: 4 }}>
-          {keys.map((key) => (
-            <NavItem key={key} tab={key} isActive={key === tab} onSelect={() => switchTab(key)} />
-          ))}
-        </nav>
-        <div style={{ marginTop: "auto", padding: "16px 10px 0", fontSize: 12, color: "var(--lx-muted)" }}>
-          {LAB_NAME}
-          <br />
+        <SideNav tab={tab} keys={keys} onSelect={switchTab} />
+        <div style={{ marginTop: "auto", padding: "16px 12px 0", fontSize: 12, color: "var(--lx-muted)" }}>
+          <div style={{ color: "var(--lx-text)", fontWeight: 600 }}>{LAB_NAME}</div>
           <span className="lx-mono" style={{ fontSize: 11 }}>
             admin
           </span>
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 12 }}>
             <Utilities onLogout={onLogout} />
           </div>
         </div>
       </aside>
-      <main style={{ flex: 1, padding: "28px 32px", minWidth: 0 }}>
+      <Canvas
+        style={{
+          margin: "10px 10px 10px 0",
+          borderRadius: 30,
+          padding: "30px 34px 40px",
+          minHeight: "calc(100dvh - 20px)",
+        }}
+      >
         <ActiveView />
-      </main>
+      </Canvas>
     </div>
   );
 };

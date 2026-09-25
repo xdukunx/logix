@@ -1,4 +1,5 @@
-// Dark-mode plumbing. A single mode (light | dark | system, default system,
+// Dark-mode plumbing. A single mode (light | dark | system, default light --
+// the dark-framed light canvas is the primary design, full dark is opt-in --
 // persisted to localStorage) is mirrored onto documentElement's `data-theme`
 // attribute, which tokens.css keys its dark ramp off. An attribute is what
 // makes the switch reliable: overriding the custom properties themselves is
@@ -41,7 +42,7 @@ const readInitialMode = (): ThemeMode => {
   } catch {
     /* localStorage unavailable (private mode) -- fall through */
   }
-  return "system";
+  return "light";
 };
 
 export function ThemeModeProvider({ children }: { children: ReactNode }) {

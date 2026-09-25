@@ -68,16 +68,22 @@ export const MoreMenu = ({ label, items }: { label: string; items: MenuItem[] })
       aria-haspopup="menu"
       aria-expanded={isOpen}
       onClick={() => setOpen((v) => !v)}
+      className="lx-round"
       style={{
         font: "inherit",
         marginLeft: "auto",
-        border: "none",
-        background: "transparent",
-        color: isOpen ? "var(--lx-text)" : "var(--lx-muted)",
-        letterSpacing: 2,
+        width: 32,
+        height: 32,
+        borderRadius: 999,
+        border: "1px solid var(--lx-border)",
+        background: isOpen ? "var(--lx-ink)" : "var(--lx-card)",
+        color: isOpen ? "var(--lx-on-ink)" : "var(--lx-text)",
         lineHeight: 1,
-        fontSize: 16,
-        padding: "0 0 0 4px",
+        fontSize: 15,
+        padding: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         cursor: "pointer",
         flexShrink: 0,
       }}
@@ -95,7 +101,7 @@ export const MoreMenu = ({ label, items }: { label: string; items: MenuItem[] })
           className="lx-anim-menu lx-material"
           style={{
             position: "absolute",
-            top: 26,
+            top: 38,
             right: 0,
             zIndex: 30,
             border: "1px solid var(--lx-border)",
@@ -284,6 +290,86 @@ export const Modal = ({
             {footer}
           </div>
         )}
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+/**
+ * Right-hand overlay panel: slides in over the page and dismisses on Escape
+ * or a click outside. For detail that belongs to one thing on a page that
+ * must keep its own layout (a station on Monitoring) -- unlike Drawer below,
+ * which is a column of the Devices layout itself.
+ */
+export const SidePanel = ({
+  isOpen,
+  onClose,
+  label,
+  header,
+  width = 420,
+  children,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  /** Accessible name of the panel. */
+  label: string;
+  header: ReactNode;
+  width?: number;
+  children: ReactNode;
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useDismiss(ref, isOpen, onClose);
+  if (!isOpen) return null;
+  return createPortal(
+    <div
+      className="lx-anim-backdrop"
+      style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(17, 18, 20, 0.16)" }}
+    >
+      <div
+        ref={ref}
+        role="dialog"
+        aria-label={label}
+        className="lx-anim-panel"
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          bottom: 10,
+          width,
+          maxWidth: "calc(100% - 20px)",
+          background: "var(--lx-card)",
+          color: "var(--lx-text)",
+          borderRadius: 26,
+          boxShadow: "var(--lx-shadow-modal)",
+          padding: "22px 24px 28px",
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 18 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>{header}</div>
+          <button
+            type="button"
+            aria-label="Tutup"
+            className="lx-round"
+            onClick={onClose}
+            style={{
+              width: 32,
+              height: 32,
+              flexShrink: 0,
+              borderRadius: 999,
+              border: "1px solid var(--lx-border)",
+              background: "var(--lx-card)",
+              color: "var(--lx-text)",
+              fontSize: 16,
+              lineHeight: 1,
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        </div>
+        {children}
       </div>
     </div>,
     document.body,

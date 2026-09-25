@@ -75,8 +75,9 @@ export const Callout = ({
 );
 
 /**
- * The one card. Flat white, radius 16, the subtle two-layer shadow. `variant`
- * covers the three station-card states; `isSelected` draws the accent ring.
+ * The one card. Flat white on the grey canvas, radius 24. `variant` covers
+ * the station-card states; `isSelected` draws an ink ring (a lime ring on
+ * white would barely register).
  */
 export const Card = ({
   variant = "solid",
@@ -107,7 +108,7 @@ export const Card = ({
         variant === "dashed"
           ? undefined
           : isSelected
-            ? "0 0 0 1.5px var(--lx-accent), 0 4px 16px rgba(16,24,40,.06)"
+            ? "0 0 0 1.5px var(--lx-ink), var(--lx-shadow-hover)"
             : "var(--lx-shadow-card)",
       padding,
       ...style,
@@ -117,7 +118,8 @@ export const Card = ({
   </div>
 );
 
-/** Screen header: 22px title + one muted summary sentence + right-aligned slot. */
+/** Screen header: a large light title (the reference boards' "Overview"),
+ *  one muted summary sentence, and a right-aligned slot. */
 export const PageHeader = ({
   title,
   summary,
@@ -127,11 +129,16 @@ export const PageHeader = ({
   summary?: ReactNode;
   action?: ReactNode;
 }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, flexWrap: "wrap" }}>
+  <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 26, flexWrap: "wrap" }}>
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 650, letterSpacing: "-0.01em", margin: 0 }}>{title}</h1>
+      <h1
+        className="lx-rise"
+        style={{ fontSize: "clamp(28px, 3.2vw, 40px)", fontWeight: 400, letterSpacing: "-0.035em", lineHeight: 1.05, margin: 0 }}
+      >
+        {title}
+      </h1>
       {summary !== undefined && (
-        <div style={{ fontSize: 13.5, color: "var(--lx-muted)", marginTop: 3 }}>{summary}</div>
+        <div style={{ fontSize: 13.5, color: "var(--lx-muted)", marginTop: 8 }}>{summary}</div>
       )}
     </div>
     {action && <div style={{ marginLeft: "auto" }}>{action}</div>}

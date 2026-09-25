@@ -31,6 +31,38 @@ export const useBreakpoint = (): Breakpoint => {
 /** True when the OS asks for reduced motion; drives the snap-instead-of-animate rule. */
 export const useReducedMotion = (): boolean => useMediaQuery("(prefers-reduced-motion: reduce)");
 
+/**
+ * A number that counts from its previous value to `target` whenever the
+ * target changes (ease-out cubic), and snaps under reduced motion. Only a
+ * CHANGE animates: a re-render with the same target does nothing, so a view
+ * that re-renders every second does not keep replaying it.
+ */
+export const useCountUp = (target: number, ms = 700): number => {
+  const isReduced = useReducedMotion();
+  const [value, setValue] = useState(isReduced ? target : 0);
+  const shown = useRef(isReduced ? target : 0);
+  useEffect(() => {
+    if (isReduced) {
+      shown.current = target;
+      setValue(target);
+      return;
+    }
+    const from = shown.current;
+    const start = performance.now();
+    let raf = 0;
+    const step = (now: number) => {
+      const p = Math.min(1, (now - start) / ms);
+      const v = from + (target - from) * (1 - Math.pow(1 - p, 3));
+      shown.current = v;
+      setValue(v);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms, isReduced]);
+  return value;
+};
+
 /** Calls `onOutside` on pointerdown outside `ref`, and on Escape. */
 export const useDismiss = (
   ref: RefObject<HTMLElement | null>,
