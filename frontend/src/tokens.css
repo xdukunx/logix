@@ -230,6 +230,11 @@ body {
   --lx-card: var(--lx-frame-raise);
   --lx-sunken: var(--lx-frame-raise);
   --lx-border: rgba(255, 255, 255, 0.08);
+  --lx-hairline: rgba(255, 255, 255, 0.08);
+  --lx-border-dashed: var(--lx-frame-muted);
+  /* Lime reads fine as text on the dark frame; its darker canvas partner
+     would draw a dark-green heartbeat spike on near-black. */
+  --lx-accent-text: var(--lx-accent);
   --lx-ink: var(--lx-frame-text);
   --lx-on-ink: var(--lx-frame);
   color: var(--lx-text);

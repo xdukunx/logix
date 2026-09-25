@@ -70,19 +70,3 @@ export function ThemeModeProvider({ children }: { children: ReactNode }) {
 
   return <ThemeModeContext.Provider value={value}>{children}</ThemeModeContext.Provider>;
 }
-
-/**
- * Forces dark tokens for a subtree regardless of the user's preference --
- * used by the /wall TV mode, which the design specifies as always dark.
- */
-export const ForceDark = ({ children }: { children: ReactNode }) => {
-  useEffect(() => {
-    const previous = document.documentElement.getAttribute("data-theme");
-    document.documentElement.setAttribute("data-theme", "dark");
-    return () => {
-      if (previous) document.documentElement.setAttribute("data-theme", previous);
-      else document.documentElement.removeAttribute("data-theme");
-    };
-  }, []);
-  return <div style={{ background: "var(--lx-bg)", minHeight: "100dvh" }}>{children}</div>;
-};
