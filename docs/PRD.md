@@ -421,7 +421,7 @@ Enrollment: `POST /api/enroll/invite`, `POST /api/enroll` ·
 Control: `POST /api/control/{lock,broadcast,power,screenshot}`,
 `POST /api/control/screenshot/upload`, `GET /api/devices/{id}/screenshot` ·
 Messaging: `POST /api/replies`, `GET /api/replies`,
-`POST /api/replies/{id}/read` ·
+`POST /api/replies/{id}/read`, `GET /api/conversations` ·
 Alerts: `GET /api/alerts`, `POST /api/alerts/{id}/acknowledge`,
 `POST /api/alerts/{id}/resolve` ·
 Records: `POST /api/log`, `GET /api/sessions`, `GET /api/audit-log`,

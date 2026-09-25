@@ -67,12 +67,39 @@ if ((Test-Path $Global:SessionFile) -and -not $TestMode) {
 function New-BlurredBackgroundImage {
     try {
         $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
-        $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
-        $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-        $gfx.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bmp.Size)
+        $srcBmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+        $srcGfx = [System.Drawing.Graphics]::FromImage($srcBmp)
+        $srcGfx.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $srcBmp.Size)
+        $srcGfx.Dispose()
+
+        # The XAML displays this through a Gaussian BlurEffect (Radius 24,
+        # Stretch="Fill") -- fine detail is invisible on screen regardless of
+        # source resolution, so encoding/decoding a multi-monitor virtual
+        # screen at full native size (both PNG compression below and the
+        # BitmapImage decode scale with pixel count) is pure waste on a path
+        # that runs synchronously on the UI thread every time the sign-in
+        # popup appears (login, unlock, wake, remote LOCK). Cap the encoded
+        # copy's width well past what the blur can make visible, and skip the
+        # resize entirely when the source is already at or under that (a
+        # single modest laptop display).
+        $maxWidth = 1600
+        if ($bounds.Width -gt $maxWidth) {
+            $scale = $maxWidth / [double]$bounds.Width
+            $destW = $maxWidth
+            $destH = [Math]::Max(1, [int]([Math]::Round($bounds.Height * $scale)))
+            $bmp = New-Object System.Drawing.Bitmap($destW, $destH)
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            $gfx.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+            $gfx.DrawImage($srcBmp, 0, 0, $destW, $destH)
+            $gfx.Dispose()
+            $srcBmp.Dispose()
+        } else {
+            $bmp = $srcBmp
+        }
+
         $ms = New-Object System.IO.MemoryStream
         $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-        $gfx.Dispose(); $bmp.Dispose()
+        $bmp.Dispose()
         $ms.Position = 0
         $img = New-Object System.Windows.Media.Imaging.BitmapImage
         $img.BeginInit()

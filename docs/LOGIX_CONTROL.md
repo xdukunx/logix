@@ -149,6 +149,18 @@ to attach the outcome to. `apply_command_acks()` applies each ack with an
 an unknown or already-terminal `command_id` — an ack is a best-effort
 report, not something the caller depends on succeeding.
 
+**Delivery is at-least-once, execution is once.** A delivered command stays
+in the device's queue until its ack arrives; if none has arrived
+`COMMAND_REDELIVERY_SECONDS` (20) after it was sent, the next heartbeat
+sends it again, still capped by `COMMAND_TTL_MINUTES`. Before this, the
+queue was cleared the moment a heartbeat read it, so a response lost in
+transit (a dropped connection, the agent's 3s client timeout) lost the
+command silently on both sides. The agent records each `command_id` in
+`executed_commands.json` *before* running it and skips any it has already
+run, so a redelivery caused by a lost *ack* never runs LOCK or LOGOFF a
+second time. For BROADCAST, `done` means the message reached the device's
+message inbox — not that the person at the device has read it.
+
 **Still true:** a `status: 'queued'` row must not be read as
 `status: 'done'` — it just means "queued" now covers a narrower, more
 honest window than before.

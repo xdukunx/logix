@@ -1318,6 +1318,83 @@ $setupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_setup.ps1')
 Assert ($setupSrc -match 'device_name = \$name') "the setup wizard sends the typed name at enrolment"
 Assert ($installSrc -match 'device_name   = \$DeviceName') "so does the unattended installer path"
 
+# ---------------------------------------------------------------------------
+# Admin messages queue instead of overwriting each other, and a command the
+# server redelivers (its ack was lost) runs only once.
+Write-Host "admin messages queue; a redelivered command runs once"
+$msgState = Join-Path $env:TEMP ('lxinbox_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$savedStateDirMsg = $Global:StateDir
+$savedInboxDir = $Global:MessageInboxDir
+$savedInboxMax = $Global:MessageInboxMax
+$savedExecMax = $Global:ExecutedCommandsMax
+try {
+    New-Item -ItemType Directory -Force -Path $msgState | Out-Null
+    $Global:StateDir = $msgState
+    $Global:MessageInboxDir = Join-Path $msgState 'inbox'
+
+    Set-LogbookIncomingMessage -Text 'pertama' -CommandId 'c1'
+    Set-LogbookIncomingMessage -Text 'kedua' -CommandId 'c2'
+    $queued = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' | Sort-Object Name)
+    Assert ($queued.Count -eq 2) "a second message queues behind the first instead of overwriting it"
+    $firstMsg = Get-Content -LiteralPath $queued[0].FullName -Raw | ConvertFrom-Json
+    Assert ($firstMsg.text -eq 'pertama' -and $firstMsg.command_id -eq 'c1') "and the inbox drains in arrival order"
+    Assert (@(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.tmp').Count -eq 0) `
+        "no half-written .tmp is left behind for the widget to trip over"
+
+    $Global:MessageInboxMax = 3
+    1..5 | ForEach-Object { Set-LogbookIncomingMessage -Text "m$_" }
+    $bounded = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' | Sort-Object Name)
+    Assert ($bounded.Count -eq 3) "the inbox is bounded"
+    Assert ((Get-Content -LiteralPath $bounded[-1].FullName -Raw | ConvertFrom-Json).text -eq 'm5') "and keeps the newest"
+
+    Assert (@(Get-LogbookExecutedCommandIds).Count -eq 0) "a fresh device has no executed commands recorded"
+    Add-LogbookExecutedCommandId 'cmd-a'
+    $one = @(Get-LogbookExecutedCommandIds)
+    # A one-element list is where ConvertTo-Json likes to emit a bare scalar.
+    Assert ($one.Count -eq 1 -and $one[0] -eq 'cmd-a') "a single executed id round-trips as a one-element list"
+    Add-LogbookExecutedCommandId 'cmd-b'
+    Assert ((@(Get-LogbookExecutedCommandIds)) -contains 'cmd-b') "later ids are appended"
+    $Global:ExecutedCommandsMax = 3
+    'cmd-c', 'cmd-d', 'cmd-e' | ForEach-Object { Add-LogbookExecutedCommandId $_ }
+    $kept = @(Get-LogbookExecutedCommandIds)
+    Assert ($kept.Count -eq 3 -and $kept[-1] -eq 'cmd-e' -and -not ($kept -contains 'cmd-a')) "the executed list is bounded, oldest dropped first"
+
+    # The reply retry queue, round-tripped for real. Under Windows PowerShell
+    # 5.1 (what the agent runs on) the old writer produced
+    # {"value":[...],"Count":1}, which read back as one reply with no text --
+    # the server rejects that as empty, so a reply queued while offline was
+    # never delivered. This suite runs under both 5.1 and 7 for that reason.
+    $q = @(Get-LogbookPendingReplies)
+    $q += @{ text = 'halo admin'; command_id = 'c1'; created_at = '2026-01-01T10:00:00' }
+    Set-LogbookPendingReplies $q
+    $back = @(Get-LogbookPendingReplies)
+    Assert ($back.Count -eq 1 -and $back[0].text -eq 'halo admin') "a queued reply reads back with its text intact"
+    Assert ((Get-Content (Join-Path $msgState 'pending_replies.json') -Raw).TrimStart().StartsWith('[')) "and is stored as a JSON list"
+    Set-Content -LiteralPath (Join-Path $msgState 'pending_replies.json') -Encoding UTF8 `
+        -Value '{"value":[{"text":"tertahan","command_id":"c9","created_at":"2026-01-01T09:00:00"}],"Count":1}'
+    $legacy = @(Get-LogbookPendingReplies)
+    Assert ($legacy.Count -eq 1 -and $legacy[0].text -eq 'tertahan') "a queue already stuck in the old 5.1 shape is unwrapped, so it finally sends"
+} finally {
+    $Global:StateDir = $savedStateDirMsg
+    $Global:MessageInboxDir = $savedInboxDir
+    $Global:MessageInboxMax = $savedInboxMax
+    $Global:ExecutedCommandsMax = $savedExecMax
+    Remove-Item $msgState -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$switchIdx = $heartbeatFn.IndexOf('switch ($name)')
+$skipIdx = $heartbeatFn.IndexOf('-contains $cmdId')
+$recordIdx = $heartbeatFn.IndexOf('Add-LogbookExecutedCommandId')
+Assert ($skipIdx -ge 0 -and $skipIdx -lt $switchIdx) "a redelivered command_id is skipped before dispatch"
+Assert ($recordIdx -ge 0 -and $recordIdx -lt $switchIdx) `
+    "a command is recorded as executed BEFORE it runs -- LOGOFF can take this process down with it"
+
+$showMsgFn = [regex]::Match($timerSrc, '(?s)function Show-LogbookPendingMessage.*?\n\}').Value
+Assert ($showMsgFn.Length -gt 0) "the inbox drain is where this check expects it"
+Assert ($showMsgFn -notmatch '\bfinally\b') "a message is not deleted in a finally block, i.e. even when it failed to render"
+Assert ($showMsgFn -match "msgState -ne 'none'") "a new message waits while the card still holds one"
+Assert ($viewFn -match "msgState -in @\('reading','sent'\)") "quick replies stay offered after a send, so the conversation can go on"
+
 
 # The summary lives at the END of the file, which sounds too obvious to write
 # down until you notice it did not: it sat at what was once the last line, and

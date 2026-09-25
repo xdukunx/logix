@@ -58,21 +58,35 @@ export interface DeviceScreenshot {
   captured_at: string;
 }
 
-export interface Reply {
-  id: number;
-  hostname: string;
-  device_name: string | null;
-  message: string;
-  created_at: string;
-  read_at: string | null;
-  /** The broadcast this answers, when the reply carried its command_id. */
-  in_reply_to: string | null;
+/** One line of an admin <-> workstation conversation (GET /api/conversations). */
+export interface ConversationMessage {
+  id: string;
+  /** out = admin -> workstation, in = the person at the workstation -> admin. */
+  direction: "out" | "in";
+  text: string;
+  at: string;
+  command_id: string | null;
+  // out only
+  actor?: string;
+  /** remote_actions status; null for an ALL broadcast (one shared row). */
+  status?: "queued" | "done" | "failed" | "expired" | null;
+  to_all?: boolean;
+  // in only
+  reply_id?: number;
+  read_at?: string | null;
 }
 
-export interface RepliesPage {
-  total: number;
+export interface ConversationThread {
+  hostname: string;
+  device_name: string;
   unread: number;
-  replies: Reply[];
+  last_at: string;
+  messages: ConversationMessage[];
+}
+
+export interface ConversationsPage {
+  unread: number;
+  threads: ConversationThread[];
 }
 
 export interface Alert {

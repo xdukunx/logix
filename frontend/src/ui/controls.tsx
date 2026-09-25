@@ -6,6 +6,7 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type CSSProperties,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 
@@ -398,6 +399,7 @@ export const TextArea = ({
   placeholder,
   rows = 3,
   maxLength,
+  onKeyDown,
 }: {
   label: string;
   value: string;
@@ -405,6 +407,7 @@ export const TextArea = ({
   placeholder?: string;
   rows?: number;
   maxLength?: number;
+  onKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
 }) => {
   const id = useId();
   return (
@@ -430,6 +433,7 @@ export const TextArea = ({
         maxLength={maxLength}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
         style={{ ...FIELD_STYLE, resize: "vertical", lineHeight: 1.5 }}
       />
     </div>

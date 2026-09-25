@@ -241,6 +241,38 @@ function Test-LogbookPopupRunning {
     return $false
 }
 
+# Cheap liveness check for logbook_monitor.ps1's heartbeat loop, which
+# previously called Get-ProcessByCommandPattern (measured 116-204ms per call,
+# see that function's comment) every heartbeat tick -- by default every 5s,
+# for the entire life of a session, purely to answer "is the timer widget
+# still up." Get-Process -Id is a direct handle lookup, not a WMI query --
+# a few ms at most. timer.pid records the conhost wrapper's PID, not the WPF
+# process's own (Start-LogbookTimer's comment), but Start-HiddenPowerShell's
+# comment establishes that exiting either side of that wrapper/child pair
+# takes the other down with it, so the wrapper's liveness is a correct proxy
+# for the widget's.
+#
+# A false "still running" (e.g. the PID got recycled by an unrelated process
+# in the ~5s window before the next check) only delays a restart by one
+# heartbeat tick: Start-LogbookTimer unconditionally calls the WMI-based,
+# authoritative Stop-LogbookTimers before spawning a replacement, so nothing
+# here can leave a genuinely-dead timer un-replaced for long, and nothing
+# here can create a duplicate. The ProcessName check narrows that recycled-PID
+# window further, cheaply.
+function Test-LogbookTimerRunning {
+    try {
+        $pidFile = Join-Path $Global:StateDir 'timer.pid'
+        if (-not (Test-Path $pidFile)) { return $false }
+        $timerPid = (Get-Content $pidFile -Raw -ErrorAction Stop).Trim()
+        if (-not $timerPid) { return $false }
+        $p = Get-Process -Id ([int]$timerPid) -ErrorAction SilentlyContinue
+        if (-not $p) { return $false }
+        return ($p.ProcessName -in @('conhost', 'powershell', 'pwsh'))
+    } catch {
+        return $false
+    }
+}
+
 # Install-time-only, must run elevated. The popup/monitor run as a normal
 # (often non-admin) user at runtime, and by default that account cannot
 # write HKCU:\...\Policies\System even in its own hive (Windows locks that
@@ -1321,15 +1353,71 @@ function Get-LogbookDeviceDisplayName {
     return $deviceName
 }
 
-# Writes the single incoming-message drop the timer widget polls each tick and
-# shows inline near the clock. allow_reply lets the widget offer a reply box for
-# admin messages (BROADCAST) but not for one-way notices (screenshot/power).
+# Messages for the timer widget land in an inbox DIRECTORY, one file per
+# message, which the widget drains oldest-first (Show-LogbookPendingMessage in
+# logbook_timer.ps1). This replaced a single incoming_message.json slot: a
+# second message overwrote the first before anyone saw it, and the widget
+# deleted the slot even when rendering it failed. One file per message also
+# means this writer (the monitor) and the widget (reader/deleter) never
+# read-modify-write the same file, so there is no cross-process race to lock
+# around. Written under a .tmp name and renamed, so the widget can never pick
+# up a half-written file. Names sort by arrival time.
+#
+# allow_reply lets the widget offer a reply box for admin messages (BROADCAST)
+# but not for one-way notices (screenshot/power).
+$Global:MessageInboxDir = Join-Path $Global:StateDir 'inbox'
+$Global:MessageInboxMax = 50
+
 function Set-LogbookIncomingMessage {
     param([string]$Text, [string]$Reason = 'Direction Message', [string]$CommandId = '', [bool]$AllowReply = $true)
     Ensure-LogbookDirs
-    $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
-    @{ text = $Text; reason = $Reason; command_id = $CommandId; allow_reply = $AllowReply; received_at = (Get-Date).ToString('o') } |
-        ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
+    New-Item -ItemType Directory -Force -Path $Global:MessageInboxDir | Out-Null
+    $now = Get-Date
+    $name = '{0}_{1}' -f $now.ToString('yyyyMMddHHmmssfff'), [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $tmp = Join-Path $Global:MessageInboxDir "$name.tmp"
+    @{ text = $Text; reason = $Reason; command_id = $CommandId; allow_reply = $AllowReply; received_at = $now.ToString('o') } |
+        ConvertTo-Json | Out-File -FilePath $tmp -Encoding UTF8 -Force
+    Move-Item -LiteralPath $tmp -Destination (Join-Path $Global:MessageInboxDir "$name.json") -Force
+
+    # Bounded: a widget that never runs (no session for days) must not let
+    # this grow without limit. Oldest go first; the widget would drop them as
+    # stale anyway.
+    $files = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object Name)
+    if ($files.Count -gt $Global:MessageInboxMax) {
+        $files[0..($files.Count - $Global:MessageInboxMax - 1)] | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# command_ids this device has already executed, newest last. The server
+# resends a command whose ack has not arrived within COMMAND_REDELIVERY_SECONDS
+# (server/main.py), which turns a lost heartbeat response into a retry instead
+# of a silently dropped command -- but it also means a command can arrive a
+# second time when it was the ACK that got lost, not the command. Re-running
+# LOCK would end the session the user just signed back into, and re-running
+# LOGOFF would sign them straight out again; remembering what ran makes
+# delivery at-least-once but execution once.
+$Global:ExecutedCommandsFile = 'executed_commands.json'
+$Global:ExecutedCommandsMax = 200
+
+function Get-LogbookExecutedCommandIds {
+    $path = Join-Path $Global:StateDir $Global:ExecutedCommandsFile
+    if (-not (Test-Path $path)) { return @() }
+    try {
+        $loaded = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($loaded) { return @($loaded | ForEach-Object { [string]$_ }) }
+    } catch {}
+    return @()
+}
+
+function Add-LogbookExecutedCommandId([string]$CommandId) {
+    if (-not $CommandId) { return }
+    Ensure-LogbookDirs
+    $ids = @(Get-LogbookExecutedCommandIds) + $CommandId
+    if ($ids.Count -gt $Global:ExecutedCommandsMax) {
+        $ids = $ids[($ids.Count - $Global:ExecutedCommandsMax)..($ids.Count - 1)]
+    }
+    # -InputObject keeps a one-element list a list on 5.1 (see Set-LogbookPendingReplies).
+    ConvertTo-Json -InputObject $ids | Out-File -FilePath (Join-Path $Global:StateDir $Global:ExecutedCommandsFile) -Encoding UTF8 -Force
 }
 
 # Device -> admin message (Logix Control replies). Posts to /api/replies with the
@@ -1346,6 +1434,15 @@ function Get-LogbookPendingReplies {
     if (-not (Test-Path $path)) { return @() }
     try {
         $loaded = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        # Queues written by the old Set-LogbookPendingReplies under Windows
+        # PowerShell 5.1 are {"value":[...],"Count":n} rather than a list (see
+        # that function). Read as-is, that is ONE item with no text, which the
+        # server rejects as empty -- so every reply queued while the server was
+        # unreachable sat here forever. Unwrapping it delivers them.
+        if ($loaded -and $loaded.PSObject.Properties['value'] -and $loaded.PSObject.Properties['Count'] -and
+            -not $loaded.PSObject.Properties['text']) {
+            $loaded = $loaded.value
+        }
         if ($loaded) { return @($loaded) }
     } catch {}
     return @()
@@ -1364,10 +1461,13 @@ function Set-LogbookPendingReplies($Replies) {
     if ($items.Count -gt $Global:PendingRepliesMax) {
         $items = $items[($items.Count - $Global:PendingRepliesMax)..($items.Count - 1)]
     }
-    # The leading comma forces an array even for a single item: without it
-    # ConvertTo-Json emits a bare object, which loads back as one object
-    # rather than a one-element list.
-    ,$items | ConvertTo-Json -Depth 4 | Out-File -FilePath $path -Encoding UTF8 -Force
+    # -InputObject, not the pipeline, so a one-item queue is still written as
+    # a list. The previous form, `,$items | ConvertTo-Json`, did that under
+    # PowerShell 7 but under Windows PowerShell 5.1 -- what the agent actually
+    # runs on -- serialized the array's wrapper instead:
+    # {"value":[...],"Count":1}. Get-LogbookPendingReplies unwraps queues
+    # already written that way.
+    ConvertTo-Json -InputObject $items -Depth 4 | Out-File -FilePath $path -Encoding UTF8 -Force
 }
 
 # Post one reply. Throws on any failure, so the caller decides whether to
@@ -1568,7 +1668,25 @@ function Send-LogbookHeartbeat {
 
         $newAcks = @()
         if ($res -and $res.commands) {
+            $executedIds = @(Get-LogbookExecutedCommandIds)
             foreach ($cmd in $res.commands) {
+                # A redelivery of something already run (see
+                # Get-LogbookExecutedCommandIds). Its ack is still sitting in
+                # pending_acks.json from the first run -- that is WHY the server
+                # resent it -- so there is nothing to add here.
+                $cmdId = [string]$cmd.command_id
+                if ($cmdId -and ($executedIds -contains $cmdId)) {
+                    Write-LogbookInfo "Skipping redelivered command $cmdId (already executed)."
+                    continue
+                }
+                # Recorded BEFORE running, not after: LOGOFF/SHUTDOWN/RESTART can
+                # take this process down before anything after them executes,
+                # and an unrecorded LOGOFF would be redelivered into the user's
+                # next sign-in.
+                if ($cmdId) {
+                    Add-LogbookExecutedCommandId $cmdId
+                    $executedIds += $cmdId
+                }
                 $name = $cmd.command.ToUpper()
                 $param = $cmd.param
                 Write-LogbookInfo "Received remote command: $name (param: $param)"
@@ -1586,15 +1704,16 @@ function Send-LogbookHeartbeat {
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
                         }
                         'BROADCAST' {
-                            # Drop for the timer widget to show inline near the
+                            # Queued in the widget's inbox, shown inline near the
                             # clock -- not a separate MessageBox. command_id
                             # rides along so a reply typed into the widget can
                             # reference the exact broadcast it answers. "done"
-                            # means the file was written, not that the user saw it.
+                            # means it reached this device's inbox, not that the
+                            # user has read it yet.
                             Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
                             $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
                             Set-LogbookIncomingMessage -Text $param -Reason $reason -CommandId ([string]$cmd.command_id)
-                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'delivered to device inbox' }
                         }
                         'SCREENSHOT' {
                             # Transparency first, then capture: the person at the
@@ -3311,6 +3430,21 @@ $res
                      Foreground="{StaticResource LxText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
         </StackPanel>
 
+        <!-- Reply confirmation: the user's own answer echoed back, then its
+             delivery status. Sits directly under the message it answers,
+             ABOVE the quick replies, because those stay offered after a send
+             so the user can keep answering (one reply used to end the
+             conversation). The tick is Path-based and fixed-size; the label
+             WRAPS, because the queued-for-retry wording is longer than one
+             222px line and used to run off the card. -->
+        <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,10">
+          <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
+                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Top" Margin="0,3,8,0"/>
+          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12" TextWrapping="Wrap" MaxWidth="190"
+                     Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
+        </StackPanel>
+
         <!-- Quick replies: two one-tap answers plus a free-text escape.
              A WRAP panel, not a horizontal StackPanel. The card is 260px wide
              and 222px inside its padding; these three pills measure ~233px
@@ -3359,21 +3493,6 @@ $res
             </Button.Template>
           </Button>
         </Grid>
-
-        <!-- Reply confirmation. Dot returns to green, card auto-collapses in 5s.
-             The tick is Path-based and fixed-size; the label WRAPS, because
-             the queued-for-retry wording is longer than one 222px line and
-             used to run off the card the same way the pills above did. The
-             stray Collapsed 1px Border that sat first in this horizontal
-             stack (a copy/paste of the divider above) is gone; it did
-             nothing but occupy the first slot of the row. -->
-        <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal">
-          <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
-                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Top" Margin="0,3,8,0"/>
-          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12" TextWrapping="Wrap" MaxWidth="190"
-                     Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
-        </StackPanel>
 
         <!-- SELESAI: press-and-hold to confirm, not a tap.
              Progress is drawn as a STROKE TRACING THE PILL'S PERIMETER, not
