@@ -16,7 +16,17 @@ $xaml = Build-LogbookPopupXaml $cfg
 $doc = [xml]$xaml
 # v3: the fullscreen window is now a translucent scrim over the lock screen and
 # the dialog itself is a 320px card, rather than the window being the surface.
-Assert ($doc.Window.Background -eq '#D8070C15') "fullscreen popup is a dimmed scrim, not an opaque surface (v3 section 6)"
+$scrim = $doc.SelectNodes("//*[local-name()='Rectangle']") | Where-Object { $_.Name -eq 'Scrim' }
+$expectedScrim = '#D8' + (Get-LogbookTheme $cfg).surface.TrimStart('#')
+Assert ($doc.Window.Background -eq 'Transparent' -and $scrim -and $scrim.Fill -eq $expectedScrim) `
+    "fullscreen popup is a dimmed scrim over the live desktop, not an opaque surface (v3 section 6)"
+# The scrim is composited by Windows over what is really on screen. The popup
+# used to capture the whole virtual screen and PNG-encode it on every sign-in
+# for a background this layout never displayed.
+$popupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_popup.ps1')
+Assert ($popupSrc -notmatch 'CopyFromScreen') "the sign-in popup never captures the screen"
+$wbXaml = Build-LogbookWelcomeBackXaml $cfg @{ nama = 'Uji'; nim = '123456'; tujuan = 'Tes' } 'Physical'
+Assert (($xaml + $wbXaml) -notmatch 'BgImage|BlurEffect Radius="24"') "neither popup layout has a screenshot backdrop to fill"
 $mainCard = $doc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MainCard' }
 Assert ($mainCard.Width -eq '320') "sign-in dialog is 320px wide"
 Assert ($mainCard.CornerRadius -eq '22') "sign-in dialog uses radius 22, matching the pill language"
@@ -46,7 +56,13 @@ $tmp = Join-Path $env:TEMP ("logix_cfgtest_" + [guid]::NewGuid().ToString('N').S
 try {
     $merged = Merge-LogbookConfig (Get-LogbookDefaultConfig) (Read-LogbookConfigFile $tmp)
     Assert ($merged.branding.colors.accent -eq '#1A7F4B') "accent overridden"
-    Assert ($merged.branding.colors.primary -eq '#0E1626') "primary kept from defaults"
+    Assert ($merged.branding.colors.primary -eq (Get-LogbookDefaultConfig).branding.colors.primary) "primary kept from defaults"
+    # Text on the accent follows the accent: a lab that rebrands to a dark
+    # colour must not inherit the lime default's ink text.
+    Assert ((Get-LogbookTheme $merged).onAccent -eq '#FFFFFF') "a dark rebranded accent gets white text on it"
+    Assert ((Get-LogbookTheme (Get-LogbookDefaultConfig)).onAccent -eq '#111214') "the lime default carries ink"
+    Assert ((Get-LogbookTheme @{ branding = @{ colors = @{ accent = '#FFD400'; onAccent = '#222222' } } }).onAccent -eq '#222222') `
+        "an explicit onAccent always wins"
     Assert ($merged.branding.title -eq 'Report Logbook') "title kept from defaults"
     Assert (@($merged.purposes).Count -eq 4) "purposes array replaced (4)"
     Assert (@($merged.requiredFields) -join ',' -eq 'nama,keterangan') "requiredFields replaced"
@@ -159,7 +175,13 @@ Assert ($selesaiFill.Width -eq '0') "the hold fill starts empty -- SELESAI reads
 
 Write-Host "v3 anti-pattern guard rails (client)"
 Assert ($timerXaml -notmatch 'GradientBrush') "no gradient anywhere in the timer widget"
-Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status dot is static"
+Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status dot is static at rest"
+# v4 "Denyut": the dot may beat ONCE per heartbeat the server acknowledged --
+# driven by the monitor's event, never by a timer loop of its own.
+$beatFn = [regex]::Match((Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_timer.ps1')), '(?s)function Invoke-LogbookDotBeat.*?\n\}').Value
+Assert ($beatFn -match 'reduceMotion' -and $beatFn -notmatch 'RepeatBehavior|Forever') "the heartbeat beat is one-shot and respects reduced motion"
+Assert ((Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_timer.ps1')) -match 'Get-LogbookHeartbeatPulse\)\.WaitOne\(0\)') `
+    "the beat is triggered by a real acknowledged heartbeat, not a timer of its own"
 $mono = $timerDoc.SelectNodes("//*[local-name()='TextBlock'][@FontFamily='Consolas']")
 Assert ($mono.Count -ge 4) "time / ID values render in Consolas (mono tabular)"
 

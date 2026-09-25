@@ -554,21 +554,20 @@ PAGE = """<!doctype html>
 <link rel="icon" href="data:,">
 <style>
 /* ── tokens ─────────────────────────────────────────────────────────────
-   The LogiX v3 "Clean Calibration" ramp, copied from frontend/src/tokens.css
-   when that was what the admin dashboard shipped. The dashboard has since
-   moved to v4 "Denyut" and this page has not followed, so these values no
-   longer match that file -- do not read them as the current palette. A copy
-   rather than an import because this page is standalone, with no build step.
+   The LogiX v4 "Denyut" ramp, copied from frontend/src/tokens.css so this
+   page reads as the same product as the admin dashboard. A copy rather than
+   an import because this page is standalone, with no build step.
 
    Status colour exists only as a dot or a hairline edge, never a tinted
-   background, and the accent is reserved for links, focus rings and
-   primary buttons. Nothing else. */
+   background. The accent is lime, which is unreadable as a thin line or as
+   text on white: it fills primary buttons (with --accent-ink on it), while
+   focus rings and the active-nav edge use --edge, ink on the light ramp. */
 :root{
-  --bg:#f4f5f7; --surface:#ffffff; --surface-subtle:#f4f5f7;
-  --surface-accent:#f4f5f7; --border:#e6e9ef; --border-strong:#d9dde3;
-  --text:#14181f; --text-muted:#6a7382; --text-faint:#8a94a6;
-  --accent:#2563eb; --accent-hover:#1d4ed8; --accent-ink:#ffffff;
-  --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+  --bg:#eceef1; --surface:#ffffff; --surface-subtle:#f3f4f6;
+  --surface-accent:#f3f4f6; --border:#e3e6ea; --border-strong:#cfd4da;
+  --text:#111214; --text-muted:#6b7078; --text-faint:#8a93a0;
+  --accent:#c5f23a; --accent-hover:#b6e329; --accent-ink:#111214; --edge:#111214;
+  --ok:#1f9d55; --warn:#e0a100; --err:#e5484d;
 
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
   --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
@@ -580,19 +579,19 @@ PAGE = """<!doctype html>
   --ease:cubic-bezier(.2,.6,.2,1);
 }
 :root[data-theme="dark"]{
-  --bg:#0b0f16; --surface:#111722; --surface-subtle:#0b0f16;
-  --surface-accent:#0b0f16; --border:#1e2836; --border-strong:#2a3648;
-  --text:#edf1f7; --text-muted:#8a94a6; --text-faint:#6b7280;
-  --accent:#2563eb; --accent-hover:#3b82f6; --accent-ink:#ffffff;
-  --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  --bg:#121316; --surface:#1a1c20; --surface-subtle:#15171a;
+  --surface-accent:#15171a; --border:#26292f; --border-strong:#30343a;
+  --text:#eef0f3; --text-muted:#8d939c; --text-faint:#5f6670;
+  --accent:#c5f23a; --accent-hover:#d4f75e; --accent-ink:#111214; --edge:#c5f23a;
+  --ok:#3ccf78; --warn:#f5b82e; --err:#ff5c61;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#0b0f16; --surface:#111722; --surface-subtle:#0b0f16;
-    --surface-accent:#0b0f16; --border:#1e2836; --border-strong:#2a3648;
-    --text:#edf1f7; --text-muted:#8a94a6; --text-faint:#6b7280;
-    --accent:#2563eb; --accent-hover:#3b82f6; --accent-ink:#ffffff;
-    --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+    --bg:#121316; --surface:#1a1c20; --surface-subtle:#15171a;
+    --surface-accent:#15171a; --border:#26292f; --border-strong:#30343a;
+    --text:#eef0f3; --text-muted:#8d939c; --text-faint:#5f6670;
+    --accent:#c5f23a; --accent-hover:#d4f75e; --accent-ink:#111214; --edge:#c5f23a;
+    --ok:#3ccf78; --warn:#f5b82e; --err:#ff5c61;
   }
 }
 
@@ -600,7 +599,7 @@ PAGE = """<!doctype html>
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:400 13px/1.55 var(--font);
   -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+:focus-visible{outline:2px solid var(--edge);outline-offset:2px;border-radius:2px}
 
 /* ── shell ───────────────────────────────────────────────────────────── */
 .shell{display:grid;grid-template-columns:208px 1fr;min-height:100vh}
@@ -614,7 +613,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:400 13px/1.55 var(--fo
   border-left:2px solid transparent;transition:background var(--duration-fast) var(--ease)}
 .nav a:hover{background:var(--surface-subtle);color:var(--text)}
 .nav a[aria-current="page"]{background:var(--surface-accent);color:var(--text);
-  border-left-color:var(--accent)}
+  border-left-color:var(--edge)}
 .nav-rule{height:1px;background:var(--border);margin:var(--space-3) var(--space-2)}
 .side-foot{margin-top:auto;padding-top:var(--space-4)}
 .chip{border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -718,7 +717,7 @@ td{padding:var(--space-3);border-bottom:1px solid var(--border);vertical-align:t
 tbody tr:last-child td{border-bottom:0}
 tbody tr{cursor:pointer;transition:background var(--duration-fast) var(--ease)}
 tbody tr:hover{background:var(--surface-subtle)}
-tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+tbody tr:focus-visible{outline:2px solid var(--edge);outline-offset:-2px}
 .num{font-family:var(--mono);font-size:12px;white-space:nowrap}
 .r{text-align:right}
 .mut{color:var(--text-muted)}
@@ -785,7 +784,7 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .mark{padding:0 var(--space-2) 0 0}
   .nav{flex-direction:row;gap:var(--space-1)}
   .nav a{border-left:0;border-bottom:2px solid transparent}
-  .nav a[aria-current="page"]{border-left-color:transparent;border-bottom-color:var(--accent)}
+  .nav a[aria-current="page"]{border-left-color:transparent;border-bottom-color:var(--edge)}
   .nav-rule,.side-foot{display:none}
   main{padding:var(--space-5) var(--space-4) var(--space-7)}
   th.opt,td.opt{display:none}

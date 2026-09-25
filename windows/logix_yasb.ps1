@@ -208,12 +208,12 @@ $cssSnippet = @"
    never get WA_Hover. The click has to BE fast rather than look pressed, which
    is what the -Action fast path and the widget's 100ms poll are for. */
 .logix-widget .label {
-    color: #EEF3FB;
+    color: #EEF0F3;
 }
 /* The clock is the value; the glyph is a label for it, so it sits back a step
    rather than competing at the same weight. */
 .logix-widget .icon {
-    color: #93A1B8;
+    color: #8D939C;
     font-size: 13px;
 }
 /* Empty payload = no session. Collapse the slot rather than leave a gap. */

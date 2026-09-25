@@ -33,7 +33,7 @@ $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Logix Workstation Setup" Height="590" Width="480"
-        WindowStartupLocation="CenterScreen" Background="#070C15" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen" Background="#0B0C0E" ResizeMode="NoResize"
         FontFamily="Segoe UI, Tahoma, Geneva, Verdana, sans-serif">
   <Grid Margin="24">
     <Grid.RowDefinitions>
@@ -45,38 +45,38 @@ $xaml = @"
 
     <!-- Header Title -->
     <StackPanel Grid.Row="0" Margin="0,0,0,24">
-      <TextBlock Text="LOGIX WORKSTATION SETUP" FontSize="18" FontWeight="Bold" Foreground="#2563EB" LetterSpacing="1"/>
-      <TextBlock Text="Hubungkan workstation ini ke server administrasi pusat." FontSize="11" Foreground="#93A1B8" Margin="0,4,0,0"/>
+      <TextBlock Text="LOGIX WORKSTATION SETUP" FontSize="18" FontWeight="Bold" Foreground="#C5F23A" LetterSpacing="1"/>
+      <TextBlock Text="Hubungkan workstation ini ke server administrasi pusat." FontSize="11" Foreground="#8D939C" Margin="0,4,0,0"/>
     </StackPanel>
 
     <!-- Inputs -->
     <StackPanel Grid.Row="1" Margin="0,0,0,16">
-      <TextBlock Text="NAMA DEVICE (TAMPIL DI DASHBOARD ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#93A1B8" Margin="0,0,0,6"/>
-      <TextBox Name="DeviceNameBox" Height="36" Padding="8,4" Background="#0E1626" Foreground="#EEF3FB" BorderBrush="#223451" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <TextBlock Text="NAMA DEVICE (TAMPIL DI DASHBOARD ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,0,0,6"/>
+      <TextBox Name="DeviceNameBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
 
-      <TextBlock Text="URL SERVER ADMINISTRASI" FontSize="10" FontWeight="SemiBold" Foreground="#93A1B8" Margin="0,16,0,6"/>
-      <TextBox Name="ServerUrlBox" Height="36" Padding="8,4" Background="#0E1626" Foreground="#EEF3FB" BorderBrush="#223451" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <TextBlock Text="URL SERVER ADMINISTRASI" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
+      <TextBox Name="ServerUrlBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
 
-      <TextBlock Text="API KEY SERVER (OPSIONAL)" FontSize="10" FontWeight="SemiBold" Foreground="#93A1B8" Margin="0,16,0,6"/>
-      <TextBox Name="ApiKeyBox" Height="36" Padding="8,4" Background="#0E1626" Foreground="#EEF3FB" BorderBrush="#223451" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <TextBlock Text="API KEY SERVER (OPSIONAL)" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
+      <TextBox Name="ApiKeyBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
 
-      <TextBlock Text="KODE ENROLLMENT (OPSIONAL, DARI ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#93A1B8" Margin="0,16,0,6"/>
-      <TextBox Name="EnrollCodeBox" Height="36" Padding="8,4" Background="#0E1626" Foreground="#EEF3FB" BorderBrush="#223451" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
-      <TextBlock Text="Jika diisi, device ini akan didaftarkan otomatis dan mendapat API key sendiri (menggantikan API Key Server di atas)." FontSize="10" Foreground="#93A1B8" Margin="0,4,0,0" TextWrapping="Wrap"/>
+      <TextBlock Text="KODE ENROLLMENT (OPSIONAL, DARI ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
+      <TextBox Name="EnrollCodeBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <TextBlock Text="Jika diisi, device ini akan didaftarkan otomatis dan mendapat API key sendiri (menggantikan API Key Server di atas)." FontSize="10" Foreground="#8D939C" Margin="0,4,0,0" TextWrapping="Wrap"/>
 
-      <TextBlock Text="MODE PRIVASI" FontSize="10" FontWeight="SemiBold" Foreground="#93A1B8" Margin="0,16,0,6"/>
-      <ComboBox Name="PrivacyModeBox" Height="36" Padding="8,4" Background="#0E1626" Foreground="#EEF3FB" BorderBrush="#223451" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13">
+      <TextBlock Text="MODE PRIVASI" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
+      <ComboBox Name="PrivacyModeBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13">
         <ComboBoxItem Content="local_only" Tag="Tidak ada data yang meninggalkan device ini. Paling privat (default)."/>
         <ComboBoxItem Content="redacted_sync" Tag="Hanya jam terpakai per pengguna (tersamarkan) yang dikirim -- tanpa nama, ID, atau IP. Via GSheet sync."/>
         <ComboBoxItem Content="admin_full_sync" Tag="Data sesi lengkap dikirim ke server pusat. Pengguna harus diberi tahu."/>
       </ComboBox>
-      <TextBlock Name="PrivacyModeHint" FontSize="10" Foreground="#93A1B8" Margin="0,4,0,0" TextWrapping="Wrap"/>
+      <TextBlock Name="PrivacyModeHint" FontSize="10" Foreground="#8D939C" Margin="0,4,0,0" TextWrapping="Wrap"/>
     </StackPanel>
 
     <!-- Status Report Area -->
-    <Border Grid.Row="2" Background="#0E1626" BorderBrush="#223451" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,16">
+    <Border Grid.Row="2" Background="#1A1C20" BorderBrush="#2A2D33" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,16">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <TextBlock Name="StatusText" Text="Siap mengonfigurasi. Masukkan URL server dan klik 'Uji Koneksi' untuk memverifikasi." TextWrapping="Wrap" FontSize="12" Foreground="#93A1B8"/>
+        <TextBlock Name="StatusText" Text="Siap mengonfigurasi. Masukkan URL server dan klik 'Uji Koneksi' untuk memverifikasi." TextWrapping="Wrap" FontSize="12" Foreground="#8D939C"/>
       </ScrollViewer>
     </Border>
 
@@ -88,10 +88,10 @@ $xaml = @"
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
       
-      <Button Name="TestBtn" Grid.Column="0" Content="Uji Koneksi" Height="36" Width="120" HorizontalAlignment="Left" Background="#0E1626" Foreground="#EEF3FB" BorderBrush="#223451" BorderThickness="1" FontWeight="SemiBold" Cursor="Hand"/>
+      <Button Name="TestBtn" Grid.Column="0" Content="Uji Koneksi" Height="36" Width="120" HorizontalAlignment="Left" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" FontWeight="SemiBold" Cursor="Hand"/>
       
-      <Button Name="SaveBtn" Grid.Column="1" Content="Simpan &amp; Selesai" Height="36" Width="140" Margin="0,0,10,0" Background="#2563EB" Foreground="#ffffff" BorderBrush="Transparent" FontWeight="Bold" Cursor="Hand"/>
-      <Button Name="CancelBtn" Grid.Column="2" Content="Batal" Height="36" Width="80" Background="#223451" Foreground="#EEF3FB" BorderBrush="Transparent" FontWeight="SemiBold" Cursor="Hand"/>
+      <Button Name="SaveBtn" Grid.Column="1" Content="Simpan &amp; Selesai" Height="36" Width="140" Margin="0,0,10,0" Background="#C5F23A" Foreground="#111214" BorderBrush="Transparent" FontWeight="Bold" Cursor="Hand"/>
+      <Button Name="CancelBtn" Grid.Column="2" Content="Batal" Height="36" Width="80" Background="#2A2D33" Foreground="#EEF0F3" BorderBrush="Transparent" FontWeight="SemiBold" Cursor="Hand"/>
     </Grid>
   </Grid>
 </Window>

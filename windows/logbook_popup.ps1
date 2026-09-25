@@ -28,8 +28,6 @@ Write-LogbookInfo "Popup launch TestMode=$TestMode ForceNew=$ForceNew"
 
 try {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
-    Add-Type -AssemblyName System.Drawing
-    Add-Type -AssemblyName System.Windows.Forms
 } catch {
     Write-LogbookError "WPF load failed: $($_.Exception.Message)"
     throw
@@ -64,59 +62,8 @@ if ((Test-Path $Global:SessionFile) -and -not $TestMode) {
     }
 }
 
-function New-BlurredBackgroundImage {
-    try {
-        $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
-        $srcBmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
-        $srcGfx = [System.Drawing.Graphics]::FromImage($srcBmp)
-        $srcGfx.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $srcBmp.Size)
-        $srcGfx.Dispose()
-
-        # The XAML displays this through a Gaussian BlurEffect (Radius 24,
-        # Stretch="Fill") -- fine detail is invisible on screen regardless of
-        # source resolution, so encoding/decoding a multi-monitor virtual
-        # screen at full native size (both PNG compression below and the
-        # BitmapImage decode scale with pixel count) is pure waste on a path
-        # that runs synchronously on the UI thread every time the sign-in
-        # popup appears (login, unlock, wake, remote LOCK). Cap the encoded
-        # copy's width well past what the blur can make visible, and skip the
-        # resize entirely when the source is already at or under that (a
-        # single modest laptop display).
-        $maxWidth = 1600
-        if ($bounds.Width -gt $maxWidth) {
-            $scale = $maxWidth / [double]$bounds.Width
-            $destW = $maxWidth
-            $destH = [Math]::Max(1, [int]([Math]::Round($bounds.Height * $scale)))
-            $bmp = New-Object System.Drawing.Bitmap($destW, $destH)
-            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-            $gfx.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
-            $gfx.DrawImage($srcBmp, 0, 0, $destW, $destH)
-            $gfx.Dispose()
-            $srcBmp.Dispose()
-        } else {
-            $bmp = $srcBmp
-        }
-
-        $ms = New-Object System.IO.MemoryStream
-        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-        $bmp.Dispose()
-        $ms.Position = 0
-        $img = New-Object System.Windows.Media.Imaging.BitmapImage
-        $img.BeginInit()
-        $img.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-        $img.StreamSource = $ms
-        $img.EndInit()
-        $img.Freeze()
-        $ms.Dispose()
-        return $img
-    } catch {
-        Write-LogbookError "Screenshot blur background failed: $($_.Exception.Message)"
-        return $null
-    }
-}
-
-# "Card implosion" close: the backdrop (blurred desktop screenshot + scrim --
-# everything in the root Grid except MainCard) fades on its own, slightly
+# "Card implosion" close: the backdrop (the scrim -- everything in the root
+# Grid except MainCard) fades on its own, slightly
 # longer timeline as a soft lingering vignette, while MainCard (the actual
 # sign-in panel) gets the dramatic exit -- a quick confirm "pop", then an
 # accelerating shrink + twist + blur + fade into the exact SCREEN CENTER
@@ -149,11 +96,10 @@ function Invoke-LogbookFadeClose($win, [double]$DurationMs = 380) {
     $card = $null
     try { $card = $win.FindName('MainCard') } catch {}
 
-    # Backdrop: every direct child of the root Grid except the card (BgImage,
-    # the scrim Rectangle) -- found structurally rather than by name, so this
-    # works unchanged for both window layouts that share this Image+
-    # Rectangle+Border pattern (the main sign-in form and the returning-user
-    # welcome-back card) without hardcoding either one's exact child list.
+    # Backdrop: every direct child of the root Grid except the card (today,
+    # the Scrim rectangle in both the sign-in form and the welcome-back card)
+    # -- found structurally rather than by name, so a layout that adds another
+    # backdrop element fades with it without touching this function.
     try {
         if ($root -and $card) {
             foreach ($child in @($root.Children)) {
@@ -390,14 +336,9 @@ function Invoke-LogbookHandoffToTimer($win, [int]$MaxWaitMs = 1800) {
     $poll.Start()
 }
 
-# Cached across the fast path -> full form transition. Clicking "Bukan saya /
-# ganti data" used to rebuild the full form AND recapture a fresh fullscreen
-# blurred screenshot (New-BlurredBackgroundImage: CopyFromScreen + PNG
-# encode/decode, a few hundred ms of blocking work) -- the visible lag on that
-# button. The fast path already captured an identical desktop screenshot, so we
-# reuse the frozen bitmap (safe to share across windows once Frozen) and skip
-# the second capture, making the switch feel instant.
-$script:cachedBg = $null
+# Cached across the fast path -> full form transition, so "Bukan saya / ganti
+# data" does not decode the mascot a second time. (A desktop screenshot used
+# to be captured and cached here too; neither window takes one any more.)
 $script:cachedMascot = $null
 
 # Warm the whole START path NOW, while the form is still being built and the
@@ -499,8 +440,6 @@ if ((-not $ForceNew) -and (Test-Path $profileFile)) {
                 [void](Set-LogbookPopupMonitorPlacement -Window $fpWindow -Card $fpWindow.FindName('MainCard') -Panel $null -cfg $cfg)
             })
             $fpWindow.Topmost = $true
-            $fpBg = New-BlurredBackgroundImage
-            if ($fpBg) { $fpWindow.FindName('BgImage').Source = $fpBg; $script:cachedBg = $fpBg }
             $fpLogo = [string]$cfg.branding.logoPath
             if (Test-Path $fpLogo) {
                 try {
@@ -577,10 +516,7 @@ $window.Add_Loaded({
 $window.Topmost = $true
 $window.Activate() | Out-Null
 
-# Reuse the fast path's frozen screenshot when present (instant "ganti data"
-# switch); only capture a fresh one when arriving at the full form directly.
-$bg = if ($script:cachedBg) { $script:cachedBg } else { New-BlurredBackgroundImage }
-if ($bg -ne $null) { $window.FindName('BgImage').Source = $bg }
+
 # Mascot hero: load branding.logoPath (the mascot PNG the installer lays down
 # at C:\Program Files\Logix\logo.png) into MascotImage above the wordmark. The
 # LogoText wordmark stays visible beneath it, so a missing/broken image just

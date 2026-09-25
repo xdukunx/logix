@@ -7,20 +7,20 @@
     "title": "Report Logbook",
     "subtitle": "Computational Workstation",
     "colors": {
-      "primary": "#0E1626",
-      "accent": "#2563EB",
-      "muted": "#93A1B8",
-      "text": "#EEF3FB",
-      "surface": "#070C15",
-      "surfaceWidget": "#0B1017",
-      "surfaceElevated": "#0E1626",
-      "border": "#223451"
+      "primary": "#1A1C20",
+      "accent": "#C5F23A",
+      "muted": "#8D939C",
+      "text": "#EEF0F3",
+      "surface": "#0B0C0E",
+      "surfaceWidget": "#111214",
+      "surfaceElevated": "#1A1C20",
+      "border": "#2A2D33"
     },
     "signals": {
-      "normal": "#22C55E",
+      "normal": "#3CCF78",
       "notice": "#3B82F6",
-      "warning": "#F59E0B",
-      "critical": "#EF4444"
+      "warning": "#F5B82E",
+      "critical": "#FF5C61"
     }
   },
 

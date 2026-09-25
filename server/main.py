@@ -593,21 +593,25 @@ DEFAULT_CONFIG = {
         "logoPath": "C:\\Program Files\\Logix\\logo.png",
         "title": "Report Logbook",
         "subtitle": "Computational Workstation",
+        # v4 "Denyut": lime on an ink ramp, the client twin of
+        # frontend/src/tokens.css. No onAccent here on purpose -- the client
+        # derives it from the accent (Get-LogbookTheme), so a lab that
+        # rebrands only the accent still gets readable text on it.
         "colors": {
-            "primary": "#0E1626",
-            "accent": "#2563EB",
-            "muted": "#93A1B8",
-            "text": "#EEF3FB",
-            "surface": "#070C15",
-            "surfaceWidget": "#0B1017",
-            "surfaceElevated": "#0E1626",
-            "border": "#223451"
+            "primary": "#1A1C20",
+            "accent": "#C5F23A",
+            "muted": "#8D939C",
+            "text": "#EEF0F3",
+            "surface": "#0B0C0E",
+            "surfaceWidget": "#111214",
+            "surfaceElevated": "#1A1C20",
+            "border": "#2A2D33"
         },
         "signals": {
-            "normal": "#22C55E",
+            "normal": "#3CCF78",
             "notice": "#3B82F6",
-            "warning": "#F59E0B",
-            "critical": "#EF4444"
+            "warning": "#F5B82E",
+            "critical": "#FF5C61"
         }
     },
     "text": {
@@ -651,6 +655,37 @@ DEFAULT_CONFIG = {
         "retention_days": 365
     }
 }
+
+# The v3 palette exactly as DEFAULT_CONFIG shipped it. startup_event() writes
+# a full DEFAULT_CONFIG snapshot to server_config.json on first run, so every
+# existing lab has these colours saved explicitly and a new DEFAULT_CONFIG
+# alone would never reach it. migrate_v3_default_palette() swaps them for the
+# current defaults ONLY when a saved palette is still exactly this -- a lab
+# that picked its own colours is left alone.
+V3_DEFAULT_COLORS = {
+    "primary": "#0E1626", "accent": "#2563EB", "muted": "#93A1B8", "text": "#EEF3FB",
+    "surface": "#070C15", "surfaceWidget": "#0B1017", "surfaceElevated": "#0E1626", "border": "#223451",
+}
+V3_DEFAULT_SIGNALS = {"normal": "#22C55E", "notice": "#3B82F6", "warning": "#F59E0B", "critical": "#EF4444"}
+
+
+def migrate_v3_default_palette(config: Dict[str, Any]) -> bool:
+    """Replace an untouched v3 default palette with the current one, in place.
+    Returns whether anything changed. Colours compare case-insensitively."""
+    branding = config.get("branding") if isinstance(config, dict) else None
+    if not isinstance(branding, dict):
+        return False
+    def norm(d):
+        return {k: str(v).upper() for k, v in d.items()} if isinstance(d, dict) else None
+
+    changed = False
+    if norm(branding.get("colors")) == norm(V3_DEFAULT_COLORS):
+        branding["colors"] = dict(DEFAULT_CONFIG["branding"]["colors"])
+        changed = True
+    if norm(branding.get("signals")) == norm(V3_DEFAULT_SIGNALS):
+        branding["signals"] = dict(DEFAULT_CONFIG["branding"]["signals"])
+        changed = True
+    return changed
 
 
 def get_db():
@@ -1651,6 +1686,18 @@ def startup_event():
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CONFIG, f, indent=4)
+    else:
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if migrate_v3_default_palette(saved):
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(saved, f, indent=4)
+                logger.info("Updated the untouched v3 default palette in %s to the current one", CONFIG_PATH.name)
+        except Exception:
+            # A config this cannot read is served as-is (or as defaults) by
+            # GET /api/config; startup must not fail over a colour migration.
+            logger.warning("Palette migration skipped for %s", CONFIG_PATH, exc_info=True)
     logger.info("Logix server started (dev_mode=%s, db=%s)", LOGIX_DEV_MODE, DB_PATH.name)
 
 

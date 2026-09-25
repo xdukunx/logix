@@ -40,6 +40,17 @@ try {
     throw
 }
 
+# Software rendering for this process. The widget is a few small surfaces that
+# stay on screen for hours; a Direct3D device for them cost ~17 MB more memory
+# and slightly more CPU than the software rasterizer when measured, and weak
+# integrated GPUs on older lab machines gain nothing from it. Must be set
+# before the first window is created.
+try {
+    [System.Windows.Media.RenderOptions]::ProcessRenderMode = [System.Windows.Interop.RenderMode]::SoftwareOnly
+} catch {
+    Write-LogbookError "Timer: could not select software rendering: $($_.Exception.Message)"
+}
+
 # Win32 helpers: WS_EX_TOOLWINDOW keeps the widget out of Alt-Tab; the strip
 # additionally takes WS_EX_TRANSPARENT so it is click-through and never steals
 # a click from the application beneath it.
@@ -1323,7 +1334,33 @@ $timer.Add_Tick({
 
     Show-LogbookPendingMessage
     Test-LogbookIdleWarning
+
+    # Denyut: one beat of the status dot per heartbeat the server actually
+    # acknowledged, signalled by the monitor (Get-LogbookHeartbeatPulse). A
+    # zero-timeout check of an in-memory event: no file, no wait.
+    try { if ((Get-LogbookHeartbeatPulse).WaitOne(0)) { Invoke-LogbookDotBeat } } catch {}
 })
+
+# The dot swells and settles once, then is still again: never a loop at rest.
+# Visible dots only, and not at all under reduced motion.
+function Invoke-LogbookDotBeat {
+    if ($script:reduceMotion) { return }
+    $beat = New-Object System.Windows.Media.Animation.DoubleAnimation(1.9, 1.0, [TimeSpan]::FromMilliseconds(480))
+    $ease = New-Object System.Windows.Media.Animation.CubicEase
+    $ease.EasingMode = 'EaseOut'
+    $beat.EasingFunction = $ease
+    foreach ($dot in @($pillDot, $cardDot, $sliverDot)) {
+        if (-not $dot.IsVisible) { continue }
+        $scale = $dot.RenderTransform -as [System.Windows.Media.ScaleTransform]
+        if (-not $scale -or $scale.IsFrozen) {
+            $scale = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+            $dot.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 0.5)
+            $dot.RenderTransform = $scale
+        }
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $beat)
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $beat)
+    }
+}
 
 # The monitor owns the actual idle auto-close (logbook_monitor.ps1); this only
 # owns the 5-minute warning the design promises the user, so the two can never
