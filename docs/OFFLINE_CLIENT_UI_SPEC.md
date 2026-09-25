@@ -1,8 +1,22 @@
 # Logix UI specification — local workstation console
 
-Final design specification. **Not implemented.** Research and rationale live
-in [OFFLINE_CLIENT_VISUAL_DIRECTION.md](OFFLINE_CLIENT_VISUAL_DIRECTION.md);
+Final design specification, written before the page was built. The page it
+describes is [`logix/report_server.py`](../logix/report_server.py) (Start
+menu → **Laporan Logix**); where the two differ, the code is what ships.
+Research and rationale live in
+[OFFLINE_CLIENT_VISUAL_DIRECTION.md](OFFLINE_CLIENT_VISUAL_DIRECTION.md);
 this document is the decisions.
+
+> **The telemetry panel has been removed (September 2026).** §10 and §11,
+> and every mention of the health panel, CPU, memory, GPU or storage below,
+> describe a panel that shipped and was then taken out at the lab admin's
+> request: the client should not carry a hardware usage tracker, because
+> Logix is a logbook and every lab PC was paying for a sensor poll nobody
+> needed. The route (`/api/telemetry`), the module that read the sensors
+> (`logix/workstation.py`) and its optional `psutil` dependency went with
+> it. Those sections are kept as design history, marked where they appear,
+> rather than deleted. The shipped Overview is: workstation context →
+> current usage → recent.
 
 Every value here is implementable with stdlib `http.server`, one HTML file,
 plain CSS and vanilla JS. No framework, no build step, no CDN, no webfont,
@@ -18,7 +32,8 @@ logbook**. It answers, in order:
 1. Which workstation is this?
 2. Is it in use, and by whom?
 3. What are they doing, and under what job?
-4. Is the machine healthy?
+4. ~~Is the machine healthy?~~ *(dropped with the telemetry panel — see the
+   note above)*
 5. What happened recently, and where is the full history?
 6. Is any of this leaving the device?
 
@@ -32,9 +47,10 @@ not hold, it is replaced by typography and spacing, not filled with a
 plausible number. This is why there are no sparklines, no trend arrows, no
 period deltas and no gauges-with-targets anywhere in this spec.
 
-**Absence is a designed state.** Unavailable telemetry, an idle
-workstation, an empty log and a device that never syncs are all normal, and
-each has a deliberate appearance rather than a gap where something failed.
+**Absence is a designed state.** An idle workstation, an empty log and a
+device that never syncs are all normal, and each has a deliberate
+appearance rather than a gap where something failed. (Unavailable
+telemetry was on this list while the panel existed.)
 
 ## 2. Theme
 
@@ -139,7 +155,7 @@ premise is that it works with the network gone.
 | `--text-md` | 13px 400 | body, table cells, controls |
 | `--text-lg` | 15px 600 | panel titles, person name |
 | `--text-xl` | 20px 600 | session purpose |
-| `--display` | 26px 640, `-0.02em` | workstation name, telemetry values |
+| `--display` | 26px 640, `-0.02em` | workstation name (and telemetry values, before §10 was removed) |
 | `--clock` | 34px 600 mono | elapsed time |
 
 **Mono is a role, not a theme.** It applies to elapsed time, timestamps,
@@ -184,13 +200,13 @@ When an object gets what:
 | Treatment | Applies to |
 |---|---|
 | No border, no fill | section headings, the recent-logs list, page structure |
-| Hairline border on `--surface` | telemetry panel, table, server card |
+| Hairline border on `--surface` | table, server card (and the telemetry panel, removed — §10) |
 | `--surface-accent` + 2px accent left edge | the current-usage panel, and nothing else |
 | Filled `--accent` | one primary button per page, at most |
 
 Not every group is a card. The recent-logs list is rows on the page ground
-with separators — boxing it would make it a peer of the health panel, which
-it is not.
+with separators — boxing it would make it a peer of the current-usage
+panel, which it is not.
 
 ## 8. Navigation
 
@@ -240,7 +256,17 @@ Persistent across every view, in the page header:
 - Sync status sits at the opposite end of the same baseline, so "which
   machine" and "is anything leaving it" are read together.
 
-## 10. Telemetry
+## 10. Telemetry — removed
+
+> **Removed in September 2026; kept here as design history.** The panel
+> below shipped (it grew per-core blocks, a GPU dial, sparklines from an
+> in-memory ring buffer and GPU temperature/power/clock along the way) and
+> was then taken out at the lab admin's request: a hardware usage tracker in
+> the style of MSI Center is not something the client needs. It was also
+> the only part of the page with a running cost — while open, a 100 ms CPU
+> sample on every 2.5 s poll and an `nvidia-smi` spawn every 15 s — and the
+> only reason to install `psutil`. Nothing replaces it; the Overview goes
+> straight from workstation context to current usage.
 
 **One health panel, not four cards.** References 01 and 05 arrived at this
 independently. Four bordered boxes imply four unrelated subjects; these are
@@ -271,6 +297,9 @@ No trends. No arrows. No targets. No history. The "refreshed Ns ago" line
 is the only temporal claim the panel makes, and it is true.
 
 ## 11. Proportion rule
+
+*The readings this rule was written for left with §10. The rule itself —
+no dial that implies a target — still stands for anything added later.*
 
 **Allowed**, because these are real fractions of a known whole: CPU
 utilization, memory used of total, storage used of total, GPU utilization,
@@ -350,9 +379,10 @@ unless there is a real action.
 |---|---|---|
 | No active session | `No active usage` | `This workstation is currently idle.` |
 | No logs at all | `No sessions recorded` | `No sessions have been recorded on this workstation yet.` |
+| Nothing today (Overview → Recent, which lists today only) | `No sessions today` | `Nothing has been recorded on this workstation today.` |
 | No logs in range | `No sessions in this period` | `Try a wider date range.` |
 | No search results | `No matching sessions` | `No session matches this filter.` |
-| No GPU | `Unavailable` | `No supported GPU was detected.` (inline, in the panel) |
+| ~~No GPU~~ | ~~`Unavailable`~~ | ~~`No supported GPU was detected.`~~ (went with the panel, §10) |
 | No server | `Not connected` | `This workstation is not paired with a central server.` |
 
 ## 15. Error states
@@ -366,11 +396,14 @@ fact.
     3 changes stored safely on this workstation.     [ Retry ]
 ```
 
-- Telemetry failure: that metric alone reads `Unavailable`. The panel and
-  page are unaffected.
+- ~~Telemetry failure: that metric alone reads `Unavailable`. The panel and
+  page are unaffected.~~ (No telemetry any more — §10.)
 - Server unavailable / sync error: one line on the Server page and one word
   in the header status. Never a modal, never a banner, never a toast.
 - Export failure: an inline note under the Export button, with the reason.
+- Page closed by its idle shutdown: the header status reads
+  `Closed — reopen Laporan Logix`, in the neutral tone, since logging carries
+  on regardless. The tab cannot reconnect: a reopened page has a new token.
 - Malformed local status: the affected panel shows its empty state; the
   rest of the page renders.
 
@@ -388,11 +421,10 @@ local data is at risk, because it never is.
 Motion is used for: view transitions, the side sheet sliding in, selection
 changes, hover and focus. Nothing else.
 
-Explicitly not animated: telemetry bars (they would appear to be tracking
-something), the clock, panels on data refresh, and anything on a timer.
-Telemetry updates in place with no transition and no layout shift — the
-clock and all numerals are tabular precisely so a changing digit moves
-nothing.
+Explicitly not animated: the clock, panels on data refresh, and anything on
+a timer (and, while they existed, the telemetry bars — §10). Refreshed
+values update in place with no transition and no layout shift — the clock
+and all numerals are tabular precisely so a changing digit moves nothing.
 
 ```css
 @media (prefers-reduced-motion: reduce) {
@@ -551,6 +583,9 @@ no accent panel.
 
 ## 23. Overview composition
 
+*As designed. The `WORKSTATION HEALTH` band in this diagram was removed with
+§10; the shipped page goes from the header rule straight to current usage.*
+
 ### Desktop (≥1100px)
 
 ```
@@ -586,19 +621,19 @@ no accent panel.
 └────────────┴──────────────────────────────────────────────────────────┘
 ```
 
-**A note on order.** The health band sits above current usage, matching the
-requested composition, but current usage is the only accented object on the
-page — so the eye lands there first regardless of DOM order, matching the
-product hierarchy where "is it in use / who / what / job" precede machine
-health. Order and emphasis are set independently, on purpose.
+**A note on order** *(historical)*. The health band sat above current usage,
+matching the requested composition, but current usage was the only accented
+object on the page — so the eye landed there first regardless of DOM order,
+matching the product hierarchy where "is it in use / who / what / job"
+precede machine health. With the band gone, order and emphasis now agree.
 
 ### Narrow (<900px)
 
 Sidebar becomes a horizontal strip of text links across the top; the
-pinned workstation chip merges into the header block. Health drops to two
-columns, then one below 560px. Current usage keeps its accent edge and
-stacks the clock beneath the purpose. Recent keeps start / name / duration
-and drops purpose below 560px. Nothing disappears entirely.
+pinned workstation chip merges into the header block. (Health dropped to two
+columns, then one below 560px, while it existed.) Current usage keeps its
+accent edge and stacks the clock beneath the purpose. Recent keeps start /
+name / duration and drops purpose below 560px. Nothing disappears entirely.
 
 ## 24. Logs composition
 
@@ -634,9 +669,9 @@ actions. No second column, no telemetry, no chart.
 |---|---|
 | ≥1400px | Content max-width 1180px, centred. Layout does not keep growing. |
 | 1100–1400 | Full layout as specified. |
-| 900–1100 | Health to 2×2. Current usage stacks clock under purpose. |
+| 900–1100 | Current usage stacks clock under purpose. (Health went 2×2 here, before §10 was removed.) |
 | 560–900 | Sidebar → top strip. Table drops NIM and Job. Toolbar wraps. |
-| <560px | Health single column. Recent shows start / name / duration. |
+| <560px | Recent shows start / name / duration. (Health went single column, before §10 was removed.) |
 
 Never: a horizontally scrolling page. Wide content scrolls inside its own
 container.
@@ -651,10 +686,11 @@ container.
   element including table rows. Never removed.
 - Tab order follows visual order. The side sheet traps focus while open and
   restores it to the originating row on close.
-- Table uses real `<table>` semantics with `<th scope="col">`; the health
-  panel is a `<dl>`; nav is `<nav>` with `aria-current="page"`.
-- Live-updating values (clock, telemetry) are **not** in an aria-live
-  region — announcing a clock every second is hostile. Status changes are.
+- Table uses real `<table>` semantics with `<th scope="col">`; nav is
+  `<nav>` with `aria-current="page"`. (The health panel was to be a `<dl>`;
+  it has since been removed — §10.)
+- Live-updating values (the clock) are **not** in an aria-live region —
+  announcing a clock every second is hostile. Status changes are.
 - Disabled controls: `--text-faint`, `cursor:default`, `aria-disabled`.
   Actions that cannot apply are hidden rather than disabled (§22).
 - Reduced motion honoured (§16).
@@ -671,8 +707,8 @@ be ceremony.
 | `NavList` | — | four items, selection state |
 | `WorkstationContext` | 2 | header block and pinned chip |
 | `StatusIndicator` | many | dot + words, one per state |
-| `HealthPanel` | — | container |
-| `HealthMetric` | 4 | label / value / secondary / bar |
+| ~~`HealthPanel`~~ | — | removed with §10 |
+| ~~`HealthMetric`~~ | — | removed with §10 |
 | `CurrentUsagePanel` | — | the accented object |
 | `SessionRow` | many | recent list and log table share a shape |
 | `LogTable` | — | + `LogToolbar` (search, range, filters, export) |
@@ -687,6 +723,8 @@ be ceremony.
 Not to be added, at any point, for any reason:
 
 - Fake historical telemetry, sparklines, trend arrows, period deltas
+- A hardware usage tracker (CPU / memory / GPU / storage) of any kind —
+  shipped once, removed at the lab admin's request (§10)
 - Gauges implying a target, score, grade or efficiency
 - Productivity metrics, rankings, streaks, gamification
 - AI panels, generated summaries, "insights", recommendations

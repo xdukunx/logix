@@ -140,12 +140,14 @@ Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ig
 ; report_server.py drives logbook_report.py for both the table and the export.
 Source: "{#SrcRoot}\logix\logbook_report.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
 Source: "{#SrcRoot}\logix\report_server.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
-; Workstation telemetry (CPU/memory/GPU/storage) for the dashboard's health
-; panel. Optional in behaviour -- report_server.py imports it in a try/except
-; and the panel renders "Unavailable" without it -- but not shipping the file
-; at all means the panel is ALWAYS unavailable on a fresh install, which is a
-; deployment gap, not the graceful degradation the module is designed for.
-Source: "{#SrcRoot}\logix\workstation.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
+
+[InstallDelete]
+; Retired core files, removed when an older install is upgraded in place.
+; workstation.py fed the report page's CPU/memory/GPU/storage panel, removed
+; at the lab admin's request. Nothing imports it any more, so a leftover copy
+; is inert; this just keeps it and its cached bytecode off lab PCs.
+Type: files; Name: "{commonappdata}\Logix\workstation.py"
+Type: files; Name: "{commonappdata}\Logix\__pycache__\workstation.*.pyc"
 
 [Tasks]
 ; Shown ONLY when YasbConfigDetected finds an existing YASB config on this

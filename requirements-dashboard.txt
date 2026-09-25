@@ -1,13 +1,13 @@
-# Optional dependencies -- ONLY needed for the local dashboard's telemetry
-# cards and its XLSX export. The core (capture, session lifecycle, logbook,
-# sync, reporting) needs none of these and must never be made to.
+# Optional dependency -- ONLY needed to write .xlsx reports: the Export button
+# on the local report page (Start menu -> Laporan Logix, served by
+# logix/report_server.py) and the logbook_report.py command line. Capture,
+# the session lifecycle, the logbook and sync need none of this and must never
+# be made to.
 #
 #   pip install -r requirements-dashboard.txt
 #
-# Without psutil the dashboard shows "Unavailable" for CPU and memory.
-# Storage does not need it (shutil.disk_usage is stdlib) and GPU does not
-# either (nvidia-smi, spawned on demand and cached).
+# Without openpyxl the report page's Export falls back to CSV.
 #
-# Without openpyxl the Export XLSX action is offered as CSV instead.
-psutil>=5.9
+# psutil is no longer needed: it only fed the report page's CPU/memory/GPU/
+# storage panel, which was removed at the lab admin's request.
 openpyxl>=3.1

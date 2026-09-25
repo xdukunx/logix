@@ -6,9 +6,9 @@ the page could have come from anywhere other than this device's own
 database.
 
 The rule the whole dashboard is built on is that nothing is invented. An
-absent GPU, an absent job id and an absent session each have to be reported
-as absent, rather than as a zero, an empty card, or a plausible-looking
-placeholder that nobody looking at the screen could tell from a real one.
+absent job id and an absent session each have to be reported as absent,
+rather than as an empty card or a plausible-looking placeholder that nobody
+looking at the screen could tell from a real one.
 """
 from __future__ import annotations
 
@@ -191,29 +191,69 @@ def test_idle_workstation_reports_no_active_session(monkeypatch, tmp_path):
         httpd.server_close()
 
 
-# ---- telemetry ----------------------------------------------------------
+# ---- no hardware telemetry ----------------------------------------------
+#
+# The CPU/memory/GPU/storage panel was removed at the lab admin's request:
+# the client is a logbook, not a hardware monitor. These pin that down so it
+# does not drift back in, and so an install upgraded in place -- which can
+# still have the old workstation.py on disk -- never runs it.
 
-def test_telemetry_endpoint_has_every_key(dash):
+def test_telemetry_route_is_gone(dash):
     base, token, _ = dash
-    d = _get(base, token, "/api/telemetry")
-    for k in ("cpu", "memory", "storage", "gpu"):
-        assert k in d
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _get(base, token, "/api/telemetry")
+    assert e.value.code == 404
 
 
-def test_telemetry_is_separate_from_history(dash):
-    """The cards refresh every few seconds. If that endpoint also ran the
-    session queries, the refresh rate would become a database load."""
+def test_overview_carries_no_hardware_readings(dash):
     base, token, _ = dash
-    d = _get(base, token, "/api/telemetry")
-    assert "sessions" not in d and "recent" not in d
+    d = _get(base, token, "/api/overview")
+    assert "telemetry" not in d
+    assert set(d) == {"workstation", "active", "recent", "sync"}
 
 
-def test_storage_needs_no_optional_dependency(dash):
-    """shutil.disk_usage is stdlib, so the metric answering "can this machine
-    still record" is never Unavailable for want of an install."""
+def test_page_does_not_ask_for_telemetry(dash):
+    """A page still polling the removed route would 404 every few seconds,
+    and each of those requests would also keep the idle shutdown from ever
+    firing."""
     base, token, _ = dash
-    st = _get(base, token, "/api/telemetry")["storage"]
-    assert st is not None and st["total_bytes"] > 0
+    with urllib.request.urlopen(base + "/?t=" + token, timeout=15) as r:
+        page = r.read().decode("utf-8")
+    assert "/api/telemetry" not in page
+    assert "Workstation health" not in page
+
+
+def test_a_leftover_workstation_module_is_never_imported(dash, tmp_path, monkeypatch):
+    """An existing install keeps the old workstation.py beside report_server.py
+    until something deletes it. It must be inert there: importing it would
+    bring back the process spawns and CPU sampling the removal was for.
+
+    The stand-in records that it ran rather than raising, because the old
+    code swallowed import errors -- a raising module would pass this test
+    even against the code it is meant to catch."""
+    stale = tmp_path / "stale_install"
+    stale.mkdir()
+    flag = stale / "imported.flag"
+    (stale / "workstation.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(flag)!r}).write_text('imported')\n"
+        "def snapshot(*a, **k):\n"
+        "    return {}\n"
+        "def history():\n"
+        "    return []\n",
+        encoding="utf-8")
+    monkeypatch.syspath_prepend(str(stale))
+    monkeypatch.delitem(sys.modules, "workstation", raising=False)
+
+    base, token, _ = dash
+    with urllib.request.urlopen(base + "/?t=" + token, timeout=15) as r:
+        r.read()
+    _get(base, token, "/api/overview")
+    _get(base, token, "/api/logs?range=all")
+    _get(base, token, "/api/server")
+
+    assert not flag.exists(), "report_server imported the retired workstation module"
+    assert "workstation" not in sys.modules
 
 
 # ---- sync state ---------------------------------------------------------
@@ -268,6 +308,42 @@ def test_exported_file_downloads(dash):
     assert len(body) > 0
     if d["format"] == "xlsx":
         assert body[:2] == b"PK", "a real xlsx is a zip container"
+
+
+def test_export_respects_the_sync_filter(dash):
+    """The Logs table filters by sync state, so its Export must too: the
+    fixture has one finished session and one still running."""
+    openpyxl = pytest.importorskip("openpyxl")
+    base, token, _ = dash
+    active = _get(base, token, "/api/export?range=all&sync=active")
+    everything = _get(base, token, "/api/export?range=all")
+    assert active["ok"] and everything["ok"], (active, everything)
+
+    rep = _mod("logbook_report")
+
+    def names(export):
+        ws = openpyxl.load_workbook(rep.DEFAULT_OUTDIR / export["name"])["Report Logbook"]
+        return {c.value for row in ws.iter_rows() for c in row} & {"Rani", "Alya"}
+
+    assert names(active) == {"Alya"}
+    assert names(everything) == {"Rani", "Alya"}
+
+
+def test_csv_fallback_downloads_as_csv(dash, monkeypatch):
+    """Without openpyxl the export is a CSV, and it must not be served under
+    the xlsx media type."""
+    base, token, _ = dash
+
+    def no_openpyxl(**_kw):
+        raise SystemExit("openpyxl missing")
+
+    monkeypatch.setattr(sys.modules["report_server"].report, "build", no_openpyxl)
+    d = _get(base, token, "/api/export?range=all")
+    assert d["ok"] and d["format"] == "csv", d
+    with urllib.request.urlopen(base + "/download?t=" + token + "&f=" + d["name"],
+                                timeout=20) as r:
+        assert r.headers["Content-Type"].startswith("text/csv")
+        assert b"Rani" in r.read()
 
 
 def test_download_refuses_a_path_it_did_not_create(dash):

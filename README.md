@@ -218,9 +218,10 @@ capture methods above are platform-specific.
 Every device has its own console — Start menu → **Laporan Logix**. A local
 web page, no account, no network, served by Python's standard library on
 `127.0.0.1` only. Three pages: **Overview** (what is happening right now:
-who is signed in, live CPU/memory/GPU/storage), **Logs** (searchable local
+who is signed in, and today's recent sessions), **Logs** (searchable local
 history + export), **Server** (sync state, only relevant once connected).
-Nothing the machine cannot report is ever shown as a fake zero. Details:
+It is a logbook, not a hardware monitor — there is no CPU/memory/GPU usage
+tracker on the client. Details:
 [docs/LAB_SETUP.md](docs/LAB_SETUP.md#the-local-dashboard-in-more-detail).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
