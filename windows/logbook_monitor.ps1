@@ -186,8 +186,10 @@ while ($true) {
         if (Test-Path $Global:SessionFile) {
             Send-LogbookHeartbeat -Status 'ACTIVE'
             # Keep timer alive if session is active; do not open new popup from heartbeat.
-            $timers = Get-ProcessByCommandPattern 'logbook_timer\.ps1'
-            if (($timers | Measure-Object).Count -eq 0) {
+            # PID-based check (Test-LogbookTimerRunning), not a WMI query -- this
+            # runs every heartbeat tick for the whole session, and WMI here was
+            # measured at 116-204ms per call (see Get-ProcessByCommandPattern).
+            if (-not (Test-LogbookTimerRunning)) {
                 $s = Get-ActiveLogbookSession
                 if ($s -and $s.session_id) { Start-LogbookTimer -SessionId $s.session_id | Out-Null }
             }

@@ -135,8 +135,22 @@ REPORTS_DIR = BASE_DIR / "reports"
 ACTIVE_TOKENS: Dict[str, Dict[str, Any]] = {}
 
 # Command queue for clients
-# Format: { hostname: [ { "command": str, "param": str } ] }
+# Format: { hostname: [ { "command": str, "param": str, "delivered_at": ... } ] }
 PENDING_COMMANDS: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def _pc_key(hostname: Optional[str]) -> str:
+    """Canonical PENDING_COMMANDS dict key for a hostname.
+
+    Unlike every DB hostname lookup in this file (which uses COLLATE
+    NOCASE), a plain dict is exact-match -- an admin action queuing a
+    command under one case and the device's own heartbeat (its literal
+    $env:COMPUTERNAME) reading under another would otherwise queue a
+    command that dict key can never be read back under, and it would just
+    sit until COMMAND_TTL_MINUTES silently expired it with nothing to point
+    at the real cause. Every PENDING_COMMANDS read and write goes through
+    this so that can't happen."""
+    return (hostname or "").strip().upper()
 
 # In-memory heartbeats storage
 # Format: { hostname: { "status": str, "username": str, "anydesk_id": str, "last_seen": datetime } }
@@ -235,7 +249,7 @@ class DeviceDeleted(Exception):
         self.hostname = hostname
 
 
-# Logix Control: persisted device registry. See docs/LOGIX_CONTROL.md §5.
+# Logix Control: persisted device registry. See docs/LOGIX_CONTROL.md Â§5.
 # device_id is still assigned as a stopgap on first-seen hostname via
 # upsert_device() for devices that never go through /api/enroll (e.g. an
 # existing deployment that hasn't adopted invite-code enrollment yet) --
@@ -305,7 +319,7 @@ ENROLLMENT_INVITE_COLUMNS = {
 
 INVITE_TTL_MINUTES = 15
 
-# category -> agent profile defaults, per API_CONTRACT.md §4. A module-level
+# category -> agent profile defaults, per API_CONTRACT.md Â§4. A module-level
 # constant for now; the contract describes this as eventually server-side
 # config rather than code, matching how device_policies shipped seeded-but-
 # not-yet-editable.
@@ -343,7 +357,7 @@ def compute_sync_status(category: Optional[str], last_seen, now: Optional[dateti
 
 
 # Policy profiles: named bundles a device can be assigned to. Seeded with the
-# 7 profiles from docs/LOGIX_CONTROL.md §5. allowed_capabilities is now
+# 7 profiles from docs/LOGIX_CONTROL.md Â§5. allowed_capabilities is now
 # real: enforce_command_policy() reads the command_allowlist rows seeded from
 # POLICY_COMMAND_RULES below before any control command is queued.
 POLICY_COLUMNS = {
@@ -399,7 +413,7 @@ POLICY_COMMAND_RULES = {
 # feature. status progresses 'queued' -> 'done'/'failed' (agent-acked on a
 # later heartbeat, see HeartbeatPayload.acks) or -> 'expired' (TTL elapsed
 # before delivery, see COMMAND_TTL_MINUTES). A 'queued' row must still never
-# be read as 'done' -- see docs/LOGIX_CONTROL.md §6.
+# be read as 'done' -- see docs/LOGIX_CONTROL.md Â§6.
 REMOTE_ACTION_COLUMNS = {
     "action_id": "INTEGER PRIMARY KEY AUTOINCREMENT",
     "actor_email": "TEXT NOT NULL",
@@ -437,12 +451,27 @@ REMOTE_ACTION_COLUMNS = {
 # heartbeats again (see that function's docstring).
 COMMAND_TTL_MINUTES = 5
 
+# post_heartbeat used to clear a device's whole PENDING_COMMANDS queue the
+# instant it was read, regardless of whether the HTTP response carrying it
+# actually reached the agent -- a dropped connection or the agent's own 3s
+# client-side timeout (Send-LogbookHeartbeat in windows/logbook_common.ps1)
+# silently took the command down with it, with nothing on either side aware
+# a delivery was missed. A command now stays queued and is resent on a later
+# heartbeat if this many seconds pass with no ack -- a few heartbeat
+# intervals at the default 5s cadence, so a single dropped response is
+# absorbed within one retry rather than waiting out the full TTL. Still
+# capped by COMMAND_TTL_MINUTES via reconcile_expired_actions, and a
+# command_id that never gets acked twice is harmless: LOCK/SCREENSHOT are
+# idempotent, BROADCAST just re-shows the same message, and SHUTDOWN/RESTART
+# just reschedule the same timer.
+COMMAND_REDELIVERY_SECONDS = 20
+
 # Only these action types are ever queued/delivered to a device and can
 # genuinely fail due to connectivity -- safe to retry. RENAME and
 # REVOKE_API_KEY are synchronous server-side edits (never queued, always
 # logged 'done' immediately), and REVOKE_API_KEY is explicitly
 # security-sensitive -- neither is offered a Retry action, automatic or
-# manual, per roadmap item J §C.
+# manual, per roadmap item J Â§C.
 RETRYABLE_ACTION_TYPES = {"LOCK", "BROADCAST", "SCREENSHOT", "SHUTDOWN", "RESTART", "LOGOFF"}
 DEFAULT_MAX_RETRIES = 1
 
@@ -536,7 +565,7 @@ class HeartbeatPayload(BaseModel):
     # ("done"|"failed"), detail}.
     acks: Optional[List[Dict[str, Any]]] = None
     # Session context for the Monitoring station card (v3 design D-03): the
-    # card's second line is "{user} · {access type} · {duration}", which needs
+    # card's second line is "{user} Â· {access type} Â· {duration}", which needs
     # a start time and an access type the server did not previously receive.
     # All optional -- an older agent build simply omits them and the card
     # degrades to the username alone.
@@ -564,21 +593,25 @@ DEFAULT_CONFIG = {
         "logoPath": "C:\\Program Files\\Logix\\logo.png",
         "title": "Report Logbook",
         "subtitle": "Computational Workstation",
+        # v4 "Denyut": lime on an ink ramp, the client twin of
+        # frontend/src/tokens.css. No onAccent here on purpose -- the client
+        # derives it from the accent (Get-LogbookTheme), so a lab that
+        # rebrands only the accent still gets readable text on it.
         "colors": {
-            "primary": "#0E1626",
-            "accent": "#2563EB",
-            "muted": "#93A1B8",
-            "text": "#EEF3FB",
-            "surface": "#070C15",
-            "surfaceWidget": "#0B1017",
-            "surfaceElevated": "#0E1626",
-            "border": "#223451"
+            "primary": "#1A1C20",
+            "accent": "#C5F23A",
+            "muted": "#8D939C",
+            "text": "#EEF0F3",
+            "surface": "#0B0C0E",
+            "surfaceWidget": "#111214",
+            "surfaceElevated": "#1A1C20",
+            "border": "#2A2D33"
         },
         "signals": {
-            "normal": "#22C55E",
+            "normal": "#3CCF78",
             "notice": "#3B82F6",
-            "warning": "#F59E0B",
-            "critical": "#EF4444"
+            "warning": "#F5B82E",
+            "critical": "#FF5C61"
         }
     },
     "text": {
@@ -622,6 +655,37 @@ DEFAULT_CONFIG = {
         "retention_days": 365
     }
 }
+
+# The v3 palette exactly as DEFAULT_CONFIG shipped it. startup_event() writes
+# a full DEFAULT_CONFIG snapshot to server_config.json on first run, so every
+# existing lab has these colours saved explicitly and a new DEFAULT_CONFIG
+# alone would never reach it. migrate_v3_default_palette() swaps them for the
+# current defaults ONLY when a saved palette is still exactly this -- a lab
+# that picked its own colours is left alone.
+V3_DEFAULT_COLORS = {
+    "primary": "#0E1626", "accent": "#2563EB", "muted": "#93A1B8", "text": "#EEF3FB",
+    "surface": "#070C15", "surfaceWidget": "#0B1017", "surfaceElevated": "#0E1626", "border": "#223451",
+}
+V3_DEFAULT_SIGNALS = {"normal": "#22C55E", "notice": "#3B82F6", "warning": "#F59E0B", "critical": "#EF4444"}
+
+
+def migrate_v3_default_palette(config: Dict[str, Any]) -> bool:
+    """Replace an untouched v3 default palette with the current one, in place.
+    Returns whether anything changed. Colours compare case-insensitively."""
+    branding = config.get("branding") if isinstance(config, dict) else None
+    if not isinstance(branding, dict):
+        return False
+    def norm(d):
+        return {k: str(v).upper() for k, v in d.items()} if isinstance(d, dict) else None
+
+    changed = False
+    if norm(branding.get("colors")) == norm(V3_DEFAULT_COLORS):
+        branding["colors"] = dict(DEFAULT_CONFIG["branding"]["colors"])
+        changed = True
+    if norm(branding.get("signals")) == norm(V3_DEFAULT_SIGNALS):
+        branding["signals"] = dict(DEFAULT_CONFIG["branding"]["signals"])
+        changed = True
+    return changed
 
 
 def get_db():
@@ -1054,10 +1118,11 @@ def rehydrate_pending_commands() -> None:
     finally:
         conn.close()
     for row in rows:
-        existing_ids = {c.get("command_id") for c in PENDING_COMMANDS.get(row["target_device"], [])}
+        key = _pc_key(row["target_device"])
+        existing_ids = {c.get("command_id") for c in PENDING_COMMANDS.get(key, [])}
         if row["command_id"] in existing_ids:
             continue
-        PENDING_COMMANDS.setdefault(row["target_device"], []).append({
+        PENDING_COMMANDS.setdefault(key, []).append({
             "command_id": row["command_id"],
             "command": row["action_type"],
             "param": row["param"] or "",
@@ -1358,7 +1423,7 @@ def reconcile_alerts(conn) -> None:
     conn.commit()
 
 
-# --- RBAC (Logix Control Milestone 3, docs/LOGIX_CONTROL.md §4) -----------
+# --- RBAC (Logix Control Milestone 3, docs/LOGIX_CONTROL.md Â§4) -----------
 # Permissions-only: which role can call which endpoint. Deliberately does
 # NOT restrict by faculty/lab/room scope -- no backing entity for "their
 # faculty" exists yet, and inventing one here would be unscoped work.
@@ -1621,6 +1686,18 @@ def startup_event():
     if not CONFIG_PATH.exists():
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(DEFAULT_CONFIG, f, indent=4)
+    else:
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if migrate_v3_default_palette(saved):
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(saved, f, indent=4)
+                logger.info("Updated the untouched v3 default palette in %s to the current one", CONFIG_PATH.name)
+        except Exception:
+            # A config this cannot read is served as-is (or as defaults) by
+            # GET /api/config; startup must not fail over a colour migration.
+            logger.warning("Palette migration skipped for %s", CONFIG_PATH, exc_info=True)
     logger.info("Logix server started (dev_mode=%s, db=%s)", LOGIX_DEV_MODE, DB_PATH.name)
 
 
@@ -1806,7 +1883,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
         # a registry that will not have it. 403 (not 401) so the agent's own
         # logs distinguish "my key is wrong" from "I was removed".
         HEARTBEATS.pop(payload.hostname, None)
-        PENDING_COMMANDS.pop(payload.hostname, None)
+        PENDING_COMMANDS.pop(_pc_key(payload.hostname), None)
         logger.info("heartbeat: rejected deleted device %s", payload.hostname)
         raise HTTPException(
             status_code=403,
@@ -1817,7 +1894,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
 
     now = datetime.now()
     status = payload.status.upper()
-    # "Dikunci admin · 14:02" needs the moment the status last CHANGED, not the
+    # "Dikunci admin Â· 14:02" needs the moment the status last CHANGED, not the
     # last heartbeat -- carry the previous timestamp forward while it holds.
     previous = HEARTBEATS.get(payload.hostname)
     status_since = (
@@ -1851,6 +1928,22 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
         except Exception:
             logger.warning("heartbeat: apply_command_acks failed for %s", payload.hostname, exc_info=True)
 
+        # Drop whatever this heartbeat just acked from this device's own
+        # redelivery queue (see COMMAND_REDELIVERY_SECONDS below) so an
+        # already-acked command is never resent. Scoped to this hostname
+        # only -- an ALL broadcast shares one command_id across many
+        # devices' queues, and this device acking it must not cancel
+        # delivery to the others still waiting on their copy.
+        acked_ids = {
+            a.get("command_id") for a in payload.acks
+            if a.get("command_id") and a.get("status") in ("done", "failed")
+        }
+        if acked_ids:
+            pc_key = _pc_key(payload.hostname)
+            queue = PENDING_COMMANDS.get(pc_key)
+            if queue:
+                PENDING_COMMANDS[pc_key] = [c for c in queue if c.get("command_id") not in acked_ids]
+
     # Housekeeping: expire anything (this device's queue or any other's)
     # that has sat 'queued' past COMMAND_TTL_MINUTES -- see
     # reconcile_expired_actions()'s docstring for why this replaced the old
@@ -1868,9 +1961,30 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
     # Retrieve pending commands for this workstation -- anything past its
     # TTL was already purged from PENDING_COMMANDS above, so everything
     # remaining here is still within window and safe to deliver.
-    cmds = PENDING_COMMANDS.get(payload.hostname, [])
-    if cmds:
-        PENDING_COMMANDS[payload.hostname] = []  # clear queue either way
+    #
+    # A command stays in the queue once sent, instead of being cleared the
+    # instant it's read: this response might never reach the agent (dropped
+    # connection, the agent's own client-side timeout), and the old
+    # unconditional clear treated "read by this handler" as "delivered",
+    # losing the command silently when it wasn't. Only an ack (purged above)
+    # or COMMAND_TTL_MINUTES (via reconcile_expired_actions) removes it now;
+    # anything already sent more than COMMAND_REDELIVERY_SECONDS ago with no
+    # ack yet is assumed lost and resent.
+    now = datetime.now()
+    pc_key = _pc_key(payload.hostname)
+    queue = PENDING_COMMANDS.get(pc_key, [])
+    cmds = []
+    for c in queue:
+        delivered_at = c.get("delivered_at")
+        due = True
+        if delivered_at is not None:
+            try:
+                due = (now - datetime.fromisoformat(delivered_at)).total_seconds() >= COMMAND_REDELIVERY_SECONDS
+            except (TypeError, ValueError):
+                due = True  # malformed timestamp -- treat as due rather than wedging it forever
+        if due:
+            c["delivered_at"] = now.isoformat()
+            cmds.append({k: v for k, v in c.items() if k != "delivered_at"})
 
     return {"status": "ok", "commands": cmds}
 
@@ -1914,7 +2028,7 @@ def get_active_workstations(email: str = Depends(verify_token)):
 # Device registry (Logix Control, Milestone 2). Persisted, unlike /api/active
 # above which only reflects the last 5 minutes of in-memory heartbeats -- this
 # lists every device ever seen, including stale/offline ones. See
-# docs/LOGIX_CONTROL.md §5.
+# docs/LOGIX_CONTROL.md Â§5.
 @app.get("/api/devices")
 def get_devices(email: str = Depends(require_permission("devices_read"))):
     conn = get_db()
@@ -2001,7 +2115,7 @@ def get_device_detail(device_id: str, email: str = Depends(require_permission("d
         conn.close()
 
 
-# Manual retry (roadmap item J §D). Creates a new queued child row rather
+# Manual retry (roadmap item J Â§D). Creates a new queued child row rather
 # than mutating the original -- see REMOTE_ACTION_COLUMNS' comment on
 # retry_of_action_id -- so the original failed/expired row's history is
 # preserved exactly like alerts are resolved rather than deleted. Reuses
@@ -2033,7 +2147,7 @@ def retry_action(device_id: str, action_id: int, email: str = Depends(require_pe
         hostname = device["hostname"]
 
         new_command_id = str(uuid.uuid4())
-        PENDING_COMMANDS.setdefault(hostname, []).append({
+        PENDING_COMMANDS.setdefault(_pc_key(hostname), []).append({
             "command_id": new_command_id,
             "command": action["action_type"],
             "param": action["param"] or "",
@@ -2145,7 +2259,7 @@ def resolve_alert(alert_id: int, email: str = Depends(require_permission("alerts
         conn.close()
 
 
-# Device enrollment (Logix Control). See docs/LOGIX_CONTROL.md §5 and the
+# Device enrollment (Logix Control). See docs/LOGIX_CONTROL.md Â§5 and the
 # locked design in API_CONTRACT.md.
 class EnrollInviteRequest(BaseModel):
     category: Optional[str] = "custom"
@@ -2450,7 +2564,7 @@ def rename_device(payload: RenameDeviceRequest, email: str = Depends(require_per
 
 def enforce_command_policy(hostname: str, command_type: str, reason: str) -> None:
     """Gate a control command on the target device's assigned policy profile
-    (docs/LOGIX_CONTROL.md §5 -- this is where device_policies /
+    (docs/LOGIX_CONTROL.md Â§5 -- this is where device_policies /
     command_allowlist stop being data-only). Raises 403 when the policy
     disallows the command, 400 when the policy requires a reason and none
     was given. Fails open for LOCK/BROADCAST when no rule exists (a device
@@ -2512,7 +2626,7 @@ def queue_command(email: str, hostname: str, command_type: str, param: str = "",
     """Append one command to a device's in-memory delivery queue and write
     its audit row. The audit write is best-effort -- it must never block the
     command that was already queued (the original retrofit contract from
-    docs/LOGIX_CONTROL.md §6)."""
+    docs/LOGIX_CONTROL.md Â§6)."""
     command_id = command_id or str(uuid.uuid4())
     entry = {
         "command_id": command_id, "command": command_type, "param": param,
@@ -2520,7 +2634,7 @@ def queue_command(email: str, hostname: str, command_type: str, param: str = "",
     }
     if command_type == "BROADCAST":
         entry["reason"] = reason or "Direction Message"
-    PENDING_COMMANDS.setdefault(hostname, []).append(entry)
+    PENDING_COMMANDS.setdefault(_pc_key(hostname), []).append(entry)
     try:
         conn = get_db()
         try:
@@ -2562,7 +2676,7 @@ def queue_broadcast_command(payload: ControlRequest, email: str = Depends(requir
             except HTTPException:
                 skipped.append(h)
                 continue
-            PENDING_COMMANDS.setdefault(h, []).append({
+            PENDING_COMMANDS.setdefault(_pc_key(h), []).append({
                 "command_id": command_id, "command": "BROADCAST", "param": msg,
                 "reason": payload.reason or "Direction Message", "queued_at": queued_at,
             })
@@ -2701,7 +2815,12 @@ class ReplyPayload(BaseModel):
 
 
 @app.post("/api/replies")
-def post_reply(payload: ReplyPayload, _: None = Depends(verify_api_key)):
+def post_reply(payload: ReplyPayload, _: None = Depends(verify_api_key),
+               x_api_key: Optional[str] = Header(None)):
+    # Same rule as heartbeats and session logs: a per-device key may only
+    # speak for its own machine, or one workstation could put words in
+    # another's mouth in the admin's conversation view.
+    assert_device_scope(x_api_key, payload.hostname)
     message = (payload.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="message cannot be empty")
@@ -2784,6 +2903,118 @@ def mark_reply_read(reply_id: int, email: str = Depends(require_permission("repl
     finally:
         conn.close()
     return {"status": "success", "reply_id": reply_id}
+
+
+# --- Conversations (admin <-> device, both directions) ----------------------
+# One thread per device, assembled from what is already stored: the admin's
+# side is the BROADCAST rows in remote_actions, the device's side is
+# device_replies. GET /api/replies returns only the device's side, so the
+# dashboard could show answers but never the conversation they belong to.
+# Nothing new is persisted here.
+CONVERSATION_MESSAGES_PER_THREAD = 50
+CONVERSATION_SCAN_LIMIT = 2000
+
+
+@app.get("/api/conversations")
+def get_conversations(email: str = Depends(require_permission("replies_read"))):
+    conn = get_db()
+    try:
+        devices = {
+            (r["hostname"] or "").upper(): r
+            for r in conn.execute("SELECT hostname, display_name, status FROM devices")
+        }
+        replies = conn.execute(
+            "SELECT id, hostname, device_name, message, command_id, created_at, read_at "
+            "FROM device_replies ORDER BY created_at DESC LIMIT ?",
+            (CONVERSATION_SCAN_LIMIT,),
+        ).fetchall()
+        sent = conn.execute(
+            "SELECT action_id, actor_email, target_device, param, status, timestamp, command_id "
+            "FROM remote_actions WHERE action_type = 'BROADCAST' ORDER BY timestamp DESC LIMIT ?",
+            (CONVERSATION_SCAN_LIMIT,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_command_id = {row["command_id"]: row for row in sent if row["command_id"]}
+    threads: Dict[str, Dict[str, Any]] = {}
+    seen_out: Dict[str, set] = {}
+
+    def thread_for(hostname: str, fallback_name: Optional[str]) -> Optional[Dict[str, Any]]:
+        # Keyed case-insensitively, like every DB hostname lookup: the admin
+        # may have typed the hostname in one case and the agent reports its
+        # COMPUTERNAME in another.
+        key = (hostname or "").upper()
+        device = devices.get(key)
+        if device is not None and device["status"] == DEVICE_STATUS_DELETED:
+            return None
+        if key not in threads:
+            threads[key] = {
+                "hostname": device["hostname"] if device else hostname,
+                "device_name": (device["display_name"] if device else None) or fallback_name or hostname,
+                "unread": 0,
+                "last_at": "",
+                "messages": [],
+            }
+            seen_out[key] = set()
+        return threads[key]
+
+    def add_sent(key: str, row, to_all: bool) -> None:
+        if row["action_id"] in seen_out[key]:
+            return
+        seen_out[key].add(row["action_id"])
+        threads[key]["messages"].append({
+            "id": f"out-{row['action_id']}",
+            "direction": "out",
+            "text": row["param"] or "",
+            "at": row["timestamp"],
+            "actor": row["actor_email"],
+            # An ALL broadcast is one shared row, settled by whichever device
+            # acked first -- it says nothing about delivery to THIS device.
+            "status": None if to_all else row["status"],
+            "to_all": to_all,
+            "command_id": row["command_id"],
+        })
+
+    for row in sent:
+        target = row["target_device"] or ""
+        if not target or target.upper() == "ALL":
+            continue
+        if thread_for(target, target) is not None:
+            add_sent(target.upper(), row, to_all=False)
+
+    for r in replies:
+        thread = thread_for(r["hostname"], r["device_name"])
+        if thread is None:
+            continue
+        thread["messages"].append({
+            "id": f"in-{r['id']}",
+            "direction": "in",
+            "text": r["message"],
+            "at": r["created_at"],
+            "read_at": r["read_at"],
+            "reply_id": r["id"],
+            "command_id": r["command_id"],
+        })
+        if not r["read_at"]:
+            thread["unread"] += 1
+        # An answer to an ALL broadcast needs its question beside it, but
+        # only in the threads of devices that actually answered -- not
+        # copied into every device's thread.
+        original = by_command_id.get(r["command_id"]) if r["command_id"] else None
+        if original is not None and (original["target_device"] or "").upper() == "ALL":
+            add_sent((r["hostname"] or "").upper(), original, to_all=True)
+
+    result = []
+    for thread in threads.values():
+        thread["messages"].sort(key=lambda m: m["at"] or "")
+        thread["messages"] = thread["messages"][-CONVERSATION_MESSAGES_PER_THREAD:]
+        thread["last_at"] = thread["messages"][-1]["at"] if thread["messages"] else ""
+        result.append(thread)
+    # Unread first, then most recent activity -- the order an admin triages in.
+    result.sort(key=lambda t: t["last_at"], reverse=True)
+    result.sort(key=lambda t: t["unread"] == 0)
+    return {"unread": sum(t["unread"] for t in result), "threads": result}
 
 
 # Logging Endpoints
@@ -3070,7 +3301,7 @@ def get_sessions(
 
 
 # Audit log for Control commands (Logix Control, Milestone 2). Read-only.
-# Rows show 'queued', never 'done' -- see docs/LOGIX_CONTROL.md §6 for why.
+# Rows show 'queued', never 'done' -- see docs/LOGIX_CONTROL.md Â§6 for why.
 @app.get("/api/audit-log")
 def get_audit_log(
     limit: int = 100,

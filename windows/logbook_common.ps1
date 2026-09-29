@@ -241,6 +241,38 @@ function Test-LogbookPopupRunning {
     return $false
 }
 
+# Cheap liveness check for logbook_monitor.ps1's heartbeat loop, which
+# previously called Get-ProcessByCommandPattern (measured 116-204ms per call,
+# see that function's comment) every heartbeat tick -- by default every 5s,
+# for the entire life of a session, purely to answer "is the timer widget
+# still up." Get-Process -Id is a direct handle lookup, not a WMI query --
+# a few ms at most. timer.pid records the conhost wrapper's PID, not the WPF
+# process's own (Start-LogbookTimer's comment), but Start-HiddenPowerShell's
+# comment establishes that exiting either side of that wrapper/child pair
+# takes the other down with it, so the wrapper's liveness is a correct proxy
+# for the widget's.
+#
+# A false "still running" (e.g. the PID got recycled by an unrelated process
+# in the ~5s window before the next check) only delays a restart by one
+# heartbeat tick: Start-LogbookTimer unconditionally calls the WMI-based,
+# authoritative Stop-LogbookTimers before spawning a replacement, so nothing
+# here can leave a genuinely-dead timer un-replaced for long, and nothing
+# here can create a duplicate. The ProcessName check narrows that recycled-PID
+# window further, cheaply.
+function Test-LogbookTimerRunning {
+    try {
+        $pidFile = Join-Path $Global:StateDir 'timer.pid'
+        if (-not (Test-Path $pidFile)) { return $false }
+        $timerPid = (Get-Content $pidFile -Raw -ErrorAction Stop).Trim()
+        if (-not $timerPid) { return $false }
+        $p = Get-Process -Id ([int]$timerPid) -ErrorAction SilentlyContinue
+        if (-not $p) { return $false }
+        return ($p.ProcessName -in @('conhost', 'powershell', 'pwsh'))
+    } catch {
+        return $false
+    }
+}
+
 # Install-time-only, must run elevated. The popup/monitor run as a normal
 # (often non-admin) user at runtime, and by default that account cannot
 # write HKCU:\...\Policies\System even in its own hive (Windows locks that
@@ -815,28 +847,31 @@ function Get-LogbookDefaultConfig {
             logoPath = 'C:\Program Files\Logix\logo.png'
             title    = 'Report Logbook'
             subtitle = 'Computational Workstation'
-            # LogiX Client Foundation palette (docs/design/LogiX Client
-            # Foundation.dc.html): "Blue is the direction; everything else is a
-            # theme." Accent #2563EB on a deep-navy surface ramp. Maroon retired.
-            # A lab re-themes by overriding any of these in config -- absent keys
-            # fall back to these defaults via Get-LogbookTheme.
+            # v4 "Denyut" palette, the client twin of the admin dashboard's
+            # tokens.css: lime accent on an ink ramp (the client is always
+            # dark). A lab re-themes by overriding any of these in config;
+            # absent keys fall back to these defaults via Get-LogbookTheme.
+            # There is deliberately no onAccent default: Get-LogbookTheme
+            # derives it from whatever the accent ends up being (ink on lime,
+            # white on a dark faculty colour). A default here would be deep-
+            # merged into every rebrand and put ink text on a dark accent.
             colors   = @{
-                primary         = '#0E1626'  # elevated surface (cards / inputs)
-                accent          = '#2563EB'  # brand blue
-                muted           = '#93A1B8'  # muted text / hairline captions
-                text            = '#EEF3FB'  # primary text
-                surface         = '#070C15'  # deepest surface (fullscreen popup)
-                surfaceWidget   = '#0B1017'  # corner timer widget surface
-                surfaceElevated = '#0E1626'  # raised panels / inputs
-                border          = '#223451'  # 1px hairline border
+                primary         = '#1A1C20'  # elevated surface (cards / inputs)
+                accent          = '#C5F23A'  # lime
+                muted           = '#8D939C'  # muted text / hairline captions
+                text            = '#EEF0F3'  # primary text
+                surface         = '#0B0C0E'  # deepest surface (fullscreen popup)
+                surfaceWidget   = '#111214'  # corner timer widget surface
+                surfaceElevated = '#1A1C20'  # raised panels / inputs
+                border          = '#2A2D33'  # 1px hairline border
             }
             # Solid "signal bar" colors -- status is a colored edge on a calm
             # surface, never a tinted card. Normal/Notice/Warning/Critical.
             signals  = @{
-                normal   = '#22C55E'  # session running
+                normal   = '#3CCF78'  # session running
                 notice   = '#3B82F6'  # privacy / screenshot (calm, never red)
-                warning  = '#F59E0B'  # attention
-                critical = '#EF4444'  # power countdown / urgent
+                warning  = '#F5B82E'  # attention
+                critical = '#FF5C61'  # power countdown / urgent
             }
         }
         text = @{
@@ -1321,15 +1356,71 @@ function Get-LogbookDeviceDisplayName {
     return $deviceName
 }
 
-# Writes the single incoming-message drop the timer widget polls each tick and
-# shows inline near the clock. allow_reply lets the widget offer a reply box for
-# admin messages (BROADCAST) but not for one-way notices (screenshot/power).
+# Messages for the timer widget land in an inbox DIRECTORY, one file per
+# message, which the widget drains oldest-first (Show-LogbookPendingMessage in
+# logbook_timer.ps1). This replaced a single incoming_message.json slot: a
+# second message overwrote the first before anyone saw it, and the widget
+# deleted the slot even when rendering it failed. One file per message also
+# means this writer (the monitor) and the widget (reader/deleter) never
+# read-modify-write the same file, so there is no cross-process race to lock
+# around. Written under a .tmp name and renamed, so the widget can never pick
+# up a half-written file. Names sort by arrival time.
+#
+# allow_reply lets the widget offer a reply box for admin messages (BROADCAST)
+# but not for one-way notices (screenshot/power).
+$Global:MessageInboxDir = Join-Path $Global:StateDir 'inbox'
+$Global:MessageInboxMax = 50
+
 function Set-LogbookIncomingMessage {
     param([string]$Text, [string]$Reason = 'Direction Message', [string]$CommandId = '', [bool]$AllowReply = $true)
     Ensure-LogbookDirs
-    $msgPath = Join-Path $Global:StateDir 'incoming_message.json'
-    @{ text = $Text; reason = $Reason; command_id = $CommandId; allow_reply = $AllowReply; received_at = (Get-Date).ToString('o') } |
-        ConvertTo-Json | Out-File -FilePath $msgPath -Encoding UTF8 -Force
+    New-Item -ItemType Directory -Force -Path $Global:MessageInboxDir | Out-Null
+    $now = Get-Date
+    $name = '{0}_{1}' -f $now.ToString('yyyyMMddHHmmssfff'), [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $tmp = Join-Path $Global:MessageInboxDir "$name.tmp"
+    @{ text = $Text; reason = $Reason; command_id = $CommandId; allow_reply = $AllowReply; received_at = $now.ToString('o') } |
+        ConvertTo-Json | Out-File -FilePath $tmp -Encoding UTF8 -Force
+    Move-Item -LiteralPath $tmp -Destination (Join-Path $Global:MessageInboxDir "$name.json") -Force
+
+    # Bounded: a widget that never runs (no session for days) must not let
+    # this grow without limit. Oldest go first; the widget would drop them as
+    # stale anyway.
+    $files = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object Name)
+    if ($files.Count -gt $Global:MessageInboxMax) {
+        $files[0..($files.Count - $Global:MessageInboxMax - 1)] | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# command_ids this device has already executed, newest last. The server
+# resends a command whose ack has not arrived within COMMAND_REDELIVERY_SECONDS
+# (server/main.py), which turns a lost heartbeat response into a retry instead
+# of a silently dropped command -- but it also means a command can arrive a
+# second time when it was the ACK that got lost, not the command. Re-running
+# LOCK would end the session the user just signed back into, and re-running
+# LOGOFF would sign them straight out again; remembering what ran makes
+# delivery at-least-once but execution once.
+$Global:ExecutedCommandsFile = 'executed_commands.json'
+$Global:ExecutedCommandsMax = 200
+
+function Get-LogbookExecutedCommandIds {
+    $path = Join-Path $Global:StateDir $Global:ExecutedCommandsFile
+    if (-not (Test-Path $path)) { return @() }
+    try {
+        $loaded = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($loaded) { return @($loaded | ForEach-Object { [string]$_ }) }
+    } catch {}
+    return @()
+}
+
+function Add-LogbookExecutedCommandId([string]$CommandId) {
+    if (-not $CommandId) { return }
+    Ensure-LogbookDirs
+    $ids = @(Get-LogbookExecutedCommandIds) + $CommandId
+    if ($ids.Count -gt $Global:ExecutedCommandsMax) {
+        $ids = $ids[($ids.Count - $Global:ExecutedCommandsMax)..($ids.Count - 1)]
+    }
+    # -InputObject keeps a one-element list a list on 5.1 (see Set-LogbookPendingReplies).
+    ConvertTo-Json -InputObject $ids | Out-File -FilePath (Join-Path $Global:StateDir $Global:ExecutedCommandsFile) -Encoding UTF8 -Force
 }
 
 # Device -> admin message (Logix Control replies). Posts to /api/replies with the
@@ -1346,6 +1437,15 @@ function Get-LogbookPendingReplies {
     if (-not (Test-Path $path)) { return @() }
     try {
         $loaded = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
+        # Queues written by the old Set-LogbookPendingReplies under Windows
+        # PowerShell 5.1 are {"value":[...],"Count":n} rather than a list (see
+        # that function). Read as-is, that is ONE item with no text, which the
+        # server rejects as empty -- so every reply queued while the server was
+        # unreachable sat here forever. Unwrapping it delivers them.
+        if ($loaded -and $loaded.PSObject.Properties['value'] -and $loaded.PSObject.Properties['Count'] -and
+            -not $loaded.PSObject.Properties['text']) {
+            $loaded = $loaded.value
+        }
         if ($loaded) { return @($loaded) }
     } catch {}
     return @()
@@ -1364,10 +1464,13 @@ function Set-LogbookPendingReplies($Replies) {
     if ($items.Count -gt $Global:PendingRepliesMax) {
         $items = $items[($items.Count - $Global:PendingRepliesMax)..($items.Count - 1)]
     }
-    # The leading comma forces an array even for a single item: without it
-    # ConvertTo-Json emits a bare object, which loads back as one object
-    # rather than a one-element list.
-    ,$items | ConvertTo-Json -Depth 4 | Out-File -FilePath $path -Encoding UTF8 -Force
+    # -InputObject, not the pipeline, so a one-item queue is still written as
+    # a list. The previous form, `,$items | ConvertTo-Json`, did that under
+    # PowerShell 7 but under Windows PowerShell 5.1 -- what the agent actually
+    # runs on -- serialized the array's wrapper instead:
+    # {"value":[...],"Count":1}. Get-LogbookPendingReplies unwraps queues
+    # already written that way.
+    ConvertTo-Json -InputObject $items -Depth 4 | Out-File -FilePath $path -Encoding UTF8 -Force
 }
 
 # Post one reply. Throws on any failure, so the caller decides whether to
@@ -1472,6 +1575,20 @@ function Invoke-LogbookScreenshotCapture {
     }
 }
 
+# Tells the timer widget that a heartbeat just reached the server, so its
+# status dot can beat once -- the "Denyut" motif, driven by something real: no
+# server, or no answer, means no beat. A named event rather than a file,
+# because this fires every few seconds for hours and needs no disk write.
+# Auto-reset: however many heartbeats land between two widget ticks, the
+# widget sees one. 'Local\' because monitor and widget share the user's session.
+function Get-LogbookHeartbeatPulse {
+    if (-not $script:heartbeatPulse) {
+        $script:heartbeatPulse = New-Object System.Threading.EventWaitHandle(
+            $false, [System.Threading.EventResetMode]::AutoReset, 'Local\LogixHeartbeatPulse')
+    }
+    return $script:heartbeatPulse
+}
+
 function Send-LogbookHeartbeat {
     param(
         [Parameter(Mandatory=$true)][string]$Status
@@ -1552,6 +1669,7 @@ function Send-LogbookHeartbeat {
         $apiUrl = $serverUrl.TrimEnd('/') + '/api/heartbeat'
 
         $res = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $body -Headers $headers -TimeoutSec 3 -UseBasicParsing
+        try { [void](Get-LogbookHeartbeatPulse).Set() } catch {}
         # Reaching here means the POST succeeded -- the acks we just sent
         # are now the server's problem.
         if ($pendingAcks.Count -gt 0) {
@@ -1568,7 +1686,25 @@ function Send-LogbookHeartbeat {
 
         $newAcks = @()
         if ($res -and $res.commands) {
+            $executedIds = @(Get-LogbookExecutedCommandIds)
             foreach ($cmd in $res.commands) {
+                # A redelivery of something already run (see
+                # Get-LogbookExecutedCommandIds). Its ack is still sitting in
+                # pending_acks.json from the first run -- that is WHY the server
+                # resent it -- so there is nothing to add here.
+                $cmdId = [string]$cmd.command_id
+                if ($cmdId -and ($executedIds -contains $cmdId)) {
+                    Write-LogbookInfo "Skipping redelivered command $cmdId (already executed)."
+                    continue
+                }
+                # Recorded BEFORE running, not after: LOGOFF/SHUTDOWN/RESTART can
+                # take this process down before anything after them executes,
+                # and an unrecorded LOGOFF would be redelivered into the user's
+                # next sign-in.
+                if ($cmdId) {
+                    Add-LogbookExecutedCommandId $cmdId
+                    $executedIds += $cmdId
+                }
                 $name = $cmd.command.ToUpper()
                 $param = $cmd.param
                 Write-LogbookInfo "Received remote command: $name (param: $param)"
@@ -1586,15 +1722,16 @@ function Send-LogbookHeartbeat {
                             $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
                         }
                         'BROADCAST' {
-                            # Drop for the timer widget to show inline near the
+                            # Queued in the widget's inbox, shown inline near the
                             # clock -- not a separate MessageBox. command_id
                             # rides along so a reply typed into the widget can
                             # reference the exact broadcast it answers. "done"
-                            # means the file was written, not that the user saw it.
+                            # means it reached this device's inbox, not that the
+                            # user has read it yet.
                             Write-LogbookInfo "Remote message received (reason: $($cmd.reason))."
                             $reason = if ($cmd.reason) { [string]$cmd.reason } else { 'Direction Message' }
                             Set-LogbookIncomingMessage -Text $param -Reason $reason -CommandId ([string]$cmd.command_id)
-                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = '' }
+                            $newAcks += @{ command_id = $cmd.command_id; status = 'done'; detail = 'delivered to device inbox' }
                         }
                         'SCREENSHOT' {
                             # Transparency first, then capture: the person at the
@@ -2194,7 +2331,7 @@ function Add-LogbookMonitorPicker($Window, $Card, $Panel, $cfg, $Screens, $Curre
         $isCurrent = ($Current -and $s.Index -eq $Current.Index)
         $btn.Background = $conv.ConvertFromString($(if ($isCurrent) { $theme.accent } else { $theme.surfaceWidget }))
         $btn.BorderBrush = $conv.ConvertFromString($(if ($isCurrent) { $theme.accent } else { $theme.border }))
-        $btn.Foreground = $conv.ConvertFromString($(if ($isCurrent) { '#FFFFFF' } else { $theme.muted }))
+        $btn.Foreground = $conv.ConvertFromString($(if ($isCurrent) { $theme.onAccent } else { $theme.muted }))
 
         # A pill, not a default WPF button: the chrome-free chip is the whole
         # reason this reads as a choice rather than as an error dialog.
@@ -2218,7 +2355,7 @@ function Add-LogbookMonitorPicker($Window, $Card, $Panel, $cfg, $Screens, $Curre
                     $on = ($child.Tag.Index -eq $target.Index)
                     $child.Background  = $conv.ConvertFromString($(if ($on) { $theme.accent } else { $theme.surfaceWidget }))
                     $child.BorderBrush = $conv.ConvertFromString($(if ($on) { $theme.accent } else { $theme.border }))
-                    $child.Foreground  = $conv.ConvertFromString($(if ($on) { '#FFFFFF' } else { $theme.muted }))
+                    $child.Foreground  = $conv.ConvertFromString($(if ($on) { $theme.onAccent } else { $theme.muted }))
                 }
             }
             Save-LogbookPreferredMonitor $target
@@ -2276,6 +2413,25 @@ function Set-LogbookPopupMonitorPlacement($Window, $Card, $Panel, $cfg) {
     return $target
 }
 
+# Ink on a light colour, white on a dark one (whichever contrasts more, per the
+# WCAG luminance formula). Lets a lab that rebranded only `accent` -- to a dark
+# faculty colour, say -- keep readable button text without ever hearing about
+# onAccent. A value it cannot parse gets white, the old behaviour.
+function Get-LogbookReadableOn([string]$Hex) {
+    $h = ([string]$Hex).TrimStart('#')
+    if ($h.Length -eq 8) { $h = $h.Substring(2) }
+    if ($h -notmatch '^[0-9A-Fa-f]{6}$') { return '#FFFFFF' }
+    $lum = 0.0
+    $weights = @(0.2126, 0.7152, 0.0722)
+    for ($i = 0; $i -lt 3; $i++) {
+        $c = [Convert]::ToInt32($h.Substring($i * 2, 2), 16) / 255.0
+        $lin = if ($c -le 0.03928) { $c / 12.92 } else { [Math]::Pow(($c + 0.055) / 1.055, 2.4) }
+        $lum += $weights[$i] * $lin
+    }
+    if ($lum -gt 0.179) { return '#111214' }
+    return '#FFFFFF'
+}
+
 function Get-LogbookTheme($cfg) {
     # Resolve the full client palette from config, with the Client Foundation
     # defaults as fallbacks. Backward-compatible: a config that only sets the
@@ -2291,23 +2447,24 @@ function Get-LogbookTheme($cfg) {
         }
         return $fallback
     }
-    $accent          = & $val $c 'accent'          '#2563EB'
-    $text            = & $val $c 'text'            '#EEF3FB'
-    $muted           = & $val $c 'muted'           '#93A1B8'
-    $surfaceElevated = & $val $c 'surfaceElevated' (& $val $c 'primary' '#0E1626')
-    $surfaceWidget   = & $val $c 'surfaceWidget'   '#0B1017'
-    $critical        = & $val $s 'critical'        '#EF4444'
+    $accent          = & $val $c 'accent'          '#C5F23A'
+    $text            = & $val $c 'text'            '#EEF0F3'
+    $muted           = & $val $c 'muted'           '#8D939C'
+    $surfaceElevated = & $val $c 'surfaceElevated' (& $val $c 'primary' '#1A1C20')
+    $surfaceWidget   = & $val $c 'surfaceWidget'   '#111214'
+    $critical        = & $val $s 'critical'        '#FF5C61'
     return @{
         accent          = $accent
+        onAccent        = & $val $c 'onAccent'      (Get-LogbookReadableOn $accent)
         text            = $text
         muted           = $muted
-        surface         = & $val $c 'surface'       '#070C15'
+        surface         = & $val $c 'surface'       '#0B0C0E'
         surfaceWidget   = $surfaceWidget
         surfaceElevated = $surfaceElevated
-        border          = & $val $c 'border'        '#223451'
-        signalNormal    = & $val $s 'normal'        '#22C55E'
+        border          = & $val $c 'border'        '#2A2D33'
+        signalNormal    = & $val $s 'normal'        '#3CCF78'
         signalNotice    = & $val $s 'notice'        '#3B82F6'
-        signalWarning   = & $val $s 'warning'       '#F59E0B'
+        signalWarning   = & $val $s 'warning'       '#F5B82E'
         signalCritical  = $critical
         # The quiet half of the critical signal, derived (see
         # Get-LogbookMixedHex) rather than picked. Full-strength #EF4444 is a
@@ -2332,19 +2489,20 @@ function Get-LogbookTheme($cfg) {
 }
 
 function Build-LogbookClientResources($cfg) {
-    # The v3 "Clean Calibration" client token set, emitted as a WPF
-    # ResourceDictionary fragment. This is the client-side twin of the web
-    # dashboard's tokens.css: one place defines the palette, every window
-    # references it via {StaticResource ...} instead of inlining hex.
+    # The client token set, emitted as a WPF ResourceDictionary fragment. This
+    # is the client-side twin of the web dashboard's tokens.css: one place
+    # defines the palette, every window references it via {StaticResource ...}
+    # instead of inlining hex. The palette is v4 "Denyut" (lime on ink); the
+    # shapes and guard rails below are unchanged from v3.
     #
-    # Values come from docs/design_handoff_logix_v3/README.md ("Client widget
-    # (WPF, always dark)") and remain config-overridable through
-    # Get-LogbookTheme, so a faculty rebrand still works.
+    # Values stay config-overridable through Get-LogbookTheme, so a faculty
+    # rebrand still works.
     #
     # Guard rails encoded here: no gradient brushes, and status colour exists
     # only as a dot fill or a 3px edge -- there is deliberately no tinted
-    # status background brush to reach for. LxNotice is the accent blue,
-    # matching the message states in the Timer prototype (D-02 state 04/07).
+    # status background brush to reach for. LxNotice is the accent, matching
+    # the message states in the Timer prototype (D-02 state 04/07). Anything
+    # drawn ON the accent uses LxOnAccent, never a literal white.
     $t = Get-LogbookTheme $cfg
     return @"
     <SolidColorBrush x:Key="LxSurface"  Color="$($t.surfaceWidget)"/>
@@ -2353,6 +2511,7 @@ function Build-LogbookClientResources($cfg) {
     <SolidColorBrush x:Key="LxText"     Color="$($t.text)"/>
     <SolidColorBrush x:Key="LxMuted"    Color="$($t.muted)"/>
     <SolidColorBrush x:Key="LxAccent"   Color="$($t.accent)"/>
+    <SolidColorBrush x:Key="LxOnAccent" Color="$($t.onAccent)"/>
     <SolidColorBrush x:Key="LxActive"   Color="$($t.signalNormal)"/>
     <SolidColorBrush x:Key="LxNotice"   Color="$($t.accent)"/>
     <SolidColorBrush x:Key="LxWarning"  Color="$($t.signalWarning)"/>
@@ -2543,7 +2702,7 @@ function Build-LogbookPopupXaml($cfg) {
     $primary = $theme.surfaceElevated  # card / input surface
     $surface = $theme.surface          # deepest fullscreen surface
     $border  = $theme.border           # hairline BORDER
-    $overlay = '#D8' + $surface.TrimStart('#')  # deep translucent scrim over blur
+    $overlay = '#D8' + $surface.TrimStart('#')  # deep translucent scrim over the live desktop
 
     $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
     $title    = ConvertTo-LogbookXmlText ([string]$cfg.branding.title)
@@ -2604,14 +2763,14 @@ function Build-LogbookPopupXaml($cfg) {
     #
     # Element names are the existing contract logbook_popup.ps1 binds to
     # (NamaBox / NimBox / AccessBox / TujuanBox / KetBox / SubmitBtn /
-    # HintText / StartTimeText / MainCard / BgImage / MascotImage); only the
+    # HintText / StartTimeText / MainCard / MascotImage); only the
     # presentation changed, so the controller keeps working untouched.
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="True" AllowsTransparency="True"
-        Background="$overlay" FontFamily="Segoe UI">
+        Background="Transparent" FontFamily="Segoe UI">
   <Window.Resources>
 $res
     <!-- Dark field: hairline border, radius 12, accent ring on focus. -->
@@ -2648,9 +2807,13 @@ $res
   </Window.Resources>
 
   <Grid>
-    <!-- Kept for the controller's optional wallpaper/mascot hooks; the v3
-         dialog itself is chrome-free, so both start collapsed. -->
-    <Image Name="BgImage" Stretch="UniformToFill" Opacity="0.18" Visibility="Collapsed"/>
+    <!-- The dimmed desktop behind the card. A translucent fill that Windows
+         composites over whatever is really on screen: no screenshot is taken
+         (that was a full-screen capture + PNG round trip on every sign-in,
+         for an image this layout never showed). An element rather than the
+         Window background so the close animation can fade it out. Opaque
+         enough to block clicks, which is what makes the form a gate. -->
+    <Rectangle Name="Scrim" Fill="$overlay"/>
 
     <Border Name="MainCard" Width="320" CornerRadius="22" Padding="28,26"
             Background="{StaticResource LxElevated}" BorderBrush="{StaticResource LxHairline}" BorderThickness="1"
@@ -2661,7 +2824,7 @@ $res
         <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
           <Border Width="26" Height="26" CornerRadius="8" Background="{StaticResource LxAccent}" Margin="0,0,9,0">
             <TextBlock Text="&gt;_" FontFamily="Consolas" FontSize="12" FontWeight="Bold"
-                       Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                       Foreground="{StaticResource LxOnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
           <TextBlock Name="LogoText" Text="$logoText" FontFamily="Consolas" FontSize="13"
                      Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
@@ -2727,7 +2890,7 @@ $accessItems
         <Button Name="SubmitBtn" Content="$tSubmit" Style="{StaticResource LxPill}"
                 Padding="0,11" HorizontalContentAlignment="Center" FontSize="13"
                 Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
-                Foreground="#FFFFFF" Margin="0,0,0,14"/>
+                Foreground="{StaticResource LxOnAccent}" Margin="0,0,0,14"/>
 
         <!-- Inline validation: one sentence telling the user how to fix it.
              No shake, no separate dialog. -->
@@ -2754,6 +2917,7 @@ $accessItems
 }
 
 function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
+    $onAccent = (Get-LogbookTheme $cfg).onAccent
     # Returning-user fast path (Action canvas: LogiX Sign-in Popup SA). A
     # returning user confirms one saved identity and starts -- no full form.
     # Same deep-navy fullscreen surface as the main popup. Named controls the
@@ -2791,11 +2955,11 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" Background="$surface"
+        Topmost="True" ShowInTaskbar="True" Background="Transparent"
         AllowsTransparency="True" FontFamily="Segoe UI">
   <Grid>
-    <Image Name="BgImage" Stretch="Fill" Opacity="0.88"><Image.Effect><BlurEffect Radius="24" KernelType="Gaussian" /></Image.Effect></Image>
-    <Rectangle Fill="$overlay" />
+    <!-- Same scrim as the sign-in form (no screenshot, no blur pass). -->
+    <Rectangle Name="Scrim" Fill="$overlay" />
     <Border Name="MainCard" Width="430" CornerRadius="16" BorderBrush="$border" BorderThickness="1" Background="$elevated"
             HorizontalAlignment="Center" VerticalAlignment="Center" Padding="34,30,34,28">
       <Border.Effect><DropShadowEffect BlurRadius="40" ShadowDepth="0" Opacity="0.5" Color="#070C15" /></Border.Effect>
@@ -2811,7 +2975,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Width="44" Height="44" CornerRadius="22" Background="$accent" VerticalAlignment="Center">
-              <TextBlock Text="$initials" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <TextBlock Text="$initials" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="$onAccent" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
               <TextBlock Text="$tContinue" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="$text" TextTrimming="CharacterEllipsis" />
@@ -2820,7 +2984,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
           </Grid>
         </Border>
         <Button Name="StartBtn" Height="50" Content="$tSubmit" FontFamily="Segoe UI Semibold" FontSize="19" FontWeight="Bold"
-                Background="$accent" Foreground="#FFFFFF" BorderThickness="0" Cursor="Hand" />
+                Background="$accent" Foreground="$onAccent" BorderThickness="0" Cursor="Hand" />
         <Button Name="ChangeBtn" Content="$tNotYou" Background="Transparent" BorderThickness="0" Foreground="$muted"
                 FontSize="13" FontWeight="SemiBold" Cursor="Hand" Margin="0,12,0,0" HorizontalAlignment="Center" />
         <TextBlock Text="$started" FontFamily="Consolas" FontSize="11" Foreground="$muted" HorizontalAlignment="Center" Margin="0,14,0,0" />
@@ -2877,11 +3041,11 @@ $res
         <StackPanel Name="OverlayActions" Orientation="Horizontal" HorizontalAlignment="Center">
           <Button Name="ExtendBtn" Content="$tExtend" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"
                   Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
-                  Foreground="#FFFFFF" Margin="0,0,8,0"/>
+                  Foreground="{StaticResource LxOnAccent}" Margin="0,0,8,0"/>
           <Button Name="EndNowBtn" Content="$tEndNow" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"/>
           <Button Name="AckBtn" Content="$tAck" Style="{StaticResource LxPill}" Padding="16,9" FontSize="12.5"
                   Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
-                  Foreground="#FFFFFF" Visibility="Collapsed"/>
+                  Foreground="{StaticResource LxOnAccent}" Visibility="Collapsed"/>
         </StackPanel>
       </StackPanel>
     </Border>
@@ -2951,7 +3115,7 @@ $res
       <TextBlock Text="$tHint" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,0,0,10"/>
       <Button Name="UnlockBtn" Content="$tUnlock" Style="{StaticResource LxPill}" MinWidth="220"
               HorizontalAlignment="Center" Padding="24,12" FontSize="14"
-              Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}" Foreground="#FFFFFF"/>
+              Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}" Foreground="{StaticResource LxOnAccent}"/>
     </StackPanel>
   </Grid>
 </Window>
@@ -3233,7 +3397,7 @@ $res
         <Border Name="PillBadge" Visibility="Collapsed" MinWidth="16" Height="16" CornerRadius="8"
                 Background="{StaticResource LxNotice}" Margin="8,0,0,0" VerticalAlignment="Center">
           <TextBlock Name="PillBadgeText" Text="1" FontFamily="Consolas" FontSize="10" FontWeight="Bold"
-                     Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
+                     Foreground="{StaticResource LxOnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
         </Border>
       </StackPanel>
     </Border>
@@ -3249,7 +3413,7 @@ $res
         <Border Name="SliverBadge" Visibility="Collapsed" MinWidth="15" Height="15" CornerRadius="8"
                 Background="{StaticResource LxNotice}" Margin="0,0,8,0" VerticalAlignment="Center">
           <TextBlock Name="SliverBadgeText" Text="1" FontFamily="Consolas" FontSize="10" FontWeight="Bold"
-                     Foreground="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
+                     Foreground="{StaticResource LxOnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0"/>
         </Border>
         <TextBlock Name="SliverText" Text="00:00" FontFamily="Consolas" FontSize="12"
                    Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
@@ -3311,6 +3475,21 @@ $res
                      Foreground="{StaticResource LxText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
         </StackPanel>
 
+        <!-- Reply confirmation: the user's own answer echoed back, then its
+             delivery status. Sits directly under the message it answers,
+             ABOVE the quick replies, because those stay offered after a send
+             so the user can keep answering (one reply used to end the
+             conversation). The tick is Path-based and fixed-size; the label
+             WRAPS, because the queued-for-retry wording is longer than one
+             222px line and used to run off the card. -->
+        <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal" Margin="0,0,0,10">
+          <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
+                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Top" Margin="0,3,8,0"/>
+          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12" TextWrapping="Wrap" MaxWidth="190"
+                     Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
+        </StackPanel>
+
         <!-- Quick replies: two one-tap answers plus a free-text escape.
              A WRAP panel, not a horizontal StackPanel. The card is 260px wide
              and 222px inside its padding; these three pills measure ~233px
@@ -3351,7 +3530,7 @@ $res
             <Button.Template>
               <ControlTemplate TargetType="Button">
                 <Border CornerRadius="15" Background="{TemplateBinding Background}">
-                  <Path Data="M 5,12 L 19,12 M 13,6 L 19,12 L 13,18" Stroke="#FFFFFF" StrokeThickness="2.2"
+                  <Path Data="M 5,12 L 19,12 M 13,6 L 19,12 L 13,18" Stroke="{StaticResource LxOnAccent}" StrokeThickness="2.2"
                         StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
                         Width="13" Height="13" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
@@ -3359,21 +3538,6 @@ $res
             </Button.Template>
           </Button>
         </Grid>
-
-        <!-- Reply confirmation. Dot returns to green, card auto-collapses in 5s.
-             The tick is Path-based and fixed-size; the label WRAPS, because
-             the queued-for-retry wording is longer than one 222px line and
-             used to run off the card the same way the pills above did. The
-             stray Collapsed 1px Border that sat first in this horizontal
-             stack (a copy/paste of the divider above) is gone; it did
-             nothing but occupy the first slot of the row. -->
-        <StackPanel Name="CardSent" Visibility="Collapsed" Orientation="Horizontal">
-          <Path Data="M 4,12.5 L 9.5,18 L 20,6.5" Stroke="{StaticResource LxActive}" StrokeThickness="2.4"
-                StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                Width="13" Height="13" Stretch="Uniform" VerticalAlignment="Top" Margin="0,3,8,0"/>
-          <TextBlock Name="SentText" Text="Terkirim ke admin" FontSize="12" TextWrapping="Wrap" MaxWidth="190"
-                     Foreground="{StaticResource LxMuted}" VerticalAlignment="Center"/>
-        </StackPanel>
 
         <!-- SELESAI: press-and-hold to confirm, not a tap.
              Progress is drawn as a STROKE TRACING THE PILL'S PERIMETER, not
@@ -3506,7 +3670,7 @@ $res
       <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
         <Button Name="ConnectBtn" Content="Hubungkan" Style="{StaticResource LxPill}" Padding="16,8"
                 FontSize="12.5" Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
-                Foreground="#FFFFFF" Margin="0,0,7,0"/>
+                Foreground="{StaticResource LxOnAccent}" Margin="0,0,7,0"/>
         <Button Name="TestBtn" Content="Uji koneksi" Style="{StaticResource LxPill}" Padding="14,8"
                 FontSize="12.5" Margin="0,0,7,0"/>
         <Button Name="DisconnectBtn" Content="Putuskan" Style="{StaticResource LxPill}" Padding="14,8"

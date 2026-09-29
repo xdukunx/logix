@@ -40,6 +40,17 @@ try {
     throw
 }
 
+# Software rendering for this process. The widget is a few small surfaces that
+# stay on screen for hours; a Direct3D device for them cost ~17 MB more memory
+# and slightly more CPU than the software rasterizer when measured, and weak
+# integrated GPUs on older lab machines gain nothing from it. Must be set
+# before the first window is created.
+try {
+    [System.Windows.Media.RenderOptions]::ProcessRenderMode = [System.Windows.Interop.RenderMode]::SoftwareOnly
+} catch {
+    Write-LogbookError "Timer: could not select software rendering: $($_.Exception.Message)"
+}
+
 # Win32 helpers: WS_EX_TOOLWINDOW keeps the widget out of Alt-Tab; the strip
 # additionally takes WS_EX_TRANSPARENT so it is click-through and never steals
 # a click from the application beneath it.
@@ -501,22 +512,25 @@ function Update-LogbookWidgetView {
 
     $stripWindow.Visibility = if ($script:posture -eq 'strip') { 'Visible' } else { 'Collapsed' }
 
-    # Card contents depend on the message state machine.
-    $hasMsg  = $script:msgState -in @('reading','replying')
+    # Card contents depend on the message state machine. 'sent' keeps the
+    # message on the card, with the reply echoed under it and the quick replies
+    # still offered -- sending one answer used to be the end of the
+    # conversation, the message vanished and there was no way to add to it.
+    $hasMsg  = $script:msgState -in @('reading','replying','sent')
     $isSent  = $script:msgState -eq 'sent'
 
-    $cardInfo.Visibility    = if ($hasMsg -or $isSent) { 'Collapsed' } else { 'Visible' }
+    $cardInfo.Visibility    = if ($hasMsg) { 'Collapsed' } else { 'Visible' }
     $cardMessage.Visibility = if ($hasMsg) { 'Visible' } else { 'Collapsed' }
-    $cardQuick.Visibility   = if ($script:msgState -eq 'reading' -and $script:msgAllowReply) { 'Visible' } else { 'Collapsed' }
+    $cardQuick.Visibility   = if ($script:msgState -in @('reading','sent') -and $script:msgAllowReply) { 'Visible' } else { 'Collapsed' }
     $cardReplyRw.Visibility = if ($script:msgState -eq 'replying') { 'Visible' } else { 'Collapsed' }
     $cardSent.Visibility    = if ($isSent) { 'Visible' } else { 'Collapsed' }
     # Hidden, never Collapsed: Collapsed would give the space back and resize
     # the card mid-press, which is what cancelled the hold 110ms in.
     $armedCap.Visibility    = if ($script:selesaiHolding) { 'Visible' } else { 'Hidden' }
     # SELESAI is out of the way while the user is answering the admin.
-    $selesaiBtn.Visibility  = if ($hasMsg -or $isSent) { 'Collapsed' } else { 'Visible' }
+    $selesaiBtn.Visibility  = if ($hasMsg) { 'Collapsed' } else { 'Visible' }
     # A message card is the wider 260px variant (design M1-M3).
-    $cardView.Width = if ($hasMsg -or $isSent) { 260 } else { 240 }
+    $cardView.Width = if ($hasMsg) { 260 } else { 240 }
 
     $pillBadge.Visibility = if ($badgeVisible) { 'Visible' } else { 'Collapsed' }
     $sliverBadge.Visibility = if ($badgeVisible) { 'Visible' } else { 'Collapsed' }
@@ -971,7 +985,14 @@ $script:edgeTimer.Add_Tick({
 })
 
 # ---- Admin message ----------------------------------------------------------
-$msgPath = Join-Path $Global:StateDir 'incoming_message.json'
+# Admin messages older than this are dropped unshown rather than surfacing
+# long after the fact -- possibly to whoever signs in next. Generous enough to
+# ride out what used to lose messages outright under the old 5-minute rule:
+# a widget that was restarting, or a user still at the sign-in popup when the
+# message arrived. An emergency alert keeps the short window, because
+# "dimatikan dalam 30 detik" shown ten minutes late is simply wrong.
+$script:MESSAGE_MAX_AGE_MINUTES   = 60
+$script:EMERGENCY_MAX_AGE_MINUTES = 5
 
 function Send-LogbookWidgetReply([string]$Text) {
     if ([string]::IsNullOrWhiteSpace($Text)) { return }
@@ -982,11 +1003,16 @@ function Send-LogbookWidgetReply([string]$Text) {
     # Send-LogbookReply writes the text to pending_replies.json and the next
     # successful heartbeat flushes it. The old wording promised a retry that
     # no code performed.
-    $sentText.Text = if ($ok) {
-        'Terkirim ke admin ' + [char]0x00B7 + ' ' + (Get-Date).ToString('HH:mm')
+    #
+    # The reply is echoed back under the message, and the quick replies stay
+    # offered (Update-LogbookWidgetView), so the conversation can continue:
+    # one reply used to end it.
+    $status = if ($ok) {
+        'terkirim ' + [char]0x00B7 + ' ' + (Get-Date).ToString('HH:mm')
     } else {
-        'Server tidak terjangkau ' + [char]0x00B7 + ' balasan diantre, terkirim otomatis nanti'
+        'server tidak terjangkau ' + [char]0x00B7 + ' balasan diantre, terkirim otomatis nanti'
     }
+    $sentText.Text = 'Anda: ' + $Text.Trim() + "`n" + $status
     $replyInput.Text = ''
     Update-LogbookWidgetView
     Start-LogbookCollapseCountdown
@@ -1011,40 +1037,69 @@ $replyInput.Add_TextChanged({
     $replyHint.Visibility = if ([string]::IsNullOrEmpty($replyInput.Text)) { 'Visible' } else { 'Collapsed' }
 })
 
+# Drains the inbox Set-LogbookIncomingMessage (logbook_common.ps1) writes to,
+# oldest first, ONE message at a time -- and only when the card is not already
+# holding one. Taking whatever arrived last used to lose the message before it
+# unseen, and swapping it in while the user was typing a reply changed the
+# command_id that reply would be linked to underneath them. A message file is
+# removed only once it is actually on screen; one that cannot be rendered is
+# set aside as .bad (kept for diagnosis, not retried every second).
 function Show-LogbookPendingMessage {
-    if (-not (Test-Path $msgPath)) { return }
-    try {
-        $msg = Get-Content $msgPath -Raw | ConvertFrom-Json
-        $receivedAt = [datetime]$msg.received_at
-        if (((Get-Date) - $receivedAt).TotalMinutes -gt 5) { return }
+    if (-not (Test-Path -LiteralPath $Global:MessageInboxDir)) { return }
+    $files = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object Name)
+    $waiting = 0
+    foreach ($f in $files) {
+        try {
+            $msg = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction Stop | ConvertFrom-Json
+            $receivedAt = [datetime]$msg.received_at
+            $isEmergency = ([string]$msg.reason -eq 'Emergency Alert')
+            $maxAge = if ($isEmergency) { $script:EMERGENCY_MAX_AGE_MINUTES } else { $script:MESSAGE_MAX_AGE_MINUTES }
+            if (((Get-Date) - $receivedAt).TotalMinutes -gt $maxAge) {
+                Write-LogbookInfo "Timer: dropping unshown message $($f.Name), older than $maxAge min."
+                Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+                continue
+            }
 
-        # An emergency escapes both postures to the centered overlay -- too
-        # important to sit as a badge in the corner.
-        if ([string]$msg.reason -eq 'Emergency Alert') {
-            Show-LogbookOverlay -Mode 'broadcast' -Body ([string]$msg.text)
-            return
+            # An emergency escapes both postures to the centered overlay -- too
+            # important to sit as a badge in the corner, or to wait its turn
+            # behind a message the user has not opened yet.
+            if ($isEmergency) {
+                Show-LogbookOverlay -Mode 'broadcast' -Body ([string]$msg.text)
+                Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+                continue
+            }
+
+            if ($script:msgState -ne 'none') { $waiting += 1; continue }
+
+            $script:msgCommandId  = [string]$msg.command_id
+            $script:msgAllowReply = ($msg.allow_reply -ne $false)
+            $messageText.Text = [string]$msg.text
+            $label = if ([string]$msg.reason -eq 'Screen View Notice') { 'PRIVASI' } else { 'ADMIN' }
+            $messageMeta.Text = $label + ' ' + [char]0x00B7 + ' ' + $receivedAt.ToString('HH:mm')
+            $script:msgState = 'unread'
+
+            # Strip posture is the ONE place a background event is allowed to
+            # move: the strip turns blue and the sliver peeks for 4s, then
+            # retracts. In pill posture nothing moves -- the badge just appears.
+            if ($script:posture -eq 'strip') {
+                $script:sliverOpen = $true
+                $script:sliverHideTick = $script:tick + $script:AUTOPEEK_SECONDS
+            }
+            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-LogbookError "Timer: could not show inbox message $($f.Name), setting it aside: $($_.Exception.Message)"
+            Move-Item -LiteralPath $f.FullName -Destination ($f.FullName + '.bad') -Force -ErrorAction SilentlyContinue
         }
+    }
 
-        $script:msgCommandId  = [string]$msg.command_id
-        $script:msgAllowReply = ($msg.allow_reply -ne $false)
-        $messageText.Text = [string]$msg.text
-        $label = if ([string]$msg.reason -eq 'Screen View Notice') { 'PRIVASI' } else { 'ADMIN' }
-        $messageMeta.Text = $label + ' ' + [char]0x00B7 + ' ' + $receivedAt.ToString('HH:mm')
-        $script:msgState = 'unread'
-        $script:msgUnread += 1
-
-        # Strip posture is the ONE place a background event is allowed to
-        # move: the strip turns blue and the sliver peeks for 4s, then
-        # retracts. In pill posture nothing moves -- the badge just appears.
-        if ($script:posture -eq 'strip') {
-            $script:sliverOpen = $true
-            $script:sliverHideTick = $script:tick + $script:AUTOPEEK_SECONDS
+    # The badge counts the message on the card plus everything queued behind
+    # it, so two broadcasts read as "2" rather than the second vanishing.
+    if ($script:msgState -eq 'unread') {
+        $newUnread = 1 + $waiting
+        if ($newUnread -ne $script:msgUnread) {
+            $script:msgUnread = $newUnread
+            Update-LogbookWidgetView
         }
-        Update-LogbookWidgetView
-    } catch {
-        Write-LogbookError "Timer: failed to show pending message: $($_.Exception.Message)"
-    } finally {
-        Remove-Item $msgPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -1279,7 +1334,33 @@ $timer.Add_Tick({
 
     Show-LogbookPendingMessage
     Test-LogbookIdleWarning
+
+    # Denyut: one beat of the status dot per heartbeat the server actually
+    # acknowledged, signalled by the monitor (Get-LogbookHeartbeatPulse). A
+    # zero-timeout check of an in-memory event: no file, no wait.
+    try { if ((Get-LogbookHeartbeatPulse).WaitOne(0)) { Invoke-LogbookDotBeat } } catch {}
 })
+
+# The dot swells and settles once, then is still again: never a loop at rest.
+# Visible dots only, and not at all under reduced motion.
+function Invoke-LogbookDotBeat {
+    if ($script:reduceMotion) { return }
+    $beat = New-Object System.Windows.Media.Animation.DoubleAnimation(1.9, 1.0, [TimeSpan]::FromMilliseconds(480))
+    $ease = New-Object System.Windows.Media.Animation.CubicEase
+    $ease.EasingMode = 'EaseOut'
+    $beat.EasingFunction = $ease
+    foreach ($dot in @($pillDot, $cardDot, $sliverDot)) {
+        if (-not $dot.IsVisible) { continue }
+        $scale = $dot.RenderTransform -as [System.Windows.Media.ScaleTransform]
+        if (-not $scale -or $scale.IsFrozen) {
+            $scale = New-Object System.Windows.Media.ScaleTransform(1.0, 1.0)
+            $dot.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 0.5)
+            $dot.RenderTransform = $scale
+        }
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $beat)
+        $scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $beat)
+    }
+}
 
 # The monitor owns the actual idle auto-close (logbook_monitor.ps1); this only
 # owns the 5-minute warning the design promises the user, so the two can never

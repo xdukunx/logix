@@ -36,10 +36,11 @@ HERE = Path(__file__).resolve().parent
 BRANDING_DIR = HERE / "branding"
 WINDOWS_DIR = HERE.parent / "windows"
 
-# Logix brand blues -- the gradient the mascot sits on. Matches the dashboard
-# theme accent (#2563EB, frontend/src/theme.ts) shading down to a deep navy.
-BRAND_TOP = (37, 99, 235)     # #2563EB
-BRAND_BOTTOM = (17, 34, 78)   # deep navy
+# The gradient the mascot sits on: the v4 "Denyut" ink ramp, the same dark
+# frame as the dashboard sidebar and the workstation client
+# (frontend/src/tokens.css --lx-frame-raise down to --lx-frame).
+BRAND_TOP = (29, 31, 35)      # #1D1F23
+BRAND_BOTTOM = (11, 12, 14)   # #0B0C0E
 WORDMARK = "Logix"
 TAGLINE = "Lab Access Logbook"
 

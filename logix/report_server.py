@@ -68,8 +68,9 @@ import logbook_report as report  # noqa: E402
 
 DEFAULT_DB = paths.default_db()
 
-# A tab left open must not keep a PII endpoint alive forever. The UI polls
-# nothing, so any gap this long means nobody is looking.
+# A tab left open must not keep a PII endpoint alive forever. The page's one
+# timer refreshes only while it is visible AND someone has touched it recently
+# (see the end of PAGE), so any gap this long means nobody is looking.
 IDLE_SHUTDOWN_SECONDS = 30 * 60
 # How often the watchdog checks. Named rather than inlined so a test can run
 # the real shutdown path in a second instead of half a minute -- a timeout
@@ -376,9 +377,14 @@ def _export_csv(db_path, start_d, end_d, only_ids=None):
 #
 # Everything here comes from a source that already existed. Nothing on this
 # page is computed twice or invented: identity and history come from
-# logbook_report's own queries, sync state from log_physical.sync_status,
-# and telemetry from workstation.py -- which returns None, never a zero,
-# for anything this machine cannot actually report.
+# logbook_report's own queries, sync state from log_physical.sync_status.
+#
+# There is deliberately no hardware reading (CPU, memory, GPU, storage). The
+# page used to carry one, and the lab admin asked for it to go: a logbook is
+# not a hardware monitor, and every PC in the lab was paying for one nobody
+# needed. workstation.py is no longer shipped, and nothing here imports it --
+# an install upgraded in place may still have the file on disk, and it must
+# stay inert there.
 
 def _sync_snapshot(db_path):
     """Sync state for the seven-state indicator in the UX contract. Returns
@@ -505,15 +511,6 @@ def _overview(state):
         sessions = []
     active = _active_session(sessions)
 
-    try:
-        import workstation
-        telemetry = workstation.snapshot()
-    except Exception:
-        # The module is optional in the same sense psutil is: a dashboard
-        # that cannot read a sensor still has a logbook to show.
-        telemetry = {"cpu": None, "memory": None, "storage": None,
-                     "gpu": None, "psutil_available": False}
-
     recent = [
         {
             "start": report.fmt_ts(s.get("start_ts")),
@@ -531,7 +528,6 @@ def _overview(state):
             "hostname": socket.gethostname(),
             "display": state.device or socket.gethostname(),
         },
-        "telemetry": telemetry,
         "active": None if not active else {
             "nama": active.get("nama") or "",
             "nim": active.get("nim") or "",
@@ -553,25 +549,25 @@ PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Logix</title>
+<!-- Every route here needs the launch token, and the browser's own
+     /favicon.ico request never carries it, so it drew a 403 on each load. -->
+<link rel="icon" href="data:,">
 <style>
 /* ── tokens ─────────────────────────────────────────────────────────────
-   Values mirror frontend/src/tokens.css -- the LogiX v3 "Clean Calibration"
-   ramp the server dashboard already ships. Not merely similar: the same
-   hex, so a person moving between the admin dashboard and this local
-   console is looking at one product rather than two that resemble each
-   other. The names differ (that file prefixes --lx-) because this page is
-   standalone and has no build step; the VALUES are the contract.
+   The LogiX v4 "Denyut" ramp, copied from frontend/src/tokens.css so this
+   page reads as the same product as the admin dashboard. A copy rather than
+   an import because this page is standalone, with no build step.
 
-   That file encodes the same rules this page arrived at independently:
-   status colour exists only as a dot or a hairline edge, never a tinted
-   background, and the accent is reserved for links, focus rings and
-   primary buttons. Nothing else. */
+   Status colour exists only as a dot or a hairline edge, never a tinted
+   background. The accent is lime, which is unreadable as a thin line or as
+   text on white: it fills primary buttons (with --accent-ink on it), while
+   focus rings and the active-nav edge use --edge, ink on the light ramp. */
 :root{
-  --bg:#f4f5f7; --surface:#ffffff; --surface-subtle:#f4f5f7;
-  --surface-accent:#f4f5f7; --border:#e6e9ef; --border-strong:#d9dde3;
-  --text:#14181f; --text-muted:#6a7382; --text-faint:#8a94a6;
-  --accent:#2563eb; --accent-hover:#1d4ed8; --accent-ink:#ffffff;
-  --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+  --bg:#eceef1; --surface:#ffffff; --surface-subtle:#f3f4f6;
+  --surface-accent:#f3f4f6; --border:#e3e6ea; --border-strong:#cfd4da;
+  --text:#111214; --text-muted:#6b7078; --text-faint:#8a93a0;
+  --accent:#c5f23a; --accent-hover:#b6e329; --accent-ink:#111214; --edge:#111214;
+  --ok:#1f9d55; --warn:#e0a100; --err:#e5484d;
 
   --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
   --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
@@ -583,19 +579,19 @@ PAGE = """<!doctype html>
   --ease:cubic-bezier(.2,.6,.2,1);
 }
 :root[data-theme="dark"]{
-  --bg:#0b0f16; --surface:#111722; --surface-subtle:#0b0f16;
-  --surface-accent:#0b0f16; --border:#1e2836; --border-strong:#2a3648;
-  --text:#edf1f7; --text-muted:#8a94a6; --text-faint:#6b7280;
-  --accent:#2563eb; --accent-hover:#3b82f6; --accent-ink:#ffffff;
-  --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  --bg:#121316; --surface:#1a1c20; --surface-subtle:#15171a;
+  --surface-accent:#15171a; --border:#26292f; --border-strong:#30343a;
+  --text:#eef0f3; --text-muted:#8d939c; --text-faint:#5f6670;
+  --accent:#c5f23a; --accent-hover:#d4f75e; --accent-ink:#111214; --edge:#c5f23a;
+  --ok:#3ccf78; --warn:#f5b82e; --err:#ff5c61;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#0b0f16; --surface:#111722; --surface-subtle:#0b0f16;
-    --surface-accent:#0b0f16; --border:#1e2836; --border-strong:#2a3648;
-    --text:#edf1f7; --text-muted:#8a94a6; --text-faint:#6b7280;
-    --accent:#2563eb; --accent-hover:#3b82f6; --accent-ink:#ffffff;
-    --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+    --bg:#121316; --surface:#1a1c20; --surface-subtle:#15171a;
+    --surface-accent:#15171a; --border:#26292f; --border-strong:#30343a;
+    --text:#eef0f3; --text-muted:#8d939c; --text-faint:#5f6670;
+    --accent:#c5f23a; --accent-hover:#d4f75e; --accent-ink:#111214; --edge:#c5f23a;
+    --ok:#3ccf78; --warn:#f5b82e; --err:#ff5c61;
   }
 }
 
@@ -603,7 +599,7 @@ PAGE = """<!doctype html>
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:400 13px/1.55 var(--font);
   -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+:focus-visible{outline:2px solid var(--edge);outline-offset:2px;border-radius:2px}
 
 /* ── shell ───────────────────────────────────────────────────────────── */
 .shell{display:grid;grid-template-columns:208px 1fr;min-height:100vh}
@@ -617,7 +613,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:400 13px/1.55 var(--fo
   border-left:2px solid transparent;transition:background var(--duration-fast) var(--ease)}
 .nav a:hover{background:var(--surface-subtle);color:var(--text)}
 .nav a[aria-current="page"]{background:var(--surface-accent);color:var(--text);
-  border-left-color:var(--accent)}
+  border-left-color:var(--edge)}
 .nav-rule{height:1px;background:var(--border);margin:var(--space-3) var(--space-2)}
 .side-foot{margin-top:auto;padding-top:var(--space-4)}
 .chip{border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -646,70 +642,6 @@ main{padding:var(--space-7) var(--space-6) var(--space-7);max-width:1180px;width
 
 h2.sec{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
   color:var(--text-faint);margin:0 0 var(--space-3)}
-.sec-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:var(--space-3)}
-.sec-row h2{margin:0}
-.stamp{font-size:11px;color:var(--text-faint)}
-
-/* ── health: ONE panel, four readings of one machine ─────────────────── */
-.health{border:1px solid var(--border);border-radius:var(--radius-md);
-  background:var(--surface);display:grid;grid-template-columns:repeat(4,1fr);
-  margin-bottom:var(--space-5)}
-.metric{padding:var(--space-4);border-left:1px solid var(--border)}
-.metric:first-child{border-left:0}
-.metric .lbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--text-faint);margin-bottom:var(--space-2)}
-.metric .val{font-size:26px;font-weight:640;letter-spacing:-.02em;line-height:1.15}
-.metric .val.na{font-size:13px;font-weight:400;color:var(--text-faint);line-height:1.55;
-  padding:6px 0 5px}
-.metric .sub{font-size:12px;color:var(--text-muted);margin-top:2px}
-/* Three shapes, because the four readings are three different shapes of
-   data -- not variety for its own sake:
-     CPU      countable discrete units  -> one block PER REAL CORE
-     Mem/Disk continuous magnitude      -> a bar
-     GPU      a single utilisation %    -> a dial
-   A row of 18 arbitrary blocks under "28.3 GB free" implied storage came
-   in 18 countable units. It does not. Cores do. */
-
-/* One block per logical CPU, each filled from the bottom by THAT core's
-   own load -- psutil.cpu_percent(percpu=True), not the aggregate split
-   into equal parts. A block is a core, so the row is only meaningful at
-   the real core count. */
-.cores{display:flex;gap:2px;margin-top:var(--space-3);align-items:flex-end;height:22px}
-.cores .c{flex:1;min-width:0;height:100%;background:var(--border-strong);
-  border-radius:1px;position:relative;overflow:hidden}
-.cores .c i{position:absolute;left:0;right:0;bottom:0;background:var(--accent);
-  display:block}
-
-/* Continuous magnitude. Same 3px hairline the rest of the page uses. */
-.bar{height:4px;background:var(--border-strong);border-radius:2px;
-  margin-top:var(--space-3);overflow:hidden}
-.bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
-
-/* A moving line over the samples this process has actually taken while the
-   page was open. Not a trend, not a forecast, and not persisted -- if the
-   page has only been open ten seconds the line is ten seconds long, which
-   is the honest thing for it to be. */
-.spark{margin-top:var(--space-3);height:34px;position:relative}
-.spark svg{width:100%;height:100%;display:block;overflow:visible}
-.spark .fill{fill:var(--accent);opacity:.10}
-.spark .line{fill:none;stroke:var(--accent);stroke-width:1.5;
-  stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.spark .warming{position:absolute;inset:0;display:flex;align-items:center;
-  font-size:11px;color:var(--text-faint)}
-
-/* Secondary readings that only exist for some hardware -- shown when the
-   machine reports them, absent otherwise, never zero-filled. */
-.aux{display:flex;gap:var(--space-3);flex-wrap:wrap;margin-top:var(--space-2);
-  font-size:11px;color:var(--text-muted);font-variant-numeric:tabular-nums}
-.aux b{font-weight:600;color:var(--text)}
-
-/* One utilisation percentage, one dial. */
-.gauge{position:relative;width:64px;height:64px;flex:none;margin-top:var(--space-2)}
-.gauge svg{width:100%;height:100%;display:block}
-.gauge .gv{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)}
-.metric.has-gauge{display:flex;align-items:flex-start;justify-content:space-between;
-  gap:var(--space-3)}
 
 /* ── current usage: the one accented object ──────────────────────────── */
 /* Plain, same surface and same 1px border as every other panel on the page
@@ -785,7 +717,7 @@ td{padding:var(--space-3);border-bottom:1px solid var(--border);vertical-align:t
 tbody tr:last-child td{border-bottom:0}
 tbody tr{cursor:pointer;transition:background var(--duration-fast) var(--ease)}
 tbody tr:hover{background:var(--surface-subtle)}
-tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+tbody tr:focus-visible{outline:2px solid var(--edge);outline-offset:-2px}
 .num{font-family:var(--mono);font-size:12px;white-space:nowrap}
 .r{text-align:right}
 .mut{color:var(--text-muted)}
@@ -845,11 +777,6 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .hide{display:none!important}
 
 /* ── responsive ──────────────────────────────────────────────────────── */
-@media(max-width:1100px){
-  .health{grid-template-columns:repeat(2,1fr)}
-  .metric:nth-child(3){border-left:0}
-  .metric:nth-child(n+3){border-top:1px solid var(--border)}
-}
 @media(max-width:900px){
   .shell{grid-template-columns:1fr}
   .side{position:static;height:auto;flex-direction:row;align-items:center;gap:var(--space-3);
@@ -857,15 +784,12 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .mark{padding:0 var(--space-2) 0 0}
   .nav{flex-direction:row;gap:var(--space-1)}
   .nav a{border-left:0;border-bottom:2px solid transparent}
-  .nav a[aria-current="page"]{border-left-color:transparent;border-bottom-color:var(--accent)}
+  .nav a[aria-current="page"]{border-left-color:transparent;border-bottom-color:var(--edge)}
   .nav-rule,.side-foot{display:none}
   main{padding:var(--space-5) var(--space-4) var(--space-7)}
   th.opt,td.opt{display:none}
 }
 @media(max-width:560px){
-  .health{grid-template-columns:1fr}
-  .metric{border-left:0;border-top:1px solid var(--border)}
-  .metric:first-child{border-top:0}
   .field{width:100%}
   .rrow{grid-template-columns:64px 1fr auto}
   .rrow .p{display:none}
@@ -900,15 +824,9 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 
     <!-- OVERVIEW -->
     <section id="v-overview">
-      <div class="sec-row">
-        <h2 class="sec">Workstation health</h2>
-        <span class="stamp" id="stamp"></span>
-      </div>
-      <div class="health" id="health"></div>
-
       <div id="usage"></div>
 
-      <div class="sec-row"><h2 class="sec">Recent</h2></div>
+      <h2 class="sec">Recent</h2>
       <div id="recent"></div>
       <!-- Export sits here as well as on Logs. Exporting is one of the two
            things a device owner actually comes to this page to do, and
@@ -940,7 +858,7 @@ tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
           <option value="active">Active</option>
         </select>
         <span class="spacer"></span>
-        <button class="primary" onclick="doExport()">Export</button>
+        <button class="primary" onclick="doExport(true)">Export</button>
       </div>
       <div id="exportNote" class="note"></div>
       <div id="logs"></div>
@@ -976,8 +894,6 @@ function t(u){return u+(u.indexOf("?")<0?"?":"&")+"t="+encodeURIComponent(TOKEN)
 var ENT={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"};
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return ENT[c]})}
 function dash(s){return (s===null||s===undefined||s==="")?"—":s}
-function gb(n){if(n==null)return null;var v=n/1073741824;return (v>=100?v.toFixed(0):v.toFixed(1))+" GB"}
-function pct(n){return n==null?null:Math.round(n)+"%"}
 
 function go(v){
   VIEW=v;
@@ -1012,149 +928,6 @@ function syncView(s){
     line:"No synchronization has run on this workstation yet."};
 }
 
-/* ── telemetry: absent is smaller, quieter, and has NO meter ─────────── */
-function clamp(p){return Math.max(0,Math.min(100,p))}
-
-/* A polyline over real samples. maxV lets a rate series (bytes/sec, which
-   has no ceiling) scale to its own peak, while a percentage series is
-   pinned to 0-100 so the line does not appear to rescale itself every
-   time the machine goes quiet.
-
-   Under two points there is nothing to draw a line between, and saying so
-   beats drawing a flat line that looks like a measured idle. */
-function sparkline(series,maxV){
-  var pts=series.filter(function(v){return typeof v==="number"});
-  if(pts.length<2)
-    return '<div class="spark"><div class="warming">collecting…</div></div>';
-  var top=maxV||Math.max.apply(null,pts)||1;
-  var W=100,H=30,n=pts.length;
-  var xy=pts.map(function(v,i){
-    var x=(n===1)?W:(i/(n-1)*W);
-    var y=H-(clampTo(v,top)/top*H);
-    return x.toFixed(2)+","+y.toFixed(2);
-  });
-  var area="0,"+H+" "+xy.join(" ")+" "+W+","+H;
-  return '<div class="spark"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
-    +'<polygon class="fill" points="'+area+'"/>'
-    +'<polyline class="line" points="'+xy.join(" ")+'"/></svg></div>';
-}
-function clampTo(v,top){return Math.max(0,Math.min(top,v))}
-
-function rate(bps){
-  if(bps==null)return null;
-  if(bps>=1048576)return (bps/1048576).toFixed(1)+" MB/s";
-  if(bps>=1024)return Math.round(bps/1024)+" KB/s";
-  return Math.round(bps)+" B/s";
-}
-
-/* One block per REAL logical CPU, each filled by that core's own load. The
-   count is len(per_core), never a round number chosen for looks: a block
-   IS a core, so 16 cores draw 16 blocks and 32 draw 32. */
-function coreRow(perCore){
-  return perCore.map(function(v){
-    return '<div class="c"><i style="height:'+clamp(v)+'%"></i></div>';
-  }).join("");
-}
-
-/* 24 ticks over a 270-degree sweep. Kept for GPU alone: it is one
-   utilisation percentage with no countable units behind it and no second
-   dimension, which is the only place a dial says more than a bar would. */
-function gaugeTicks(p){
-  var n=24, start=135, sweep=270, filled=Math.round(p/100*n), out="";
-  for(var i=0;i<n;i++){
-    var ang=(start+sweep*i/(n-1)).toFixed(1);
-    var col=(i<filled)?"var(--accent)":"var(--border-strong)";
-    out+='<line x1="50" y1="13" x2="50" y2="22" stroke="'+col+'" stroke-width="4.5" '
-      +'stroke-linecap="round" transform="rotate('+ang+' 50 50)"/>';
-  }
-  return out;
-}
-
-/* shape: "cores" | "bar" | "gauge" | null. null renders no indicator at
-   all -- absence is never drawn as a measurement, in any of the three.
-   opts.spark adds the moving line; opts.aux adds secondary readings the
-   hardware may or may not report. */
-function metric(label,value,sub,shape,data,opts){
-  opts=opts||{};
-  var body='<div class="lbl">'+esc(label)+'</div>'
-   +(value==null
-      ? '<div class="val na">Unavailable</div><div class="sub">'+esc(sub)+'</div>'
-      : '<div class="val">'+esc(value)+'</div><div class="sub">'+esc(sub)+'</div>');
-
-  var aux="";
-  if(opts.aux && opts.aux.length){
-    aux='<div class="aux">'+opts.aux.map(function(a){
-      return esc(a[0])+" <b>"+esc(a[1])+"</b>";
-    }).join("")+'</div>';
-  }
-  var spark=opts.spark ? sparkline(opts.spark,opts.sparkMax) : "";
-
-  if(shape==="cores" && data && data.length)
-    return '<div class="metric">'+body+'<div class="cores">'+coreRow(data)+'</div>'
-      +spark+aux+'</div>';
-  if(shape==="bar" && data!=null)
-    return '<div class="metric">'+body
-      +'<div class="bar"><i style="width:'+clamp(data)+'%"></i></div>'+spark+aux+'</div>';
-  if(shape==="gauge" && data!=null)
-    return '<div class="metric has-gauge"><div style="flex:1;min-width:0">'+body+spark+aux+'</div>'
-      +'<div class="gauge"><svg viewBox="0 0 100 100">'+gaugeTicks(clamp(data))+'</svg>'
-      +'<div class="gv">'+Math.round(clamp(data))+'%</div></div></div>';
-  return '<div class="metric">'+body+aux+'</div>';
-}
-function paintHealth(tl){
-  if(!tl)return;
-  var c=tl.cpu,m=tl.memory,g=tl.gpu,s=tl.storage;
-  /* The sub-line names BOTH counts when they differ. per_core comes back
-     one entry per LOGICAL cpu, so on a 10-core/16-thread part the row is
-     16 blocks -- and saying only "10 cores" over 16 blocks would leave the
-     viewer counting and finding the label wrong. */
-  var cpuSub="psutil not installed";
-  if(c){
-    cpuSub=(c.cores_physical && c.cores_physical!==c.cores_logical)
-      ? c.cores_logical+" threads on "+c.cores_physical+" cores"
-      : (c.cores_logical||0)+" cores";
-  }
-  var h=tl.history||[];
-  function series(key){return h.map(function(x){return x[key]})}
-
-  /* Only what this hardware actually reported. nvidia-smi answers [N/A]
-     for anything the card does not expose, and workstation.py drops those
-     keys rather than zero-filling -- so an absent sensor shows no chip at
-     all instead of a convincing 0. */
-  var gpuAux=[];
-  if(g&&g.temp_c!=null)   gpuAux.push(["temp", Math.round(g.temp_c)+"°C"]);
-  if(g&&g.power_w!=null)  gpuAux.push(["power", g.power_w.toFixed(1)+" W"]);
-  if(g&&g.clock_mhz!=null)gpuAux.push(["clock", Math.round(g.clock_mhz)+" MHz"]);
-
-  var io=tl.io||null;
-  var diskAux=[], memAux=[];
-  if(io){
-    diskAux.push(["read", rate(io.disk_read_bps)]);
-    diskAux.push(["write", rate(io.disk_write_bps)]);
-    memAux.push(["net", rate(io.net_recv_bps+io.net_sent_bps)]);
-  }
-
-  document.getElementById("health").innerHTML=
-     metric("CPU", c?pct(c.percent):null, cpuSub, "cores", c?c.per_core:null,
-            {spark:series("cpu"), sparkMax:100})
-   + metric("Memory", m?gb(m.used_bytes):null,
-            m?"of "+gb(m.total_bytes):"psutil not installed",
-            "bar", m?m.percent:null,
-            {spark:series("memory"), sparkMax:100, aux:memAux})
-   + metric("GPU", g?pct(g.percent):null,
-            g?gb(g.vram_used_bytes)+" / "+gb(g.vram_total_bytes)+" VRAM":"No supported GPU was detected.",
-            "gauge", g?g.percent:null,
-            {spark:series("gpu"), sparkMax:100, aux:gpuAux})
-   + metric("Storage", s?gb(s.free_bytes)+" free":null,
-            s?"of "+gb(s.total_bytes):"Unavailable",
-            "bar", s?s.percent:null,
-            /* Throughput, not capacity -- a disk that is 90% full is not
-               a disk that is busy, and the line has to answer the second
-               question since the bar already answers the first. */
-            {spark:series("disk_bps"), aux:diskAux});
-  document.getElementById("stamp").textContent="refreshed just now";
-}
-
 function paintUsage(a){
   var el=document.getElementById("usage");
   if(!a){el.innerHTML='<div class="empty" style="margin-bottom:var(--space-6)">'
@@ -1173,19 +946,32 @@ function paintUsage(a){
    +'<button onclick="detailActive()">Details</button></div></div>';
 }
 
+/* Recent is today's sessions (the overview asks for the "today" range), so
+   a date on every row is noise -- and the full timestamp wrapped the narrow
+   time column onto two lines, three on a phone. The date stays for a
+   session that began before today; the full value is in the tooltip and
+   the details sheet. */
+function shortStart(s){
+  var p=String(s||"").split(" "), d=p[0], tm=(p[1]||"").slice(0,5);
+  if(!tm)return String(s||"");
+  var n=new Date();
+  var today=n.getFullYear()+"-"+("0"+(n.getMonth()+1)).slice(-2)+"-"+("0"+n.getDate()).slice(-2);
+  return d===today?tm:d.slice(5)+" "+tm;
+}
+
 function paintRecent(list){
   var el=document.getElementById("recent");
-  if(!list||!list.length){el.innerHTML='<div class="empty"><b>No sessions recorded</b>'
-    +'<span>No sessions have been recorded on this workstation yet.</span></div>';return}
+  /* Today's list, not the whole history: "nothing recorded yet" was untrue
+     on any machine with older sessions and a quiet morning. */
+  if(!list||!list.length){el.innerHTML='<div class="empty"><b>No sessions today</b>'
+    +'<span>Nothing has been recorded on this workstation today.</span></div>';return}
   el.innerHTML='<div class="recent">'+list.map(function(r,i){
     return '<div class="rrow" tabindex="0" data-i="'+i+'">'
-      +'<span class="t">'+esc(r.start)+'</span>'
+      +'<span class="t" title="'+esc(r.start)+'">'+esc(shortStart(r.start))+'</span>'
       +'<span><span class="n">'+esc(r.nama)+'</span> <span class="p">'+esc(dash(r.tujuan))+'</span></span>'
       +'<span class="d">'+esc(r.durasi)+'</span></div>';
   }).join("")+'</div>';
 }
-
-var SERVER=null;
 
 /* The seven states are resolved SERVER-side from the structured failure
    class (see _server_state). This renders what it is told; it does not
@@ -1200,7 +986,7 @@ var SERVER_TITLE={LOCAL_ONLY:"Local only",SYNC_BLOCKED:"Synchronization disabled
 
 function loadServer(){
   fetch(t("/api/server")).then(function(x){return x.json()})
-    .then(function(d){SERVER=d;paintServer(d)}).catch(function(){});
+    .then(paintServer).catch(function(){});
 }
 
 function paintServer(d){
@@ -1219,6 +1005,9 @@ function paintServer(d){
      problem, and saying so beats leaving the reader to infer it. */
   var reassure=(d.state==="SERVER_UNAVAILABLE"||d.state==="SYNC_ERROR")
     ? '<dt>Local logging</dt><dd class="okline">Working normally</dd>' : "";
+  /* The overview refresh repaints this card; an action's progress or result
+     line must survive that, or a 90-second sync looks like nothing is running. */
+  var prev=document.getElementById("serverNote"), note=prev?prev.textContent:"";
 
   document.getElementById("server").innerHTML=
     '<div class="card">'
@@ -1241,7 +1030,7 @@ function paintServer(d){
    +'</dl>'
 
    +'<div class="actions">'+acts+'</div>'
-   +'<div class="note" id="serverNote"></div></div>';
+   +'<div class="note" id="serverNote">'+esc(note)+'</div></div>';
 }
 
 function serverAction(kind){
@@ -1250,7 +1039,7 @@ function serverAction(kind){
   fetch(t("/api/server/"+kind),{method:"GET"})
     .then(function(x){return x.json()})
     .then(function(d){
-      if(d.state){SERVER=d.state;paintServer(d.state)}
+      if(d.state)paintServer(d.state);
       var n=document.getElementById("serverNote");
       /* The sentence follows the resulting STATE, not the exit code: a sync
          that could not reach the server exits cleanly, and calling that
@@ -1263,10 +1052,20 @@ function serverAction(kind){
       if(n)n.textContent="Could not run that action.";
     });
 }
-function syncNow(){ loadOverview(); }
+/* The server exits after half an hour without a request, which the gated
+   refresh at the end of this script now lets happen with a tab still open.
+   Say so rather than leave stale numbers looking live; a reopened page gets
+   a new token, so this tab cannot reconnect. */
+function pageClosed(){
+  document.getElementById("hdrSt").className="st";
+  document.getElementById("hdrTxt").textContent="Closed — reopen Laporan Logix";
+}
 
 function loadOverview(){
-  fetch(t("/api/overview")).then(function(r){return r.json()}).then(function(d){
+  /* The rejection handler sits on fetch alone: only a refused connection
+     means the server is gone, not a bad response from a live one. */
+  fetch(t("/api/overview")).then(function(r){return r.json()},pageClosed).then(function(d){
+    if(!d)return;
     OV=d;
     var w=d.workstation, sub=(w.display!==w.hostname)?w.hostname:"";
     document.getElementById("station").textContent=w.display;
@@ -1276,11 +1075,11 @@ function loadOverview(){
     document.getElementById("chipSub").textContent=v.txt;
     document.getElementById("hdrTxt").textContent=v.txt;
     document.getElementById("hdrSt").className="st "+v.cls;
-    paintHealth(d.telemetry); paintUsage(d.active); paintRecent(d.recent); paintServer(d.sync);
+    paintUsage(d.active); paintRecent(d.recent);
+    /* d.sync is the raw sync_status, not the resolved state the Server card
+       renders -- painting it there blanked the card on every refresh. */
+    if(VIEW==="server")loadServer();
   }).catch(function(){});
-}
-function loadTelemetry(){
-  fetch(t("/api/telemetry")).then(function(r){return r.json()}).then(paintHealth).catch(function(){});
 }
 
 /* ── logs ──────────────────────────────────────────────────────────────
@@ -1441,9 +1240,11 @@ function exportNote(msg){
     if(el) el.textContent=msg;
   }
 }
-function doExport(){
+/* From Logs, export exactly what the table is filtered to (spec L6); the
+   endpoint always accepted the search and filters, but nothing sent them. */
+function doExport(fromLogs){
   exportNote("Preparing export…");
-  fetch(t("/api/export?range="+encodeURIComponent(RANGE)))
+  fetch(t("/api/export?"+(fromLogs?logsQuery():"range="+encodeURIComponent(RANGE))))
    .then(function(x){return x.json()})
    .then(function(d){
      if(d.ok){
@@ -1508,11 +1309,24 @@ document.addEventListener("keydown",function(e){
 paintSeg();
 loadFilterOptions();
 loadOverview();
-/* Telemetry refreshes on its own timer; the session queries deliberately do
-   not run with it. Nothing animates on refresh -- numerals are tabular so a
-   changing digit moves nothing. */
-setInterval(function(){if(VIEW==="overview")loadTelemetry()},2500);
-setInterval(loadOverview,30000);
+/* The session clock and sync state go stale, so the overview refreshes --
+   but only while the page is on screen and someone has touched it lately.
+   An unconditional timer looks to the server like someone reading forever,
+   which defeats the idle shutdown that stops a forgotten tab from serving
+   names and NIMs for the rest of the day. */
+var LAST_INPUT=Date.now(), INPUT_WINDOW_MS=20*60*1000;
+function someoneIsLooking(){return !document.hidden&&(Date.now()-LAST_INPUT)<INPUT_WINDOW_MS}
+["pointerdown","pointermove","keydown","wheel","touchstart"].forEach(function(ev){
+  document.addEventListener(ev,function(){
+    /* Back after the window lapsed: refresh now, not on the next tick --
+       and find out at once if the server has shut down meanwhile. */
+    var back=!someoneIsLooking(); LAST_INPUT=Date.now(); if(back)loadOverview();
+  },{passive:true});
+});
+document.addEventListener("visibilitychange",function(){
+  if(!document.hidden){LAST_INPUT=Date.now();loadOverview()}
+});
+setInterval(function(){if(someoneIsLooking())loadOverview()},30000);
 </script>
 """
 
@@ -1579,26 +1393,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, json.dumps(_overview(self.state)).encode("utf-8"))
             except Exception as exc:
                 self._send(500, json.dumps({"error": str(exc)}).encode("utf-8"))
-            return
-
-        if route == "/api/telemetry":
-            # Split from /api/overview on purpose. The cards refresh every
-            # couple of seconds; re-running the day's session queries at that
-            # rate to redraw a CPU number would be pure waste.
-            try:
-                import workstation
-                force = (qs.get("gpu") or [""])[0] == "force"
-                payload = workstation.snapshot(force_gpu=force)
-                # The samples this process has taken so far, so the page can
-                # draw a moving line rather than re-deriving one client-side
-                # from readings it would have to remember itself. In memory
-                # only -- see workstation.history().
-                payload["history"] = workstation.history()
-                self._send(200, json.dumps(payload).encode("utf-8"))
-            except Exception as exc:
-                self._send(200, json.dumps({"error": str(exc), "cpu": None,
-                                            "memory": None, "storage": None,
-                                            "gpu": None}).encode("utf-8"))
             return
 
         if route in ("/api/sessions", "/api/logs"):
@@ -1691,13 +1485,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             q = (qs.get("q") or [""])[0]
             user = (qs.get("user") or [""])[0]
             job_type = (qs.get("job_type") or [""])[0]
+            sync_f = (qs.get("sync") or [""])[0]
             only_ids = None
-            if q or user or job_type:
+            if q or user or job_type or sync_f:
                 try:
                     matched, _lbl, _tot = load_sessions_page(
                         self.state.db, name, q=q, user=user, job_type=job_type,
                         limit=100000, offset=0)
-                    only_ids = [m.get("session_id") for m in matched]
+                    # Sync is filtered per rendered row, as /api/logs does.
+                    only_ids = [m.get("session_id") for m in matched
+                                if not sync_f or _render_session(m)["sync"] == sync_f]
                 except Exception:
                     only_ids = None
             try:
@@ -1742,6 +1539,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             data = p.read_bytes()
             self._send(
                 200, data,
+                "text/csv; charset=utf-8" if p.suffix == ".csv" else
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 extra=[("Content-Disposition", f'attachment; filename="{p.name}"')],
             )

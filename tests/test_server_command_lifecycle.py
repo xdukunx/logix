@@ -335,3 +335,87 @@ def test_rehydrate_is_idempotent(monkeypatch, tmp_path):
         module.rehydrate_pending_commands()
 
     assert len(module.PENDING_COMMANDS["LAB-PC-15"]) == 1
+
+
+# --- 11: bounded redelivery when a delivery response never reaches the agent
+
+def test_command_not_redelivered_before_redelivery_window_elapses(monkeypatch, tmp_path):
+    """A second heartbeat that arrives quickly after delivery (the normal
+    case -- the agent got the response and just hasn't acked yet) must not
+    see the same command a second time."""
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "LAB-PC-16", "status": "ACTIVE"})
+        client.post("/api/control/lock", json={"hostname": "LAB-PC-16"}, headers=headers)
+
+        first = client.post("/api/heartbeat", json={"hostname": "LAB-PC-16", "status": "ACTIVE"})
+        second = client.post("/api/heartbeat", json={"hostname": "LAB-PC-16", "status": "ACTIVE"})
+
+    assert len(first.json()["commands"]) == 1
+    assert second.json()["commands"] == []
+
+
+def test_command_redelivered_after_response_presumed_lost(monkeypatch, tmp_path):
+    """If the agent never acks a delivered command and enough time passes
+    that the original response was presumably dropped (heartbeat POST
+    timeout, connection blip -- see windows/logbook_common.ps1's
+    Send-LogbookHeartbeat), the next heartbeat must resend it rather than
+    losing it silently, which is what the old unconditional clear-on-read
+    did."""
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "LAB-PC-17", "status": "ACTIVE"})
+        client.post("/api/control/lock", json={"hostname": "LAB-PC-17"}, headers=headers)
+        first = client.post("/api/heartbeat", json={"hostname": "LAB-PC-17", "status": "ACTIVE"})
+        command_id = first.json()["commands"][0]["command_id"]
+
+        stale = (datetime.now() - timedelta(seconds=module.COMMAND_REDELIVERY_SECONDS + 1)).isoformat()
+        module.PENDING_COMMANDS["LAB-PC-17"][0]["delivered_at"] = stale
+
+        second = client.post("/api/heartbeat", json={"hostname": "LAB-PC-17", "status": "ACTIVE"})
+
+    delivered = second.json()["commands"]
+    assert len(delivered) == 1
+    assert delivered[0]["command_id"] == command_id
+
+
+def test_acked_command_is_never_redelivered_even_after_window_elapses(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "LAB-PC-18", "status": "ACTIVE"})
+        client.post("/api/control/lock", json={"hostname": "LAB-PC-18"}, headers=headers)
+        first = client.post("/api/heartbeat", json={"hostname": "LAB-PC-18", "status": "ACTIVE"})
+        command_id = first.json()["commands"][0]["command_id"]
+
+        client.post("/api/heartbeat", json={
+            "hostname": "LAB-PC-18", "status": "ACTIVE",
+            "acks": [{"command_id": command_id, "status": "done", "detail": ""}],
+        })
+
+        second = client.post("/api/heartbeat", json={"hostname": "LAB-PC-18", "status": "ACTIVE"})
+
+    assert second.json()["commands"] == []
+
+
+# --- 12: PENDING_COMMANDS hostname case normalization -----------------------
+
+def test_command_delivered_despite_hostname_case_mismatch(monkeypatch, tmp_path):
+    """An admin action queued against one case of a hostname must still be
+    delivered to a device whose heartbeat reports a different case --
+    PENDING_COMMANDS is a plain dict, unlike every DB hostname lookup (which
+    uses COLLATE NOCASE), and would otherwise silently strand the command
+    under a key nothing ever reads."""
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "lab-pc-19", "status": "ACTIVE"})
+        client.post("/api/control/lock", json={"hostname": "LAB-PC-19"}, headers=headers)
+
+        res = client.post("/api/heartbeat", json={"hostname": "lab-pc-19", "status": "ACTIVE"})
+
+    delivered = res.json()["commands"]
+    assert len(delivered) == 1
+    assert delivered[0]["command"] == "LOCK"

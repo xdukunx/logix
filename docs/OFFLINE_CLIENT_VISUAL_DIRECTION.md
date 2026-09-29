@@ -1,12 +1,24 @@
 # Visual direction — local workstation console
 
 Written against the working dashboard at `b539885`, after the first two
-visual references. **Nothing here is implemented.** More references are
-coming, so this records the direction and, just as deliberately, what is
-being left undecided.
+visual references. **Nothing here was implemented when it was written**;
+the decisions it led to are in
+[OFFLINE_CLIENT_UI_SPEC.md](OFFLINE_CLIENT_UI_SPEC.md) (§14 below). More
+references were coming, so this records the direction and, just as
+deliberately, what was being left undecided.
 
 The functional architecture, data sources, API and tests stay exactly as
 they are. This is about presentation only.
+
+> **Since superseded on one point: there is no telemetry any more
+> (September 2026).** Everything below about CPU, memory, GPU and storage
+> readings — §5's health row, §11, the reference notes and the "Telemetry
+> shape" decision in §14 — is research for a panel that shipped and was then
+> removed at the lab admin's request, together with `logix/workstation.py`,
+> the `/api/telemetry` route and the optional `psutil` dependency. The
+> client is a logbook, not a hardware monitor. See
+> [OFFLINE_CLIENT_UI_SPEC.md §10](OFFLINE_CLIENT_UI_SPEC.md#10-telemetry--removed).
+> Kept as written so the reasoning stays with the research.
 
 ---
 
@@ -102,7 +114,7 @@ usually contain:
 ```
   workstation identity        who am I looking at
   ────────────────────────
-  current health              is the machine OK
+  current health              is the machine OK        (removed, see top)
   ────────────────────────
   CURRENT USAGE               who is here, what are they doing   <- dominant
   ────────────────────────
@@ -182,6 +194,10 @@ time and state, and it should read in one glance from across a lab bench.
   workstation is currently idle."* It should look intentional.
 
 ## 11. Telemetry presentation
+
+*Historical — the panel this section shaped has been removed (see the note
+at the top). For the record: the ring buffer below was later built, drawing
+real in-memory samples as sparklines, before the whole panel went.*
 
 Four readings, equal weight, no hierarchy between them — CPU, memory, GPU,
 storage.
@@ -401,12 +417,12 @@ the reasoning stays with the research that produced it.
 | Accent | **`#1A5D6E`** petrol | `#2F5BEA` sat within a few degrees of Reference 02 and reads as generic SaaS indigo. Petrol reads as instrumentation, is distinct from all five references, and carries white text at ~7:1. |
 | Nav shape | **Sidebar, 208px, text-only** | Four destinations. An icon rail needs icons to be legible; icons need a package or hand-drawn SVG, and neither buys clarity here. |
 | Icons | **Text + 3 CSS shapes + 1 inline SVG** | Smallest thing that works and adds no dependency. |
-| Telemetry shape | **One grouped panel** | References 01 and 05 reached this independently from opposite directions. Four boxes imply four subjects; this is one machine. |
+| Telemetry shape | **One grouped panel** — *later removed entirely* | References 01 and 05 reached this independently from opposite directions. Four boxes imply four subjects; this is one machine. *(September 2026: the panel was taken out at the lab admin's request; the client carries no hardware readings.)* |
 | Bars vs arcs vs rings | **3px horizontal bars** | Least decorative form that still shows proportion. Two divs, no SVG, legible at 3px. |
 | Current usage treatment | **Tint + 2px accent left edge** | Reference 03 inverts a whole card; at this size that becomes a coloured slab. Important, not loud. |
 | Range control | **Segmented** | Four options, used constantly, current value readable without opening anything. |
 | Table density | **Compact, 36px rows** | A full lab day should fit without scrolling. |
 | Details | **Side sheet** | Keeps the row visible behind it and returns the reader to their place. |
-| Page order | Health above usage, **usage accented** | Order follows the requested composition; emphasis follows the product hierarchy. Set independently, on purpose. |
-| Sparklines from a ring buffer | **No** | Reference 05 makes the strongest case for it, but it is a functional change to satisfy a visual want. Revisit only if someone asks to watch a load over time. |
+| Page order | Health above usage, **usage accented** | Order follows the requested composition; emphasis follows the product hierarchy. Set independently, on purpose. *(Moot since the health panel was removed: usage now comes first.)* |
+| Sparklines from a ring buffer | **No** — *later reversed, then removed with the panel* | Reference 05 makes the strongest case for it, but it is a functional change to satisfy a visual want. Revisit only if someone asks to watch a load over time. |
 | Workstation subtitle | **Hostname, or nothing** | `location` and `category` are server-side only. The block closes up cleanly when absent rather than inviting invented text. |

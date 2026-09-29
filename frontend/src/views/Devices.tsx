@@ -1,139 +1,225 @@
-// Perangkat -- the device registry. Design: docs/design_handoff_logix_v3/
-// LogiX Devices & Settings v2.dc.html (D-05) + README section 3.
+// Perangkat -- the device registry. v4 "Denyut".
 //
-// A flat table plus a 330px detail drawer. The 7-day sync sparkline column was
-// explicitly cut: sync status is now just a dot plus a "X ago" timestamp. The
-// one-time, 15-minute invite-code flow keeps its behaviour exactly and is only
-// restyled.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+// A bento row answers what an admin opens this page for -- is every machine
+// still reporting in, is every machine on the current agent build, which ones
+// need a look -- then the registry, with a detail panel per device (the same
+// SidePanel Monitoring and Riwayat use). The one-time, 15-minute invite-code
+// flow and the delete confirmation behave as before; only their surfaces
+// changed.
+//
+// Everything comes from /api/devices, polled so the fleet counts stay true,
+// plus /api/devices/{id} and the last screenshot for the device that is open.
+// The rules live in DevicesModel, the bento cards in DevicesBento, the panel
+// in DevicesDetail.
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { del, getJson, sendJson } from "../api";
-import { DEVICE_CATEGORIES, categoryLabel, type StationStatus } from "../tokens";
-import type { Device, DeviceDetail, DeviceScreenshot, SyncStatus } from "../types";
-import { Mono, PageHeader, SectionLabel, Skeleton, StatusDot } from "../ui/base";
+import { DEVICE_CATEGORIES, categoryLabel } from "../tokens";
+import type { Device, DeviceDetail, DeviceScreenshot } from "../types";
+import { EmptyState, ErrorState, Mono, PageHeader, Skeleton, StatusDot } from "../ui/base";
 import { Button, PillSelect, SearchChip } from "../ui/controls";
-import { useBreakpoint } from "../ui/hooks";
-import { Drawer, Modal, ModalActions, useToast } from "../ui/overlays";
+import { useBreakpoint, useReducedMotion } from "../ui/hooks";
+import { Modal, ModalActions, SidePanel, useToast } from "../ui/overlays";
 import { Table, type Column } from "../ui/table";
-import { formatLogTime, splitDeviceName, timeAgo, useTicker } from "../util";
+import { formatLogTime, timeAgo, usePolling, useTicker } from "../util";
+import { ARROW, AttentionCard, FleetCard, Tag, VersionCard } from "./DevicesBento";
+import { DetailBody, DetailHeader, InviteTicket, shotSrc, type Invite } from "./DevicesDetail";
+import {
+  SORT_OPTIONS,
+  SYNC_LABEL,
+  SYNC_STATUS,
+  agentVersion,
+  attentionList,
+  filterLabel,
+  isOutdated,
+  nameOf,
+  registryRows,
+  sameFilter,
+  summariseVersions,
+  type Filter,
+  type SortKey,
+} from "./DevicesModel";
 
-const SYNC_STATUS: Record<SyncStatus, StationStatus> = {
-  online: "active",
-  stale: "locked",
-  offline: "offline",
-  never_seen: "idle",
-};
+const REGISTRY_POLL_MS = 15_000;
+// After "Minta cuplikan" the capture arrives on the agent's next heartbeat,
+// so the drawer keeps asking for a while instead of leaving the admin to
+// guess when to press "Muat ulang".
+const SHOT_POLL_MS = 4_000;
+const SHOT_WAIT_MS = 90_000;
 
 /**
- * Enrolment categories. These are the server's CATEGORY_PROFILES keys, which
- * set the heartbeat cadence and popup frequency -- NOT the lab's GPU/CPU/Umum
- * hardware taxonomy from Settings (that lives in devices.device_types and is
- * what the idle policy keys on). The two are easy to confuse; sending a
- * hardware category here is rejected with "Unknown category".
+ * Enrolment categories are the server's CATEGORY_PROFILES keys, which set the
+ * heartbeat cadence and popup frequency -- NOT the lab's GPU/CPU/Umum hardware
+ * taxonomy from Settings, which the server rejects here as "Unknown category".
  */
-// Moved to tokens.ts so Monitoring shares it -- see DEVICE_CATEGORIES there.
-const CATEGORIES = DEVICE_CATEGORIES;
+const ENROL_CATEGORIES = new Set(DEVICE_CATEGORIES.map((c) => c.value));
 
-/** Countdown to the invite's expiry, in the mm:ss the design shows. */
-const expiryLabel = (expiresAt: string | null | undefined): string => {
-  if (!expiresAt) return "-";
-  const left = Math.max(0, (new Date(expiresAt).getTime() - Date.now()) / 1000);
-  if (left <= 0) return "kedaluwarsa";
-  return `${String(Math.floor(left / 60)).padStart(2, "0")}:${String(Math.floor(left % 60)).padStart(2, "0")}`;
-};
+/**
+ * The round ↗ closing a row: ink while its device is open. Otherwise it is only
+ * a ring, with no inline fill or colour, which would beat lx-round's ink hover.
+ */
+const roundArrow = (isOpen: boolean): CSSProperties => ({
+  width: 30,
+  height: 30,
+  borderRadius: 999,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  verticalAlign: "middle",
+  ...(isOpen
+    ? { background: "var(--lx-ink)", color: "var(--lx-on-ink)" }
+    : { boxShadow: "inset 0 0 0 1px var(--lx-border)" }),
+});
 
 export default function Devices() {
   const toast = useToast();
-  const isDesktop = useBreakpoint() === "desktop";
+  const breakpoint = useBreakpoint();
+  const isDesktop = breakpoint === "desktop";
+  const isPhone = breakpoint === "phone";
+  const isReducedMotion = useReducedMotion();
   const [devices, setDevices] = useState<Device[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<DeviceDetail | null>(null);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<Filter | null>(null);
+  const [sort, setSort] = useState<SortKey>("status");
 
   const [isInviteOpen, setInviteOpen] = useState(false);
   const [inviteCategory, setInviteCategory] = useState("lab_workstation");
-  const [invite, setInvite] = useState<{ invite_code: string; expires_at: string } | null>(null);
-  const [revokeTarget, setRevokeTarget] = useState<Device | null>(null);
+  const [invite, setInvite] = useState<Invite | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Device | null>(null);
   // Last screenshot for the selected device. `undefined` = not loaded yet,
   // `null` = the server has none (404), which is a normal state, not an error.
   const [shot, setShot] = useState<DeviceScreenshot | null | undefined>(undefined);
   const [isRequestingShot, setRequestingShot] = useState(false);
   const [isShotOpen, setShotOpen] = useState(false);
+  const [shotWait, setShotWait] = useState<{ deviceId: string; after: string | null; until: number } | null>(null);
 
-  useTicker(1000); // keeps the invite countdown and the "X ago" column live
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const registryRef = useRef<HTMLDivElement>(null);
+  const hasLoadedRef = useRef(false);
 
-  const refresh = useCallback(async () => {
+  useTicker(1000); // keeps the invite countdown and every "X ago" live
+
+  const load = useCallback(
+    async (isBackground: boolean) => {
+      try {
+        setDevices(await getJson<Device[]>("/api/devices", "Gagal memuat daftar perangkat"));
+        setLoadError(null);
+        setUpdatedAt(new Date().toISOString());
+      } catch (err) {
+        setLoadError((err as Error).message);
+        // A poll failing every 15s must not stack a toast each time; the
+        // header already says the data is stale.
+        if (!isBackground) toast((err as Error).message, "alert");
+      }
+    },
+    [toast],
+  );
+  const refresh = useCallback(() => load(false), [load]);
+
+  usePolling(() => {
+    load(hasLoadedRef.current);
+    hasLoadedRef.current = true;
+  }, REGISTRY_POLL_MS);
+
+  // Responses for a device the admin has already moved away from are dropped:
+  // switching rows quickly used to paint the previous device's screenshot
+  // into the next one's drawer.
+  const loadDetail = useCallback(async (deviceId: string) => {
     try {
-      setDevices(await getJson<Device[]>("/api/devices", "Gagal memuat daftar perangkat"));
-    } catch (err) {
-      toast((err as Error).message, "alert");
+      const d = await getJson<DeviceDetail>(`/api/devices/${deviceId}`, "Gagal memuat detail perangkat");
+      if (selectedRef.current === deviceId) setDetail(d);
+    } catch {
+      /* the drawer still renders from the list payload */
     }
-  }, [toast]);
+  }, []);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!selected) {
-      setDetail(null);
-      return;
-    }
-    let isCurrent = true;
-    getJson<DeviceDetail>(`/api/devices/${selected}`, "Gagal memuat detail perangkat")
-      .then((d) => {
-        if (isCurrent) setDetail(d);
-      })
-      .catch(() => {
-        /* the row still renders from the list payload */
-      });
-    return () => {
-      isCurrent = false;
-    };
-  }, [selected]);
-
-  // The capture the agent last uploaded. GET /api/devices/{id}/screenshot has
-  // existed since Logix Control shipped, but nothing in this dashboard ever
-  // called it -- so Monitoring's "Hasilnya muncul di Perangkat" toast pointed
-  // at a screen that did not show screenshots. This is that screen.
+  // GET /api/devices/{id}/screenshot: the capture the agent last uploaded.
+  // Monitoring's "Hasilnya muncul di Perangkat" toast points here.
   const loadShot = useCallback(async (deviceId: string) => {
     try {
-      setShot(await getJson<DeviceScreenshot>(`/api/devices/${deviceId}/screenshot`, ""));
+      const s = await getJson<DeviceScreenshot>(`/api/devices/${deviceId}/screenshot`, "");
+      if (selectedRef.current === deviceId) setShot(s);
     } catch {
-      setShot(null); // 404 = nothing captured yet, which the UI states plainly
+      if (selectedRef.current === deviceId) setShot(null); // 404 = nothing captured yet
     }
   }, []);
 
   useEffect(() => {
+    setDetail(null);
     setShot(undefined);
     setShotOpen(false);
-    if (selected) loadShot(selected);
-  }, [selected, loadShot]);
+    setShotWait(null);
+    if (!selected) return;
+    loadDetail(selected);
+    loadShot(selected);
+  }, [selected, loadDetail, loadShot]);
 
-  const rows = useMemo(() => {
-    const list = devices ?? [];
-    const needle = search.trim().toLowerCase();
-    if (!needle) return list;
-    return list.filter((d) =>
-      `${d.hostname} ${d.display_name ?? ""} ${d.category}`.toLowerCase().includes(needle),
-    );
-  }, [devices, search]);
+  useEffect(() => {
+    if (!shotWait) return;
+    const id = window.setInterval(() => {
+      if (Date.now() < shotWait.until) {
+        loadShot(shotWait.deviceId);
+        return;
+      }
+      setShotWait(null);
+      toast("Cuplikan belum masuk. Coba muat ulang sebentar lagi.", "locked");
+    }, SHOT_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [shotWait, loadShot, toast]);
 
-  const onlineCount = (devices ?? []).filter((d) => d.currently_online).length;
+  useEffect(() => {
+    if (!shotWait || shotWait.deviceId !== selected || !shot || shot.captured_at === shotWait.after) return;
+    setShotWait(null);
+    toast("Cuplikan baru diterima.");
+    loadDetail(shotWait.deviceId);
+  }, [shot, shotWait, selected, toast, loadDetail]);
 
-  const createInvite = async () => {
+  const list = useMemo(() => devices ?? [], [devices]);
+  const versions = useMemo(() => summariseVersions(list), [list]);
+  const newest = versions.newest;
+  // Not memoised: the reasons carry "x mnt lalu" text the ticker keeps live.
+  const issues = attentionList(list, newest);
+  const rows = registryRows(list, { search, filter, sort, attention: issues });
+  const onlineCount = list.filter((d) => d.currently_online).length;
+  const selectedDevice = list.find((d) => d.device_id === selected) ?? null;
+  const selectedName = selectedDevice ? nameOf(selectedDevice) : null;
+
+  const createInvite = async (device: Device | null) => {
+    // A rebind code carries the device's own category, name and hostname.
+    // Redeeming an invite overwrites the first two, so without them a rebind
+    // quietly recategorised and renamed the device; the hostname pin means
+    // only that machine can redeem the code.
+    const body = device
+      ? {
+          category: ENROL_CATEGORIES.has(device.category) ? device.category : "custom",
+          display_name: device.display_name ?? "",
+          hostname: device.hostname,
+        }
+      : { category: inviteCategory };
     try {
-      const res = await sendJson(
-        "/api/enroll/invite",
-        "POST",
-        { category: inviteCategory },
-        "Gagal membuat kode undangan",
-      );
-      setInvite(await res.json());
+      const res = await sendJson("/api/enroll/invite", "POST", body, "Gagal membuat kode undangan");
+      const { invite_code, expires_at } = (await res.json()) as { invite_code: string; expires_at: string };
+      setInvite({ invite_code, expires_at, issuedAt: Date.now(), deviceId: device?.device_id ?? null });
     } catch (err) {
       toast((err as Error).message, "alert");
     }
   };
+
+  // The Clipboard API only exists on a secure origin; served over plain http on
+  // the lab LAN there is none, and the Salin button is simply not offered.
+  const copyInvite = navigator.clipboard
+    ? () =>
+        invite &&
+        navigator.clipboard
+          .writeText(invite.invite_code)
+          .then(() => toast("Kode undangan disalin."))
+          .catch(() => toast("Gagal menyalin.", "alert"))
+    : undefined;
 
   // DELETE, not the old POST .../revoke. Revoke only nulled the API key: the
   // row stayed in the registry, kept its last_seen, kept status 'active', and
@@ -143,7 +229,7 @@ export default function Devices() {
     try {
       await del(`/api/devices/${device.device_id}`, "Gagal menghapus perangkat");
       toast("Perangkat dihapus dari registri.");
-      setRevokeTarget(null);
+      setDeleteTarget(null);
       setSelected(null);
       refresh();
     } catch (err) {
@@ -152,6 +238,7 @@ export default function Devices() {
   };
 
   const requestShot = async (device: Device) => {
+    const after = shot?.captured_at ?? null;
     setRequestingShot(true);
     try {
       await sendJson(
@@ -161,6 +248,10 @@ export default function Devices() {
         "Gagal meminta cuplikan",
       );
       toast("Permintaan dikirim. Cuplikan muncul di sini setelah client merespons.");
+      // The panel may have been closed or switched while the POST was in flight.
+      if (selectedRef.current !== device.device_id) return;
+      setShotWait({ deviceId: device.device_id, after, until: Date.now() + SHOT_WAIT_MS });
+      loadDetail(device.device_id);
     } catch (err) {
       toast((err as Error).message, "alert");
     } finally {
@@ -168,83 +259,135 @@ export default function Devices() {
     }
   };
 
+  const pick = (d: Device) => setSelected(d.device_id);
+
+  const toggleFilter = (next: Filter) => {
+    const isSame = sameFilter(filter, next);
+    setFilter(isSame ? null : next);
+    // Picked from the bento on a narrow screen, the filter changes a registry
+    // far below it; bring the registry up so the click visibly did something.
+    if (!isSame && !isDesktop) {
+      window.setTimeout(
+        () => registryRef.current?.scrollIntoView({ behavior: isReducedMotion ? "auto" : "smooth", block: "start" }),
+        0,
+      );
+    }
+  };
+
+  // minmax(0, …): a plain 1fr track grows to its widest child, and one wide
+  // chip or row of fleet labels then pushed the whole canvas sideways on phone.
+  const bentoColumns = isDesktop
+    ? "repeat(12, minmax(0, 1fr))"
+    : breakpoint === "tablet"
+      ? "repeat(2, minmax(0, 1fr))"
+      : "minmax(0, 1fr)";
+  const bentoSpan = (desktop: number, tablet: number) =>
+    isDesktop ? `span ${desktop}` : breakpoint === "tablet" ? `span ${tablet}` : undefined;
+  const gap = isPhone ? 10 : 16;
+
+  // ---- Registry ----
+  const versionCell = (d: Device) => {
+    const v = agentVersion(d);
+    if (!v) return <Mono style={{ fontSize: 12.5, color: "var(--lx-muted)" }}>-</Mono>;
+    if (isOutdated(d, newest)) return <Tag title={`Tertinggal dari ${newest}`}>↓ {v}</Tag>;
+    return <Mono style={{ fontSize: 12.5 }}>{v}</Mono>;
+  };
+
   const columns: Column<Device>[] = [
     {
       key: "id",
       header: "ID",
-      width: "120px",
+      width: "110px",
       phone: "primary",
-      render: (d) => (
-        <Mono style={{ fontSize: 12.5, fontWeight: 600 }}>
-          {splitDeviceName(d.display_name || d.hostname).id}
-        </Mono>
-      ),
+      render: (d) => <Mono style={{ fontSize: 13, fontWeight: 700 }}>{nameOf(d).id}</Mono>,
     },
     {
       key: "spec",
       header: "Spesifikasi",
-      width: "1fr",
+      width: "minmax(0, 1fr)",
       phone: "secondary",
-      render: (d) => (
-        <span style={{ color: "var(--lx-muted)" }}>
-          {splitDeviceName(d.display_name || d.hostname).spec || d.hostname}
-        </span>
-      ),
+      render: (d) => <span style={{ color: "var(--lx-muted)" }}>{nameOf(d).spec || d.hostname}</span>,
     },
-    { key: "kategori", header: "Kategori", width: "100px", phone: "secondary",
-      // Humanised, not the raw CATEGORY_PROFILES key -- "lab_workstation"
-      // is an API detail, not something to show a lab admin.
-      render: (d) => categoryLabel(d.category) },
+    // Humanised: "lab_workstation" is an API key, not something to show a lab admin.
+    { key: "category", header: "Kategori", width: "130px", phone: "secondary", render: (d) => categoryLabel(d.category) },
     {
       key: "sync",
       header: "Sinkronisasi",
-      width: "170px",
+      width: "180px",
       phone: "secondary",
-      // Dot + "X ago" only -- the 7-day sparkline that lived here was cut.
       render: (d) => (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-          <StatusDot status={SYNC_STATUS[d.sync_status] ?? "idle"} label={d.sync_status} />
+          <StatusDot status={SYNC_STATUS[d.sync_status] ?? "idle"} label={SYNC_LABEL[d.sync_status]} />
           <Mono style={{ fontSize: 12 }}>{timeAgo(d.last_seen)}</Mono>
+          {d.sync_status !== "online" && (
+            <span style={{ fontSize: 12, color: "var(--lx-muted)" }}>· {SYNC_LABEL[d.sync_status]}</span>
+          )}
         </span>
       ),
     },
+    { key: "version", header: "Versi agent", width: "110px", phone: "primary", render: versionCell },
     {
-      key: "versi",
-      header: "Versi client",
-      width: "130px",
-      render: (d) => <Mono style={{ fontSize: 12 }}>{String(d.client_version ?? "-")}</Mono>,
+      key: "open",
+      header: "",
+      width: "30px",
+      render: (d) => (
+        <span className="lx-round" aria-hidden="true" style={roundArrow(d.device_id === selected)}>
+          {ARROW}
+        </span>
+      ),
     },
   ];
 
-  const selectedDevice = (devices ?? []).find((d) => d.device_id === selected) ?? null;
-  const selectedName = selectedDevice
-    ? splitDeviceName(selectedDevice.display_name || selectedDevice.hostname)
-    : null;
-
-  const detailRow = (label: string, value: ReactNode) => (
-    <div style={{ display: "flex", fontSize: 12.5 }}>
-      <span style={{ color: "var(--lx-muted)", width: 110, flexShrink: 0 }}>{label}</span>
-      <span style={{ minWidth: 0 }}>{value}</span>
-    </div>
-  );
-
-  const inviteBox = (fontSize: number) => (
-    <div
-      style={{
-        border: "1px dashed var(--lx-border-dashed)",
-        borderRadius: "var(--lx-radius-menu)",
-        padding: 14,
-        textAlign: "center",
-        marginBottom: 10,
-      }}
-    >
-      <div className="lx-mono" style={{ fontSize, letterSpacing: ".18em" }}>
-        {invite?.invite_code}
+  const registry = (
+    <section className="lx-rise" style={{ "--i": 3 } as CSSProperties}>
+      <div
+        ref={registryRef}
+        style={{
+          scrollMarginTop: 36,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          padding: "0 4px",
+          marginBottom: 12,
+        }}
+      >
+        <span style={{ fontSize: 15, fontWeight: 550, letterSpacing: "-0.01em" }}>Registri</span>
+        <Mono style={{ fontSize: 12, color: "var(--lx-muted)" }}>
+          {rows.length === list.length ? list.length : `${rows.length}/${list.length}`}
+        </Mono>
+        {filter && (
+          <Button
+            size="sm"
+            aria-label={`Hapus filter ${filterLabel(filter)}`}
+            label={`${filterLabel(filter)}  ×`}
+            onClick={() => setFilter(null)}
+            style={{ fontSize: 12, padding: "6px 12px", whiteSpace: "pre", background: "var(--lx-ink)", color: "var(--lx-on-ink)", border: "none" }}
+          />
+        )}
+        <div
+          style={{
+            marginLeft: isPhone ? 0 : "auto",
+            width: isPhone ? "100%" : undefined,
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <SearchChip value={search} onChange={setSearch} placeholder="Cari ID / spesifikasi" />
+          <PillSelect label="Urutkan" value={sort} options={SORT_OPTIONS} onChange={setSort} width={196} />
+        </div>
       </div>
-      <div className="lx-mono" style={{ fontSize: 11, color: "var(--lx-status-locked)", marginTop: 4 }}>
-        kedaluwarsa dalam {expiryLabel(invite?.expires_at)}
-      </div>
-    </div>
+      <Table
+        columns={columns}
+        rows={rows}
+        getRowKey={(d) => d.device_id}
+        selectedKey={selected}
+        onRowClick={pick}
+        emptyLabel="Tidak ada perangkat yang cocok."
+      />
+    </section>
   );
 
   return (
@@ -253,11 +396,12 @@ export default function Devices() {
         title="Perangkat"
         summary={
           devices === null ? (
-            "Memuat..."
+            loadError ? "Gagal memuat" : "Memuat..."
           ) : (
             <>
               <Mono style={{ color: "var(--lx-text)" }}>{devices.length}</Mono> terdaftar ·{" "}
               <Mono style={{ color: "var(--lx-text)" }}>{onlineCount}</Mono> online
+              {loadError && <span style={{ color: "var(--lx-status-alert)" }}> · gagal diperbarui</span>}
             </>
           )
         }
@@ -274,134 +418,86 @@ export default function Devices() {
         }
       />
 
-      <div style={{ marginBottom: 16 }}>
-        <SearchChip value={search} onChange={setSearch} placeholder="Cari ID / spesifikasi" width={280} />
-      </div>
-
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Table
-            columns={columns}
-            rows={rows}
-            getRowKey={(d) => d.device_id}
-            selectedKey={selected}
-            onRowClick={(d) => setSelected(d.device_id === selected ? null : d.device_id)}
-            emptyLabel="Belum ada perangkat terdaftar."
-          />
-        </div>
-
-        {isDesktop && selectedDevice && selectedName && (
-          <Drawer
-            isOpen
-            onClose={() => setSelected(null)}
-            title={
-              <>
-                <StatusDot status={SYNC_STATUS[selectedDevice.sync_status] ?? "idle"} />
-                <Mono style={{ fontSize: 16, fontWeight: 600 }}>{selectedName.id}</Mono>
-              </>
-            }
-            subtitle={selectedName.spec || selectedDevice.hostname}
-          >
-            <div style={{ display: "grid", rowGap: 10, marginBottom: 24 }}>
-              {detailRow("Sinkronisasi", <Mono>{timeAgo(selectedDevice.last_seen)}</Mono>)}
-              {detailRow("Versi client", <Mono>{String(selectedDevice.client_version ?? "-")}</Mono>)}
-              {detailRow("Kategori", categoryLabel(selectedDevice.category))}
-              {detailRow("Kebijakan", detail?.policy?.description ?? "-")}
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <SectionLabel>Cuplikan layar terakhir</SectionLabel>
-            </div>
-            {shot === undefined ? (
-              <Skeleton height={124} />
-            ) : shot === null ? (
-              <div
-                style={{
-                  border: "1px dashed var(--lx-border-dashed)",
-                  borderRadius: "var(--lx-radius-menu)",
-                  padding: "18px 14px",
-                  textAlign: "center",
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  color: "var(--lx-muted)",
-                }}
-              >
-                Belum ada cuplikan untuk perangkat ini.
+      {devices === null ? (
+        loadError ? (
+          <ErrorState description={loadError} onRetry={refresh} />
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: bentoColumns, gap }}>
+            {[5, 4, 3].map((span, i) => (
+              <div key={span} style={{ gridColumn: bentoSpan(span, i === 0 ? 2 : 1) }}>
+                <Skeleton height={290} />
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShotOpen(true)}
-                title="Perbesar cuplikan"
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: 0,
-                  border: "1px solid var(--lx-border)",
-                  borderRadius: "var(--lx-radius-menu)",
-                  overflow: "hidden",
-                  background: "var(--lx-sunken)",
-                  cursor: "zoom-in",
-                }}
-              >
-                <img
-                  src={`data:${shot.content_type || "image/jpeg"};base64,${shot.image_base64}`}
-                  alt={`Cuplikan layar ${selectedName.id}`}
-                  style={{ display: "block", width: "100%", height: "auto" }}
-                />
-              </button>
-            )}
-            <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--lx-muted)", margin: "8px 0 10px" }}>
-              {shot
-                ? `Diambil ${formatLogTime(shot.captured_at)}. Pengguna selalu diberi tahu saat cuplikan diambil.`
-                : "Pengguna selalu diberi tahu saat cuplikan diambil. Tidak ada pengambilan diam-diam."}
-            </p>
-            <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-              <Button
-                label={isRequestingShot ? "Meminta..." : "Minta cuplikan"}
-                variant="secondary"
-                size="sm"
-                style={{ flex: 1 }}
-                disabled={isRequestingShot || !selectedDevice.currently_online}
-                onClick={() => requestShot(selectedDevice)}
-              />
-              <Button
-                label="Muat ulang"
-                variant="ghost"
-                size="sm"
-                style={{ flex: 1 }}
-                onClick={() => loadShot(selectedDevice.device_id)}
-              />
+            ))}
+            <div style={{ gridColumn: "1 / -1" }}>
+              <Skeleton height={380} />
             </div>
+          </div>
+        )
+      ) : list.length === 0 ? (
+        <EmptyState
+          title="Belum ada perangkat terdaftar"
+          description="Buat kode undangan lewat tombol di kanan atas, lalu masukkan kodenya di client Windows perangkat baru."
+        />
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap }}>
+          <div style={{ display: "grid", gridTemplateColumns: bentoColumns, gap }}>
+            <FleetCard
+              gridColumn={bentoSpan(5, 2)}
+              devices={list}
+              updatedAt={updatedAt}
+              selectedId={selected}
+              onSelect={pick}
+              filter={filter}
+              onFilter={toggleFilter}
+            />
+            <VersionCard
+              gridColumn={bentoSpan(4, 1)}
+              versions={versions}
+              total={list.length}
+              filter={filter}
+              onFilter={toggleFilter}
+            />
+            <AttentionCard
+              gridColumn={bentoSpan(3, 1)}
+              issues={issues}
+              isFiltered={filter?.kind === "attention"}
+              onSelect={pick}
+              onFilter={() => toggleFilter({ kind: "attention" })}
+            />
+          </div>
+          {registry}
+        </div>
+      )}
 
-            <div style={{ marginBottom: 10 }}>
-              <SectionLabel>Invite code — sekali pakai</SectionLabel>
-            </div>
-            {invite && inviteBox(20)}
-            <p style={{ fontSize: 12, lineHeight: 1.5, color: "var(--lx-muted)", margin: "0 0 20px" }}>
-              {invite
-                ? "Masukkan kode ini di client Windows untuk mengikat ulang perangkat. Berlaku 15 menit, satu kali pakai."
-                : "Buat kode sekali-pakai untuk mengikat ulang perangkat ini ke server."}
-            </p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button
-                label="Buat kode baru"
-                variant="secondary"
-                size="sm"
-                style={{ flex: 1 }}
-                onClick={createInvite}
-              />
-              <Button
-                label="Hapus"
-                variant="secondary"
-                size="sm"
-                style={{ flex: 1, color: "var(--lx-status-alert)" }}
-                onClick={() => setRevokeTarget(selectedDevice)}
-              />
-            </div>
-          </Drawer>
+      {/* Outside-click dismissal is held off while one of the panel's own
+          modals is up: a click inside that modal is "outside" the panel. */}
+      <SidePanel
+        isOpen={selectedDevice !== null}
+        onClose={() => {
+          if (deleteTarget || isShotOpen) return;
+          setSelected(null);
+        }}
+        label={`Detail ${selectedName?.id ?? ""}`}
+        header={selectedDevice && <DetailHeader device={selectedDevice} />}
+      >
+        {selectedDevice && (
+          <DetailBody
+            device={selectedDevice}
+            detail={detail}
+            newest={newest}
+            shot={shot}
+            isWaitingShot={shotWait?.deviceId === selectedDevice.device_id}
+            isRequestingShot={isRequestingShot}
+            invite={invite?.deviceId === selectedDevice.device_id ? invite : null}
+            onRequestShot={() => requestShot(selectedDevice)}
+            onReloadShot={() => loadShot(selectedDevice.device_id)}
+            onOpenShot={() => setShotOpen(true)}
+            onCreateInvite={() => createInvite(selectedDevice)}
+            onCopyInvite={copyInvite}
+            onDelete={() => setDeleteTarget(selectedDevice)}
+          />
         )}
-      </div>
+      </SidePanel>
 
       {/* Enrolment: pick a category, get a one-time code. */}
       <Modal
@@ -410,50 +506,40 @@ export default function Devices() {
         title="Tambah perangkat"
         description="Pilih kategori, lalu masukkan kode yang muncul di client Windows perangkat baru."
         footer={
-          invite ? (
+          invite?.deviceId === null ? (
             <Button label="Selesai" variant="primary" size="sm" onClick={() => setInviteOpen(false)} />
           ) : (
-            <ModalActions
-              onCancel={() => setInviteOpen(false)}
-              confirmLabel="Buat kode"
-              onConfirm={createInvite}
-            />
+            <ModalActions onCancel={() => setInviteOpen(false)} confirmLabel="Buat kode" onConfirm={() => createInvite(null)} />
           )
         }
       >
-        {invite ? (
-          inviteBox(22)
+        {invite?.deviceId === null ? (
+          <InviteTicket invite={invite} onCopy={copyInvite} />
         ) : (
-          <PillSelect
-            label="Kategori"
-            value={inviteCategory}
-            options={CATEGORIES}
-            onChange={setInviteCategory}
-            width={180}
-          />
+          <PillSelect label="Kategori" value={inviteCategory} options={DEVICE_CATEGORIES} onChange={setInviteCategory} width={180} />
         )}
       </Modal>
 
       <Modal
-        isOpen={revokeTarget !== null}
-        onClose={() => setRevokeTarget(null)}
-        title={`Hapus ${revokeTarget ? splitDeviceName(revokeTarget.display_name || revokeTarget.hostname).id : ""}?`}
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={`Hapus ${deleteTarget ? nameOf(deleteTarget).id : ""}?`}
         description="Perangkat hilang dari daftar, kehilangan kredensialnya, dan tidak bisa mendaftar ulang sendiri lewat heartbeat — hanya lewat kode undangan baru. Riwayat sesinya tetap tersimpan."
         accentEdge="alert"
         footer={
           <ModalActions
-            onCancel={() => setRevokeTarget(null)}
+            onCancel={() => setDeleteTarget(null)}
             confirmLabel="Hapus perangkat"
             variant="danger"
-            onConfirm={() => removeDevice(revokeTarget!)}
+            onConfirm={() => deleteTarget && removeDevice(deleteTarget)}
           />
         }
       />
 
-      {/* Full-size capture. A 300px drawer thumbnail is enough to see THAT a
+      {/* Full-size capture. The drawer thumbnail is enough to see THAT a
           screenshot exists, never enough to read what is on the screen. */}
       <Modal
-        isOpen={isShotOpen && shot !== null && shot !== undefined}
+        isOpen={isShotOpen && !!shot}
         onClose={() => setShotOpen(false)}
         title={`Cuplikan layar ${selectedName?.id ?? ""}`}
         description={shot ? `Diambil ${formatLogTime(shot.captured_at)}` : undefined}
@@ -462,7 +548,7 @@ export default function Devices() {
       >
         {shot && (
           <img
-            src={`data:${shot.content_type || "image/jpeg"};base64,${shot.image_base64}`}
+            src={shotSrc(shot)}
             alt={`Cuplikan layar ${selectedName?.id ?? shot.hostname}`}
             style={{
               display: "block",

@@ -29,7 +29,7 @@
         },
         "colors": {
           "type": "object",
-          "description": "Client & dashboard palette. The client (Windows popup/timer) resolves these via Get-LogbookTheme with the deep-navy Client Foundation defaults; a lab re-themes by overriding any key.",
+          "description": "Client & dashboard palette. The client (Windows popup/timer) resolves these via Get-LogbookTheme with the v4 \"Denyut\" defaults (lime on an ink ramp); a lab re-themes by overriding any key.",
           "properties": {
             "primary": {
               "type": "string",
@@ -39,7 +39,12 @@
             "accent": {
               "type": "string",
               "pattern": "^#[0-9A-Fa-f]{6}$",
-              "description": "Brand blue (#2563EB by default)."
+              "description": "Accent (lime #C5F23A by default)."
+            },
+            "onAccent": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$",
+              "description": "Text and icons drawn on the accent. Optional: when absent the client picks ink or white, whichever contrasts more with the accent."
             },
             "muted": {
               "type": "string",

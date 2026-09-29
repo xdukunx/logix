@@ -23,9 +23,9 @@ appears, someone fills it in, and the session is being recorded.
 **Step 3 — look at the data.** Start menu → **Laporan Logix**. A local
 dashboard opens in your browser, on this machine only — no account, no
 network, served by Python's standard library. Three pages: **Overview**
-(what is happening now, live CPU/memory/GPU/storage), **Logs** (searchable
-local history, with export), **Server** (only relevant once you connect to
-one — see Part B).
+(who is using the computer now, and today's recent sessions), **Logs**
+(searchable local history, with export), **Server** (only relevant once you
+connect to one — see Part B).
 
 You never have to touch a server, and no data leaves the computer.
 
@@ -165,17 +165,21 @@ Every device has its own console, opened from the Start-menu shortcut
 only and needs a one-time token, so nothing else on the lab network can
 reach it.
 
-**Overview** shows the workstation name, live health, and who is signed in.
-Health is four real readings, each drawn in the shape that suits it: one
-block per actual CPU core (filled by that core's own load), bars for memory
-and disk capacity, a dial for GPU utilisation, plus a moving line built from
-samples taken while the page is open. Where the hardware reports it, GPU
-temperature, power draw and clock appear too.
+**Overview** shows the workstation name, whether anything is waiting to
+sync, who is signed in right now (purpose, name, NIM, job, elapsed time) and
+today's five most recent sessions. It refreshes itself every 30 seconds
+while the page is on screen and someone has used it in the last 20 minutes.
+Left unattended it stops asking, so the page's own idle shutdown (30 minutes
+with no requests) takes it off the machine's loopback port; the header then
+reads **Closed — reopen Laporan Logix**, and the Start-menu shortcut opens a
+fresh one.
 
-Anything the machine cannot report says **Unavailable** rather than showing a
-zero — an absent GPU and an idle GPU must never look the same. CPU
-temperature and fan speed are *not* shown, because reading them on Windows
-needs a kernel-level driver, which would work against Logix staying small.
+There is no CPU, memory, GPU or storage reading. Earlier versions had one;
+the lab admin asked for it to go, because Logix is a logbook rather than a
+hardware monitor and every lab PC was paying for a sensor poll nobody
+needed. An upgraded install may still have the old `workstation.py` in
+`C:\ProgramData\Logix`; nothing loads it, and the installer and
+`windows\update_installed_client.ps1` delete it.
 
 **Logs** is the local history: search, date range, filters by user and job
 type, a details panel, and export. Everything is answered from the local

@@ -16,7 +16,17 @@ $xaml = Build-LogbookPopupXaml $cfg
 $doc = [xml]$xaml
 # v3: the fullscreen window is now a translucent scrim over the lock screen and
 # the dialog itself is a 320px card, rather than the window being the surface.
-Assert ($doc.Window.Background -eq '#D8070C15') "fullscreen popup is a dimmed scrim, not an opaque surface (v3 section 6)"
+$scrim = $doc.SelectNodes("//*[local-name()='Rectangle']") | Where-Object { $_.Name -eq 'Scrim' }
+$expectedScrim = '#D8' + (Get-LogbookTheme $cfg).surface.TrimStart('#')
+Assert ($doc.Window.Background -eq 'Transparent' -and $scrim -and $scrim.Fill -eq $expectedScrim) `
+    "fullscreen popup is a dimmed scrim over the live desktop, not an opaque surface (v3 section 6)"
+# The scrim is composited by Windows over what is really on screen. The popup
+# used to capture the whole virtual screen and PNG-encode it on every sign-in
+# for a background this layout never displayed.
+$popupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_popup.ps1')
+Assert ($popupSrc -notmatch 'CopyFromScreen') "the sign-in popup never captures the screen"
+$wbXaml = Build-LogbookWelcomeBackXaml $cfg @{ nama = 'Uji'; nim = '123456'; tujuan = 'Tes' } 'Physical'
+Assert (($xaml + $wbXaml) -notmatch 'BgImage|BlurEffect Radius="24"') "neither popup layout has a screenshot backdrop to fill"
 $mainCard = $doc.SelectNodes("//*[local-name()='Border']") | Where-Object { $_.Name -eq 'MainCard' }
 Assert ($mainCard.Width -eq '320') "sign-in dialog is 320px wide"
 Assert ($mainCard.CornerRadius -eq '22') "sign-in dialog uses radius 22, matching the pill language"
@@ -46,7 +56,13 @@ $tmp = Join-Path $env:TEMP ("logix_cfgtest_" + [guid]::NewGuid().ToString('N').S
 try {
     $merged = Merge-LogbookConfig (Get-LogbookDefaultConfig) (Read-LogbookConfigFile $tmp)
     Assert ($merged.branding.colors.accent -eq '#1A7F4B') "accent overridden"
-    Assert ($merged.branding.colors.primary -eq '#0E1626') "primary kept from defaults"
+    Assert ($merged.branding.colors.primary -eq (Get-LogbookDefaultConfig).branding.colors.primary) "primary kept from defaults"
+    # Text on the accent follows the accent: a lab that rebrands to a dark
+    # colour must not inherit the lime default's ink text.
+    Assert ((Get-LogbookTheme $merged).onAccent -eq '#FFFFFF') "a dark rebranded accent gets white text on it"
+    Assert ((Get-LogbookTheme (Get-LogbookDefaultConfig)).onAccent -eq '#111214') "the lime default carries ink"
+    Assert ((Get-LogbookTheme @{ branding = @{ colors = @{ accent = '#FFD400'; onAccent = '#222222' } } }).onAccent -eq '#222222') `
+        "an explicit onAccent always wins"
     Assert ($merged.branding.title -eq 'Report Logbook') "title kept from defaults"
     Assert (@($merged.purposes).Count -eq 4) "purposes array replaced (4)"
     Assert (@($merged.requiredFields) -join ',' -eq 'nama,keterangan') "requiredFields replaced"
@@ -159,7 +175,13 @@ Assert ($selesaiFill.Width -eq '0') "the hold fill starts empty -- SELESAI reads
 
 Write-Host "v3 anti-pattern guard rails (client)"
 Assert ($timerXaml -notmatch 'GradientBrush') "no gradient anywhere in the timer widget"
-Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status dot is static"
+Assert ($timerXaml -notmatch 'Name="Pulse"') "no pulsing element -- the status dot is static at rest"
+# v4 "Denyut": the dot may beat ONCE per heartbeat the server acknowledged --
+# driven by the monitor's event, never by a timer loop of its own.
+$beatFn = [regex]::Match((Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_timer.ps1')), '(?s)function Invoke-LogbookDotBeat.*?\n\}').Value
+Assert ($beatFn -match 'reduceMotion' -and $beatFn -notmatch 'RepeatBehavior|Forever') "the heartbeat beat is one-shot and respects reduced motion"
+Assert ((Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_timer.ps1')) -match 'Get-LogbookHeartbeatPulse\)\.WaitOne\(0\)') `
+    "the beat is triggered by a real acknowledged heartbeat, not a timer of its own"
 $mono = $timerDoc.SelectNodes("//*[local-name()='TextBlock'][@FontFamily='Consolas']")
 Assert ($mono.Count -ge 4) "time / ID values render in Consolas (mono tabular)"
 
@@ -1317,6 +1339,83 @@ Write-Host "enrolment carries the device name"
 $setupSrc = Get-Content -Raw (Join-Path $PSScriptRoot 'logbook_setup.ps1')
 Assert ($setupSrc -match 'device_name = \$name') "the setup wizard sends the typed name at enrolment"
 Assert ($installSrc -match 'device_name   = \$DeviceName') "so does the unattended installer path"
+
+# ---------------------------------------------------------------------------
+# Admin messages queue instead of overwriting each other, and a command the
+# server redelivers (its ack was lost) runs only once.
+Write-Host "admin messages queue; a redelivered command runs once"
+$msgState = Join-Path $env:TEMP ('lxinbox_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$savedStateDirMsg = $Global:StateDir
+$savedInboxDir = $Global:MessageInboxDir
+$savedInboxMax = $Global:MessageInboxMax
+$savedExecMax = $Global:ExecutedCommandsMax
+try {
+    New-Item -ItemType Directory -Force -Path $msgState | Out-Null
+    $Global:StateDir = $msgState
+    $Global:MessageInboxDir = Join-Path $msgState 'inbox'
+
+    Set-LogbookIncomingMessage -Text 'pertama' -CommandId 'c1'
+    Set-LogbookIncomingMessage -Text 'kedua' -CommandId 'c2'
+    $queued = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' | Sort-Object Name)
+    Assert ($queued.Count -eq 2) "a second message queues behind the first instead of overwriting it"
+    $firstMsg = Get-Content -LiteralPath $queued[0].FullName -Raw | ConvertFrom-Json
+    Assert ($firstMsg.text -eq 'pertama' -and $firstMsg.command_id -eq 'c1') "and the inbox drains in arrival order"
+    Assert (@(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.tmp').Count -eq 0) `
+        "no half-written .tmp is left behind for the widget to trip over"
+
+    $Global:MessageInboxMax = 3
+    1..5 | ForEach-Object { Set-LogbookIncomingMessage -Text "m$_" }
+    $bounded = @(Get-ChildItem -LiteralPath $Global:MessageInboxDir -Filter '*.json' | Sort-Object Name)
+    Assert ($bounded.Count -eq 3) "the inbox is bounded"
+    Assert ((Get-Content -LiteralPath $bounded[-1].FullName -Raw | ConvertFrom-Json).text -eq 'm5') "and keeps the newest"
+
+    Assert (@(Get-LogbookExecutedCommandIds).Count -eq 0) "a fresh device has no executed commands recorded"
+    Add-LogbookExecutedCommandId 'cmd-a'
+    $one = @(Get-LogbookExecutedCommandIds)
+    # A one-element list is where ConvertTo-Json likes to emit a bare scalar.
+    Assert ($one.Count -eq 1 -and $one[0] -eq 'cmd-a') "a single executed id round-trips as a one-element list"
+    Add-LogbookExecutedCommandId 'cmd-b'
+    Assert ((@(Get-LogbookExecutedCommandIds)) -contains 'cmd-b') "later ids are appended"
+    $Global:ExecutedCommandsMax = 3
+    'cmd-c', 'cmd-d', 'cmd-e' | ForEach-Object { Add-LogbookExecutedCommandId $_ }
+    $kept = @(Get-LogbookExecutedCommandIds)
+    Assert ($kept.Count -eq 3 -and $kept[-1] -eq 'cmd-e' -and -not ($kept -contains 'cmd-a')) "the executed list is bounded, oldest dropped first"
+
+    # The reply retry queue, round-tripped for real. Under Windows PowerShell
+    # 5.1 (what the agent runs on) the old writer produced
+    # {"value":[...],"Count":1}, which read back as one reply with no text --
+    # the server rejects that as empty, so a reply queued while offline was
+    # never delivered. This suite runs under both 5.1 and 7 for that reason.
+    $q = @(Get-LogbookPendingReplies)
+    $q += @{ text = 'halo admin'; command_id = 'c1'; created_at = '2026-01-01T10:00:00' }
+    Set-LogbookPendingReplies $q
+    $back = @(Get-LogbookPendingReplies)
+    Assert ($back.Count -eq 1 -and $back[0].text -eq 'halo admin') "a queued reply reads back with its text intact"
+    Assert ((Get-Content (Join-Path $msgState 'pending_replies.json') -Raw).TrimStart().StartsWith('[')) "and is stored as a JSON list"
+    Set-Content -LiteralPath (Join-Path $msgState 'pending_replies.json') -Encoding UTF8 `
+        -Value '{"value":[{"text":"tertahan","command_id":"c9","created_at":"2026-01-01T09:00:00"}],"Count":1}'
+    $legacy = @(Get-LogbookPendingReplies)
+    Assert ($legacy.Count -eq 1 -and $legacy[0].text -eq 'tertahan') "a queue already stuck in the old 5.1 shape is unwrapped, so it finally sends"
+} finally {
+    $Global:StateDir = $savedStateDirMsg
+    $Global:MessageInboxDir = $savedInboxDir
+    $Global:MessageInboxMax = $savedInboxMax
+    $Global:ExecutedCommandsMax = $savedExecMax
+    Remove-Item $msgState -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$switchIdx = $heartbeatFn.IndexOf('switch ($name)')
+$skipIdx = $heartbeatFn.IndexOf('-contains $cmdId')
+$recordIdx = $heartbeatFn.IndexOf('Add-LogbookExecutedCommandId')
+Assert ($skipIdx -ge 0 -and $skipIdx -lt $switchIdx) "a redelivered command_id is skipped before dispatch"
+Assert ($recordIdx -ge 0 -and $recordIdx -lt $switchIdx) `
+    "a command is recorded as executed BEFORE it runs -- LOGOFF can take this process down with it"
+
+$showMsgFn = [regex]::Match($timerSrc, '(?s)function Show-LogbookPendingMessage.*?\n\}').Value
+Assert ($showMsgFn.Length -gt 0) "the inbox drain is where this check expects it"
+Assert ($showMsgFn -notmatch '\bfinally\b') "a message is not deleted in a finally block, i.e. even when it failed to render"
+Assert ($showMsgFn -match "msgState -ne 'none'") "a new message waits while the card still holds one"
+Assert ($viewFn -match "msgState -in @\('reading','sent'\)") "quick replies stay offered after a send, so the conversation can go on"
 
 
 # The summary lives at the END of the file, which sounds too obvious to write

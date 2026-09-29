@@ -103,13 +103,13 @@ def test_schema_no_longer_lists_speculative_unimplemented_fields():
 # kept only as legacy comparison."
 RETIRED_MAROON = "#741B47"
 
-V3_CLIENT_COLORS = {
-    "accent": "#2563EB",
-    "text": "#EEF3FB",
-    "muted": "#93A1B8",
-    "surface": "#070C15",
-    "surfaceWidget": "#0B1017",
-    "surfaceElevated": "#0E1626",
+V4_CLIENT_COLORS = {
+    "accent": "#C5F23A",
+    "text": "#EEF0F3",
+    "muted": "#8D939C",
+    "surface": "#0B0C0E",
+    "surfaceWidget": "#111214",
+    "surfaceElevated": "#1A1C20",
 }
 
 
@@ -118,9 +118,9 @@ def _served_colors(monkeypatch) -> dict:
     return main.DEFAULT_CONFIG["branding"]["colors"]
 
 
-def test_served_branding_matches_the_v3_client_palette(monkeypatch):
+def test_served_branding_matches_the_v4_client_palette(monkeypatch):
     colors = _served_colors(monkeypatch)
-    for key, expected in V3_CLIENT_COLORS.items():
+    for key, expected in V4_CLIENT_COLORS.items():
         assert colors.get(key) == expected, (
             f"branding.colors.{key} is {colors.get(key)!r}, expected {expected!r}. "
             "DEFAULT_CONFIG paints the WPF client on first run; it has to track src/tokens.css."
@@ -132,3 +132,51 @@ def test_retired_maroon_accent_is_not_served_to_clients(monkeypatch):
         f"{RETIRED_MAROON} was retired as the accent in v3. If a lab genuinely "
         "wants it back, that is a per-deployment override, not the shipped default."
     )
+
+
+# --- Upgrading a lab that is already running --------------------------------
+# startup_event() wrote a full DEFAULT_CONFIG snapshot on first run, so an
+# existing server_config.json holds the v3 colours explicitly.
+
+def _start_with_saved_config(monkeypatch, tmp_path, saved):
+    main = _load_main(monkeypatch)
+    main.DB_PATH = tmp_path / "test.db"
+    main.CONFIG_PATH = tmp_path / "server_config.json"
+    main.REPORTS_DIR = tmp_path / "reports"
+    main.CONFIG_PATH.write_text(saved if isinstance(saved, str) else json.dumps(saved), encoding="utf-8")
+    main.startup_event()
+    return main, main.CONFIG_PATH.read_text(encoding="utf-8")
+
+
+def _v3_snapshot(main):
+    cfg = json.loads(json.dumps(main.DEFAULT_CONFIG))
+    cfg["branding"]["colors"] = dict(main.V3_DEFAULT_COLORS)
+    cfg["branding"]["signals"] = dict(main.V3_DEFAULT_SIGNALS)
+    return cfg
+
+
+def test_an_untouched_v3_palette_is_upgraded_at_startup(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch)
+    saved = _v3_snapshot(main)
+    saved["branding"]["colors"]["accent"] = "#2563eb"  # case must not matter
+    saved["branding"]["title"] = "Lab Kimia"            # everything else is kept
+    main, text = _start_with_saved_config(monkeypatch, tmp_path, saved)
+    cfg = json.loads(text)
+    assert cfg["branding"]["colors"] == main.DEFAULT_CONFIG["branding"]["colors"]
+    assert cfg["branding"]["signals"] == main.DEFAULT_CONFIG["branding"]["signals"]
+    assert cfg["branding"]["title"] == "Lab Kimia"
+
+
+def test_a_lab_that_picked_its_own_colours_is_left_alone(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch)
+    saved = _v3_snapshot(main)
+    saved["branding"]["colors"]["accent"] = "#1A7F4B"
+    main, text = _start_with_saved_config(monkeypatch, tmp_path, saved)
+    cfg = json.loads(text)
+    assert cfg["branding"]["colors"]["accent"] == "#1A7F4B"
+    assert cfg["branding"]["colors"]["surface"] == "#070C15", "a customised palette is not partially migrated"
+
+
+def test_an_unreadable_config_does_not_stop_the_server(monkeypatch, tmp_path):
+    _, text = _start_with_saved_config(monkeypatch, tmp_path, "{ not json")
+    assert text == "{ not json"

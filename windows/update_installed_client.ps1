@@ -77,8 +77,13 @@ $scripts = @(
 # resolves report_server.py out of there, and a redeploy that refreshed the
 # PowerShell half only is exactly how a mixed-version install happens -- the
 # thing this script exists to prevent.
-$coreFiles = @('log_physical.py', 'paths.py', 'logbook_report.py', 'report_server.py', 'workstation.py')
+$coreFiles = @('log_physical.py', 'paths.py', 'logbook_report.py', 'report_server.py')
 $coreDir = Join-Path $env:ProgramData 'Logix'
+# Core files the repo no longer ships. workstation.py fed the report page's
+# CPU/memory/GPU/storage panel, removed at the lab admin's request; a leftover
+# copy is inert, but keeping it is the drift this script exists to stop.
+# Mirrors [InstallDelete] in installer\logix-agent.iss.
+$retiredCoreFiles = @('workstation.py')
 
 # ---- stop the agent so nothing is mid-read while files change ---------------
 # Both generations: this script's whole job is upgrading a machine that
@@ -117,6 +122,18 @@ foreach ($c in $coreFiles) {
     else { Say "  core file missing from repo: $c" 'Yellow' }
 }
 Say "copied $coreCopied core file(s) to $coreDir" 'Green'
+
+$cacheDir = Join-Path $coreDir '__pycache__'
+foreach ($r in $retiredCoreFiles) {
+    $stale = @(Get-Item -LiteralPath (Join-Path $coreDir $r) -ErrorAction SilentlyContinue)
+    if (Test-Path -LiteralPath $cacheDir) {
+        $stale += @(Get-ChildItem -LiteralPath $cacheDir -Filter ("{0}.*.pyc" -f [IO.Path]::GetFileNameWithoutExtension($r)) -ErrorAction SilentlyContinue)
+    }
+    foreach ($f in $stale) {
+        Remove-Item -LiteralPath $f.FullName -Force
+        Say "  removed retired core file: $($f.Name)" 'DarkGray'
+    }
+}
 
 $logo = Join-Path $repo 'logo.png'
 if (Test-Path $logo) { Copy-Item $logo (Join-Path $InstallDir 'logo.png') -Force }
