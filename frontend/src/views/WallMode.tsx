@@ -6,69 +6,43 @@
 // heartbeat trace -- and it is always dark. User names can be hidden from
 // Settings > Privasi. Reachable at #wall.
 //
-// Data is Monitoring's: /api/devices merged with /api/active, plus today's
-// usage from /api/sessions/spans as TOTALS only -- no name or purpose from a
-// span ever reaches this screen. Heartbeats are derived the way Monitoring
-// derives them: a beat is a last_seen we saw MOVE between two polls of
-// /api/active, so a flat trace is a machine that has genuinely gone quiet.
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+// Data comes from ../lab: /api/devices merged with /api/active, plus
+// today's usage from /api/sessions/spans as TOTALS only -- no name or purpose
+// from a span ever reaches this screen. A beat is a last_seen we saw MOVE
+// between two polls of /api/active, so a flat trace is a machine that has
+// genuinely gone quiet.
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { getJson } from "../api";
 import Wordmark from "../components/Wordmark";
 import { useThemeMode } from "../theme/ThemeMode";
-import { ACCESS_LABEL, categoryLabel, resolveAccessType, type StationStatus } from "../tokens";
-import type { ActiveWorkstation, Device, LogixConfig, SessionSpan } from "../types";
+import { ACCESS_LABEL, resolveAccessType } from "../tokens";
+import type { LogixConfig } from "../types";
 import { Card, EmptyState, Mono, SkeletonGrid, StatusDot } from "../ui/base";
 import { useBreakpoint } from "../ui/hooks";
-import { BigNumber, CardTitle, Delta, EcgTrace, FleetDial, SegmentGauge, WeekBars, type DayBar } from "../ui/viz";
-import { durationSince, formatClock, formatSince, splitDeviceName, usePolling, useTicker } from "../util";
+import { BigNumber, CardTitle, Delta, EcgTrace, FleetDial, SegmentGauge, WeekBars } from "../ui/viz";
+import { durationSince, formatClock, formatSince, usePolling, useTicker } from "../util";
+import {
+  BEAT_WINDOW_MS,
+  LAB_STATUSES,
+  LAB_STATUS_LABEL,
+  mergeStations,
+  pad,
+  useLabLive,
+  weekUsage,
+  type LabStation,
+  type LabStatus,
+} from "../lab";
 
-interface WallStation {
-  hostname: string;
-  id: string;
-  spec: string;
-  status: StationStatus;
-  live: ActiveWorkstation | null;
-  lastSeen: string | null;
-}
-
-const LEGEND: { status: StationStatus; label: string }[] = [
-  { status: "active", label: "Dipakai" },
-  { status: "locked", label: "Terkunci" },
-  { status: "idle", label: "Bebas" },
-  { status: "offline", label: "Offline" },
-];
-const STATUS_WORD = new Map(LEGEND.map((l) => [l.status, l.label]));
-
-const BEAT_WINDOW_MS = 60_000;
 // Five missed polls of /api/active before the header admits the board is stale.
 const STALE_MS = 15_000;
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-const DAYS_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const ymd = (t: number) => {
-  const d = new Date(t);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-const startOfDay = (t: number) => {
-  const d = new Date(t);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-};
-const spanStart = (s: SessionSpan) => Date.parse(s.timestamp);
-/** An open span (no close event yet) runs until now. */
-const spanEnd = (s: SessionSpan, now: number) =>
-  s.duration_seconds === null ? now : spanStart(s) + s.duration_seconds * 1000;
-const overlapMs = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
-const hoursLabel = (h: number) => `${h.toLocaleString("id-ID", { maximumFractionDigits: 1 })} j`;
-
-const stationStatus = (live: ActiveWorkstation | null): StationStatus => {
-  if (!live) return "offline";
-  if (live.status === "LOCKED") return "locked";
-  return live.username ? "active" : "idle";
-};
+// A tile's natural height at scale 1 (padding, ID, spec, label, value and the
+// zoomed trace). Every size in a tile is multiplied by `scale`, so the height
+// it needs is TILE_HEIGHT * scale -- which is how the rows are fitted below.
+const TILE_HEIGHT = 240;
+// Below this a tile no longer reads from across the room; past it the station
+// grid scrolls instead of shrinking further.
+const MIN_SCALE = 0.6;
 
 /**
  * Pins the dark ramp while the wall is mounted. ForceDark set the attribute
@@ -103,12 +77,11 @@ const usePinnedDark = () => {
 // (lime = dipakai, ink = terkunci, outline = bebas, dashed = offline), so a
 // tile and its segment in the arc read as the same thing.
 
-const PILL: Record<StationStatus, CSSProperties> = {
+const PILL: Record<LabStatus, CSSProperties> = {
   active: { background: "var(--lx-accent)", color: "var(--lx-on-accent)" },
   locked: { background: "var(--lx-ink)", color: "var(--lx-on-ink)" },
   idle: { boxShadow: "inset 0 0 0 2px var(--lx-text)", color: "var(--lx-text)" },
   offline: { border: "1.5px dashed var(--lx-border-dashed)", color: "var(--lx-muted)" },
-  alert: { background: "var(--lx-status-alert)", color: "var(--lx-on-ink)" },
 };
 
 const clip: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 };
@@ -120,7 +93,7 @@ const StationTile = ({
   scale,
   index,
 }: {
-  s: WallStation;
+  s: LabStation;
   beats: number[];
   isNameVisible: boolean;
   scale: number;
@@ -138,7 +111,9 @@ const StationTile = ({
     aside = ACCESS_LABEL[resolveAccessType(s.live?.access_type)];
   } else if (s.status === "locked") {
     label = "Dikunci sejak";
-    value = formatClock(since);
+    // With the day, as the offline tile has: a lock from yesterday must not
+    // read as a time later today.
+    value = formatSince(since);
   } else if (s.status === "idle") {
     label = "Bebas · idle";
     value = durationSince(since);
@@ -192,7 +167,7 @@ const StationTile = ({
             ...PILL[s.status],
           }}
         >
-          {STATUS_WORD.get(s.status)}
+          {LAB_STATUS_LABEL[s.status]}
         </span>
       </div>
 
@@ -240,36 +215,23 @@ export default function WallMode() {
   const isPhone = breakpoint === "phone";
   const isDesktop = breakpoint === "desktop";
 
-  const [devices, setDevices] = useState<Device[] | null>(null);
-  const [active, setActive] = useState<ActiveWorkstation[]>([]);
-  // "unavailable": an account without sessions_read, or the server was away
-  // before the first answer. The usage card says so instead of showing a zero
-  // that would read as an empty lab.
-  const [spans, setSpans] = useState<SessionSpan[] | "unavailable" | null>(null);
+  // A wall display must not show an error card: every failed poll keeps the
+  // last good board, and the header says when that board went stale.
+  const { devices, active, spans, liveAt, lastBeatAt, beatsOf } = useLabLive();
   // null until /api/config has answered. Names stay hidden until then: the
   // old default of showing them flashed every name onto the room-facing
   // screen for as long as the config took to arrive, even with hiding on.
   const [hideNames, setHideNames] = useState<boolean | null>(null);
   const [labName, setLabName] = useState("Lab Komputasi FTMM");
-  const [liveAt, setLiveAt] = useState<number | null>(null);
-
-  // Heartbeats observed per station, as the times we SAW last_seen move.
-  // The first reading of a station is not a beat -- we did not see it arrive.
-  const beatsRef = useRef(new Map<string, number[]>());
-  const lastSeenRef = useRef(new Map<string, string>());
-  const [lastBeatAt, setLastBeatAt] = useState<number | null>(null);
+  // The station grid's own height on desktop, where it takes whatever the
+  // header and bento leave of the screen.
+  const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
+  const [gridHeight, setGridHeight] = useState<number | null>(null);
 
   // The clock, durations and "x dtk lalu" are live.
   useTicker(1000);
 
-  // A wall display must not show an error card: every failure below keeps
-  // the last good board, and the header says when that board went stale.
-  const refreshRegistry = useCallback(async () => {
-    try {
-      setDevices(await getJson<Device[]>("/api/devices", ""));
-    } catch {
-      /* keep the last good board */
-    }
+  usePolling(async () => {
     try {
       const config = await getJson<LogixConfig>("/api/config", "");
       setHideNames(Boolean(config.privacy?.hide_names_on_wall));
@@ -277,68 +239,18 @@ export default function WallMode() {
     } catch {
       /* keep defaults */
     }
-  }, []);
+  }, 15000);
 
-  const refreshLive = useCallback(async () => {
-    try {
-      const list = await getJson<ActiveWorkstation[]>("/api/active", "");
-      const now = Date.now();
-      let sawBeat = false;
-      for (const a of list) {
-        const prev = lastSeenRef.current.get(a.hostname);
-        if (prev !== undefined && prev !== a.last_seen) {
-          beatsRef.current.set(a.hostname, [...(beatsRef.current.get(a.hostname) ?? []), now]);
-          sawBeat = true;
-        }
-        lastSeenRef.current.set(a.hostname, a.last_seen);
-      }
-      for (const [host, beats] of beatsRef.current) {
-        beatsRef.current.set(host, beats.filter((t) => now - t < BEAT_WINDOW_MS));
-      }
-      setActive(list);
-      setLiveAt(now);
-      if (sawBeat) setLastBeatAt(now);
-    } catch {
-      /* keep the last good board */
-    }
-  }, []);
+  useLayoutEffect(() => {
+    if (!gridEl) return;
+    const observer = new ResizeObserver(() => setGridHeight(gridEl.clientHeight));
+    observer.observe(gridEl);
+    return () => observer.disconnect();
+  }, [gridEl]);
 
-  const refreshSpans = useCallback(async () => {
-    try {
-      const page = await getJson<{ sessions: SessionSpan[] }>(
-        `/api/sessions/spans?start_date=${ymd(Date.now() - 6 * DAY_MS)}&limit=5000`,
-        "",
-      );
-      setSpans(page.sessions);
-    } catch {
-      setSpans((prev) => prev ?? "unavailable");
-    }
-  }, []);
+  const stations = useMemo(() => (devices ? mergeStations(devices, active) : []), [devices, active]);
 
-  usePolling(refreshRegistry, 15000);
-  usePolling(refreshLive, 3000);
-  usePolling(refreshSpans, 60000);
-
-  const stations = useMemo<WallStation[]>(() => {
-    if (!devices) return [];
-    const liveByHost = new Map(active.map((a) => [a.hostname, a]));
-    return devices
-      .map((d) => {
-        const live = liveByHost.get(d.hostname) ?? null;
-        const { id, spec } = splitDeviceName(d.display_name || live?.device_name || d.hostname);
-        return {
-          hostname: d.hostname,
-          id,
-          spec: spec || categoryLabel(d.category),
-          status: stationStatus(live),
-          live,
-          lastSeen: live?.last_seen ?? d.last_seen,
-        };
-      })
-      .sort((a, b) => a.id.localeCompare(b.id, "id", { numeric: true }));
-  }, [devices, active]);
-
-  const count = (status: StationStatus) => stations.filter((s) => s.status === status).length;
+  const count = (status: LabStatus) => stations.filter((s) => s.status === status).length;
   const total = stations.length;
   const inUse = count("active");
   const onlineCount = stations.filter((s) => s.status !== "offline").length;
@@ -346,48 +258,23 @@ export default function WallMode() {
 
   // ---- Usage, from the last 7 days of session spans (totals only) ----
   const now = Date.now();
-  const today0 = startOfDay(now);
-  const usage = useMemo(() => {
-    if (!Array.isArray(spans)) return null;
-    const hoursIn = (d0: number, d1: number) =>
-      spans.reduce((sum, s) => sum + overlapMs(spanStart(s), spanEnd(s, now), d0, d1), 0) / HOUR_MS;
-    const days: DayBar[] = [];
-    for (let i = 6; i >= 0; i -= 1) {
-      const d0 = today0 - i * DAY_MS;
-      const hours = hoursIn(d0, d0 + DAY_MS);
-      days.push({
-        key: ymd(d0),
-        label: i === 0 ? "Hari ini" : DAYS_SHORT[new Date(d0).getDay()],
-        value: hours,
-        tag: hoursLabel(hours),
-        isToday: i === 0,
-      });
-    }
-    const todayHours = days[6].value;
-    // Yesterday only up to this same time of day, as on Monitoring: a whole
-    // day against half of one would always read as a drop.
-    const yesterdaySoFar = hoursIn(today0 - DAY_MS, now - DAY_MS);
-    const todaySpans = spans.filter((s) => spanEnd(s, now) > today0);
-    // Identity is used to COUNT people and goes no further.
-    const people = new Set(todaySpans.map((s) => s.nim || s.nama || s.username).filter(Boolean));
-    return {
-      days,
-      todayHours,
-      delta: yesterdaySoFar > 0 ? ((todayHours - yesterdaySoFar) / yesterdaySoFar) * 100 : null,
-      sessionsToday: todaySpans.length,
-      peopleToday: people.size,
-    };
-    // `now` moves every second; the week only needs recomputing when data does.
-  }, [spans, today0, Math.floor(now / 60000)]);
+  // `now` moves every second; the week only needs recomputing when data does,
+  // or once a minute so an open session keeps adding up.
+  const minute = Math.floor(now / 60000);
+  const usage = useMemo(() => (Array.isArray(spans) ? weekUsage(spans, now) : null), [spans, minute]);
 
   // ---- Layout ----
-  // Tiles are balanced into rows (8 stations = 4 + 4, never 6 + 2) and
-  // shrink as the lab grows so a whole lab still fits one screen.
+  // Tiles are balanced into rows (8 stations = 4 + 4, never 6 + 2). On
+  // desktop -- the wall TV -- the page is exactly one screen tall and tiles
+  // shrink until their rows fit the height the bento leaves, so the whole lab
+  // is on screen without scrolling.
   const maxCols = isDesktop ? (total <= 8 ? 4 : total <= 15 ? 5 : 6) : breakpoint === "tablet" ? 2 : 1;
   const rows = Math.max(1, Math.ceil(total / maxCols));
   const cols = Math.max(1, Math.ceil(total / rows));
-  const scale = isPhone ? 0.78 : total <= 8 ? 1 : total <= 15 ? 0.84 : 0.7;
   const gap = isPhone ? 10 : 18;
+  const byCount = isPhone ? 0.78 : total <= 8 ? 1 : total <= 15 ? 0.84 : 0.7;
+  const byHeight = isDesktop && gridHeight ? (gridHeight - (rows - 1) * gap) / rows / TILE_HEIGHT : byCount;
+  const scale = Math.max(MIN_SCALE, Math.min(byCount, byHeight));
   const bentoColumns = isDesktop ? "repeat(12, 1fr)" : breakpoint === "tablet" ? "1fr 1fr" : "1fr";
   const bentoSpan = (desktop: number, tablet: number) =>
     isDesktop ? `span ${desktop}` : breakpoint === "tablet" ? `span ${tablet}` : undefined;
@@ -398,7 +285,14 @@ export default function WallMode() {
   const beatAgo = lastBeatAt ? Math.max(0, Math.round((now - lastBeatAt) / 1000)) : null;
 
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", background: "var(--lx-frame)" }}>
+    <div
+      style={{
+        ...(isDesktop ? { height: "100dvh" } : { minHeight: "100dvh" }),
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--lx-frame)",
+      }}
+    >
       {/* ---- Frame: lab name, live state, clock ---- */}
       <header
         className="lx-frame-scope"
@@ -486,6 +380,7 @@ export default function WallMode() {
       <main
         style={{
           flex: 1,
+          minHeight: 0,
           display: "flex",
           flexDirection: "column",
           gap,
@@ -514,13 +409,13 @@ export default function WallMode() {
                   <div style={{ fontSize: isPhone ? 12.5 : 15, color: "var(--lx-muted)", marginTop: 6 }}>stasiun sedang dipakai</div>
                 </SegmentGauge>
                 <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px 18px", marginTop: 18 }}>
-                  {LEGEND.map((l) => (
+                  {LAB_STATUSES.map((status) => (
                     <span
-                      key={l.status}
+                      key={status}
                       style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: isPhone ? 13 : 15, color: "var(--lx-muted)" }}
                     >
-                      <StatusDot status={l.status} size={10} />
-                      {l.label} <Mono style={{ color: "var(--lx-text)", fontWeight: 700 }}>{count(l.status)}</Mono>
+                      <StatusDot status={status} size={10} />
+                      {LAB_STATUS_LABEL[status]} <Mono style={{ color: "var(--lx-text)", fontWeight: 700 }}>{count(status)}</Mono>
                     </span>
                   ))}
                 </div>
@@ -559,7 +454,7 @@ export default function WallMode() {
                     <WeekBars days={usage.days} height={isPhone ? 130 : 128} />
                     <div style={{ display: "flex", gap: 24, marginTop: 14, fontSize: isPhone ? 13 : 15, color: "var(--lx-muted)" }}>
                       <span>
-                        <Mono style={{ color: "var(--lx-text)", fontWeight: 700 }}>{usage.sessionsToday}</Mono> sesi
+                        <Mono style={{ color: "var(--lx-text)", fontWeight: 700 }}>{usage.todaySpans.length}</Mono> sesi
                       </span>
                       <span>
                         <Mono style={{ color: "var(--lx-text)", fontWeight: 700 }}>{usage.peopleToday}</Mono> pengguna
@@ -580,7 +475,7 @@ export default function WallMode() {
                 <div style={{ flex: 1, display: "flex", alignItems: "center" }}>
                   <FleetDial
                     dots={stations.map((s) => {
-                      const beats = beatsRef.current.get(s.hostname) ?? [];
+                      const beats = beatsOf(s.hostname);
                       return {
                         hostname: s.id,
                         isOnline: s.status !== "offline",
@@ -606,19 +501,24 @@ export default function WallMode() {
 
             {/* ---- Stations ---- */}
             <div
+              ref={setGridEl}
               style={{
                 flex: 1,
+                minHeight: 0,
+                // Only past MIN_SCALE: a lab too big for the screen scrolls
+                // here, inside the canvas, rather than shrinking unreadably.
+                overflowY: isDesktop ? "auto" : undefined,
                 display: "grid",
                 gap,
                 gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-                gridAutoRows: `minmax(${Math.round(210 * scale)}px, 1fr)`,
+                gridAutoRows: `minmax(${Math.round(TILE_HEIGHT * scale)}px, 1fr)`,
               }}
             >
               {stations.map((s, i) => (
                 <StationTile
                   key={s.hostname}
                   s={s}
-                  beats={beatsRef.current.get(s.hostname) ?? []}
+                  beats={beatsOf(s.hostname)}
                   isNameVisible={hideNames === false}
                   scale={scale}
                   index={i + 3}

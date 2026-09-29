@@ -15,6 +15,7 @@ import { Fragment, useCallback, useMemo, useRef, useState, type CSSProperties, t
 
 import { getJson, sendJson } from "../api";
 import { ACCESS_LABEL, STATUS_LABEL, categoryLabel, resolveAccessType, type StationStatus } from "../tokens";
+import { BEAT_WINDOW_MS, DAY_MS, DAYS_SHORT, HOUR_MS, LAB_STATUS_LABEL, LAB_STATUSES, hoursLabel, overlapMs, spanEnd, spanStart, startOfDay, stationStatus, ymd } from "../lab";
 import type { ActiveWorkstation, Device, SessionSpan } from "../types";
 import { Card, EmptyState, ErrorState, Mono, PageHeader, SectionLabel, SkeletonGrid, StatusDot } from "../ui/base";
 import { Button, TextArea } from "../ui/controls";
@@ -46,42 +47,9 @@ interface Station {
   device: Device;
 }
 
-const stationStatus = (device: Device, live: ActiveWorkstation | null): StationStatus => {
-  if (!live) return "offline";
-  if (live.status === "LOCKED") return "locked";
-  // Online but nobody signed in -- the station is free.
-  return live.username ? "active" : "idle";
-};
-
-const BEAT_WINDOW_MS = 60_000;
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-const DAYS_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
-
-const pad = (n: number) => String(n).padStart(2, "0");
-const ymd = (t: number) => {
-  const d = new Date(t);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-const startOfDay = (t: number) => {
-  const d = new Date(t);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-};
-const spanStart = (s: SessionSpan) => Date.parse(s.timestamp);
-/** An open span (no close event yet) runs until now. */
-const spanEnd = (s: SessionSpan, now: number) =>
-  s.duration_seconds === null ? now : spanStart(s) + s.duration_seconds * 1000;
-const overlapMs = (a0: number, a1: number, b0: number, b1: number) => Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
-const hoursLabel = (h: number) => `${h.toLocaleString("id-ID", { maximumFractionDigits: 1 })} j`;
 const clock = (t: number) => formatClock(new Date(t).toISOString());
 
-const LEGEND: { status: StationStatus; label: string }[] = [
-  { status: "active", label: "Dipakai" },
-  { status: "locked", label: "Terkunci" },
-  { status: "idle", label: "Bebas" },
-  { status: "offline", label: "Offline" },
-];
+const LEGEND = LAB_STATUSES.map((status) => ({ status, label: LAB_STATUS_LABEL[status] }));
 
 export default function Monitoring() {
   const toast = useToast();
@@ -187,7 +155,7 @@ export default function Monitoring() {
           // back to the raw category KEY printed "WS-01 - lab_workstation" at
           // a lab admin.
           spec: spec || categoryLabel(d.category),
-          status: stationStatus(d, live),
+          status: stationStatus(live),
           live,
           lastSeen: live?.last_seen ?? d.last_seen,
           anydeskId: live?.anydesk_id || "",

@@ -27,13 +27,15 @@ import {
 } from "react";
 
 import { getJson, postEmpty, sendJson } from "../api";
-import { ACCESS_LABEL, resolveAccessType, type StationStatus } from "../tokens";
+import { ACCESS_LABEL, resolveAccessType } from "../tokens";
 import type { ActiveWorkstation, ConversationMessage, ConversationsPage, ConversationThread } from "../types";
 import { Mono, SectionLabel, StatusDot } from "../ui/base";
 import { Button } from "../ui/controls";
 import { useBreakpoint } from "../ui/hooks";
 import { Modal, useToast } from "../ui/overlays";
 import { durationSince, formatClock, formatLogTime, splitDeviceName, usePolling } from "../util";
+// The same reading of a heartbeat as the wall's station tiles.
+import { DAYS_SHORT, LAB_STATUS_LABEL, pad, stationStatus, type LabStatus } from "../lab";
 import { FrameTrigger } from "./AlertsBell";
 
 const POLL_CLOSED_MS = 20000;
@@ -57,25 +59,6 @@ const isUndelivered = (m: ConversationMessage) => m.status === "failed" || m.sta
 /** "14:02" today, "02/08 · 14:02" otherwise. */
 const stamp = (iso: string) =>
   new Date(iso).toDateString() === new Date().toDateString() ? formatClock(iso) : formatLogTime(iso);
-
-type Presence = Exclude<StationStatus, "alert">;
-
-const PRESENCE_LABEL: Record<Presence, string> = {
-  active: "Dipakai",
-  locked: "Terkunci",
-  idle: "Bebas",
-  offline: "Offline",
-};
-
-/** The same reading of a heartbeat as Monitoring's station cards. */
-const presenceOf = (live: ActiveWorkstation | undefined): Presence => {
-  if (!live) return "offline";
-  if (live.status === "LOCKED") return "locked";
-  return live.username ? "active" : "idle";
-};
-
-const DAYS_SHORT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
-const pad = (n: number) => String(n).padStart(2, "0");
 
 const dayLabel = (iso: string): ReactNode => {
   const d = new Date(iso);
@@ -103,6 +86,16 @@ const UNREAD_TAG: CSSProperties = {
   fontWeight: 700,
   background: "var(--lx-accent)",
   color: "var(--lx-on-accent)",
+};
+
+// Read out, never drawn: the tag alone would be a bare number to a screen reader.
+const SCREEN_READER_ONLY: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  overflow: "hidden",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
 };
 
 const CHAT = <path d="M20 11.5a7.5 7.5 0 0 1-11 6.6L4.5 19.5l1.3-4.2A7.5 7.5 0 1 1 20 11.5z" />;
@@ -193,7 +186,7 @@ const ThreadRow = ({
   thread: ConversationThread;
   index: number;
   isActive: boolean;
-  presence: Presence | null;
+  presence: LabStatus | null;
   onSelect: () => void;
 }) => {
   const last = thread.messages[thread.messages.length - 1];
@@ -233,13 +226,14 @@ const ThreadRow = ({
         }}
       >
         <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {presence && <StatusDot status={presence} label={PRESENCE_LABEL[presence]} />}
+          {presence && <StatusDot status={presence} label={LAB_STATUS_LABEL[presence]} />}
           <Mono style={{ fontSize: 13, fontWeight: 700 }}>{splitDeviceName(thread.device_name).id}</Mono>
           <span style={{ flex: 1 }} />
           {last && <Mono style={{ fontSize: 10.5, opacity: 0.6 }}>{stamp(last.at)}</Mono>}
           {isUnread && (
             <span key={thread.unread} className="lx-mono lx-anim-dot" style={UNREAD_TAG}>
               {thread.unread}
+              <span style={SCREEN_READER_ONLY}> belum dibaca</span>
             </span>
           )}
         </span>
@@ -401,8 +395,8 @@ export default function RepliesInbox() {
   const unread = page.unread;
 
   const liveByHost = live ? new Map(live.map((a) => [a.hostname.toUpperCase(), a])) : null;
-  const presenceFor = (hostname: string): Presence | null =>
-    liveByHost ? presenceOf(liveByHost.get(hostname.toUpperCase())) : null;
+  const presenceFor = (hostname: string): LabStatus | null =>
+    liveByHost ? stationStatus(liveByHost.get(hostname.toUpperCase())) : null;
 
   const list = (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, gap: 8 }}>
@@ -467,7 +461,7 @@ export default function RepliesInbox() {
                 <>
                   <StatusDot status={presence} />
                   <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
-                    {PRESENCE_LABEL[presence]}
+                    {LAB_STATUS_LABEL[presence]}
                     {presence === "active" && station && (
                       <>
                         {" · "}
@@ -559,10 +553,12 @@ export default function RepliesInbox() {
               padding: "6px 6px 6px 14px",
               borderRadius: 20,
               background: "var(--lx-card)",
-              // The textarea drops its own outline; the whole composer takes
-              // the ink focus edge instead, so focus is still plainly visible.
-              border: `1px solid ${isComposerFocused ? "var(--lx-ink)" : "var(--lx-border)"}`,
-              transition: "border-color var(--lx-motion) var(--lx-ease)",
+              border: "1px solid var(--lx-border)",
+              // The textarea drops its own outline so the Kirim button can sit
+              // inside the field; the whole composer takes the app's focus
+              // ring (tokens.css :focus-visible) instead.
+              outline: isComposerFocused ? "2px solid var(--lx-ink)" : "none",
+              outlineOffset: 2,
             }}
           >
             <textarea

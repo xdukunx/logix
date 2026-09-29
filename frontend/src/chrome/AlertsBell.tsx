@@ -58,6 +58,9 @@ const CATEGORY: Record<string, { label: string; isCondition: boolean }> = {
 };
 
 const HISTORY_LIMIT = 30;
+// Far above what a lab keeps open, so the severity and "belum ditandai" counts
+// are read from the whole active set rather than one page of it.
+const ACTIVE_LIMIT = 500;
 
 // ---------------------------------------------------------------------------
 // The chrome control. Exported for RepliesInbox, so the two controls in the
@@ -316,6 +319,8 @@ const cssVar = (name: string) => getComputedStyle(document.documentElement).getP
 export default function AlertsBell() {
   const toast = useToast();
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
+  // The server's count of active alerts, which can run past the loaded page.
+  const [total, setTotal] = useState(0);
   const [isOpen, setOpen] = useState(false);
   const [view, setView] = useState<"active" | "history">("active");
   const [filter, setFilter] = useState<Severity | null>(null);
@@ -324,13 +329,23 @@ export default function AlertsBell() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
 
-  const refresh = useCallback(async () => {
+  // Resolves to the fresh list, or null when the fetch failed.
+  const refresh = useCallback(async (): Promise<AlertRow[] | null> => {
     try {
-      const data = await getJson<{ alerts: AlertRow[] }>("/api/alerts?active=true", "Gagal memuat peringatan");
-      setAlerts(data.alerts || []);
+      // The server pages at 100 by default; event alerts only close by hand,
+      // so a lab that leaves them open would otherwise count a flat 100.
+      const data = await getJson<{ total: number; alerts: AlertRow[] }>(
+        `/api/alerts?active=true&limit=${ACTIVE_LIMIT}`,
+        "Gagal memuat peringatan",
+      );
+      const list = data.alerts || [];
+      setAlerts(list);
+      setTotal(data.total ?? list.length);
+      return list;
     } catch {
       // Roles without alert access get a 403; keep the last known list rather
       // than flashing an error into the app chrome.
+      return null;
     }
   }, []);
 
@@ -377,9 +392,10 @@ export default function AlertsBell() {
             })
           : null;
       await exit?.finished.catch(() => {});
-      await refresh();
-      // If the refresh failed the row is still there; do not leave it invisible.
-      exit?.cancel();
+      const list = await refresh();
+      // Only a row that survived the refresh (or a failed one) comes back;
+      // cancelling otherwise would flash it for a frame before React drops it.
+      if (!list || list.some((a) => a.id === id)) exit?.cancel();
     } catch (err) {
       toast((err as Error).message, "alert");
     } finally {
@@ -424,7 +440,7 @@ export default function AlertsBell() {
     >
       <div style={{ display: "flex", alignItems: "flex-end", gap: "12px 16px", flexWrap: "wrap" }}>
         <div>
-          <BigNumber value={alerts.length} size={46} />
+          <BigNumber value={total} size={46} />
           <div style={{ fontSize: 12.5, opacity: 0.7, marginTop: 6 }}>
             peringatan aktif ·{" "}
             {unacknowledged > 0 ? (
@@ -575,11 +591,9 @@ export default function AlertsBell() {
         <FrameTrigger
           icon={BELL}
           label="Peringatan"
-          count={unacknowledged || alerts.length}
+          count={unacknowledged || total}
           tone={unacknowledged > 0 ? "alert" : "quiet"}
-          ariaLabel={
-            unacknowledged > 0 ? `${unacknowledged} peringatan belum ditandai` : `${alerts.length} peringatan aktif`
-          }
+          ariaLabel={unacknowledged > 0 ? `${unacknowledged} peringatan belum ditandai` : `${total} peringatan aktif`}
           // Opening shortens the poll interval, and that restart fetches at once.
           onClick={() => setOpen(true)}
         />

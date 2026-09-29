@@ -241,17 +241,21 @@ export const FleetDial = ({ dots, children }: { dots: DialDot[]; children?: Reac
     >
       <svg viewBox="0 0 200 200" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} aria-hidden="true">
         <circle cx="100" cy="100" r={r} fill="none" stroke="currentColor" strokeOpacity="0.14" strokeWidth="9" />
-        <circle
-          cx="100"
-          cy="100"
-          r={r}
-          fill="none"
-          stroke="var(--lx-accent)"
-          strokeWidth="9"
-          strokeLinecap="round"
-          strokeDasharray={`${fraction * circ} ${circ}`}
-          transform="rotate(-90 100 100)"
-        />
+        {/* A zero-length dash with round caps still paints a dot: skip the arc
+            entirely while nothing is online. */}
+        {fraction > 0.001 && (
+          <circle
+            cx="100"
+            cy="100"
+            r={r}
+            fill="none"
+            stroke="var(--lx-accent)"
+            strokeWidth="9"
+            strokeLinecap="round"
+            strokeDasharray={`${fraction * circ} ${circ}`}
+            transform="rotate(-90 100 100)"
+          />
+        )}
       </svg>
       {dots.map((d, i) => {
         const a = (i / Math.max(dots.length, 1)) * 2 * Math.PI - Math.PI / 2;

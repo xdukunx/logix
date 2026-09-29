@@ -11,9 +11,9 @@
 // as a spike on the trace and a silent server flatlines. An admin sees the
 // server is down before typing a password, and "server down" never reads as
 // "wrong password".
-import { useState, type CSSProperties, type FormEvent } from "react";
+import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 
-import { getJson, login } from "../api";
+import { login } from "../api";
 import Wordmark from "../components/Wordmark";
 import { Card, Mono } from "../ui/base";
 import { Button, TextField } from "../ui/controls";
@@ -25,22 +25,31 @@ const PULSE_EVERY_MS = 3000;
 // Short, so the beats of the few seconds a sign-in takes are all on screen.
 const PULSE_WINDOW_MS = 15_000;
 
-
 const useServerPulse = () => {
   const [beats, setBeats] = useState<number[]>([]);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [isDown, setDown] = useState(false);
+  const sentRef = useRef(0);
+  const handledRef = useRef(0);
   usePolling(async () => {
+    const seq = ++sentRef.current;
     const started = performance.now();
+    let isOk = false;
     try {
-      await getJson("/api/health", "");
-      const now = Date.now();
-      setLatencyMs(Math.round(performance.now() - started));
-      setDown(false);
-      setBeats((prev) => [...prev.filter((t) => now - t < PULSE_WINDOW_MS), now]);
+      // A server that takes the connection and never answers is down too: the
+      // timeout turns that hang into a failure within one pulse.
+      isOk = (await fetch("/api/health", { signal: AbortSignal.timeout(PULSE_EVERY_MS) })).ok;
     } catch {
-      setDown(true);
+      /* no answer: isOk stays false */
     }
+    // Pulses can overlap; a slow answer must not overwrite a newer one.
+    if (seq < handledRef.current) return;
+    handledRef.current = seq;
+    setDown(!isOk);
+    if (!isOk) return;
+    const now = Date.now();
+    setLatencyMs(Math.round(performance.now() - started));
+    setBeats((prev) => [...prev.filter((t) => now - t < PULSE_WINDOW_MS), now]);
   }, PULSE_EVERY_MS);
   return { beats, latencyMs, isDown, lastBeat: beats[beats.length - 1] };
 };
