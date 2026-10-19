@@ -147,12 +147,38 @@ def migrate(con: sqlite3.Connection) -> None:
     con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_type ON physical_log(session_type)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_physical_log_event ON physical_log(event)")
 
+    rekey_auto_close_rows(con)
+
     jobs_cols = existing_columns(con, "jobs")
     if jobs_cols:
         for name, decl in {"session_type": "TEXT", "source": "TEXT", "client_ip": "TEXT"}.items():
             if name not in jobs_cols:
                 con.execute(f"ALTER TABLE jobs ADD COLUMN {name} {decl}")
     con.commit()
+
+
+def rekey_auto_close_rows(con: sqlite3.Connection) -> int:
+    """Give every auto-close row its own event_uid, and queue it to sync again.
+
+    close_open_workstation_sessions() used to copy the NEW session's
+    event_uid onto each auto-close row it wrote. The server deduplicates on
+    event_uid, so it accepted the START and silently dropped the close as a
+    repeat -- the replaced session then stayed open on the server forever,
+    inflating Riwayat. Re-keying those rows and clearing synced lets the
+    server finally receive the closes it threw away. Idempotent: a row that
+    already has a uid of its own is never touched again.
+    """
+    cur = con.execute(
+        """
+        UPDATE physical_log
+           SET event_uid = lower(hex(randomblob(16))), synced = 0
+         WHERE source = 'auto_close_before_new_start'
+           AND COALESCE(event_uid, '') <> ''
+           AND event_uid IN (SELECT event_uid FROM physical_log o
+                              WHERE o.id <> physical_log.id)
+        """
+    )
+    return cur.rowcount or 0
 
 
 def load_json_file(path: str | None) -> dict[str, Any]:
@@ -340,6 +366,9 @@ def close_open_workstation_sessions(con: sqlite3.Connection, closing_payload: di
         payload = dict(closing_payload)
         payload.update({
             "event": reason,
+            # Its own identity. Copying the new START's event_uid here made the
+            # server drop this close as a duplicate (see rekey_auto_close_rows).
+            "event_uid": uuid.uuid4().hex,
             "session_id": sid,
             "session_type": coalesce(row["session_type"], closing_payload.get("session_type"), "Physical"),
             "source": "auto_close_before_new_start",

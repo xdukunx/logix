@@ -44,6 +44,12 @@ try {
     }
 } catch {}
 
+# "A sign-in popup is open" as a named object, held for this process's life.
+# logix.exe agent asks with one OpenMutex call where the PowerShell monitor
+# had to walk every process's command line through WMI -- on each unlock.
+# Created only after the check above, which must not see this popup itself.
+try { $script:PopupMarker = New-Object System.Threading.Mutex($false, 'Local\LogixSignInPopup') } catch {}
+
 # If there is an active session and this is not an explicit new interactive unlock, only restore timer.
 # If ForceNew is set, close stale previous session first so the report gets END/Auto Finish + duration.
 if ((Test-Path $Global:SessionFile) -and -not $TestMode) {
