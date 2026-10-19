@@ -54,6 +54,15 @@ $testBtn     = $window.FindName('TestBtn')
 $disconnect  = $window.FindName('DisconnectBtn')
 $messageText = $window.FindName('MessageText')
 $closeBtn    = $window.FindName('CloseBtn')
+$syncBox     = $window.FindName('SyncBox')
+$pulseOn     = $window.FindName('PulseOn')
+$pulseOff    = $window.FindName('PulseOff')
+
+function Set-SyncChoice {
+    $mode = if ($syncBox.IsChecked) { 'admin_full_sync' } else { 'local_only' }
+    Set-LogbookConfigValue -Key 'LOGIX_PRIVACY_MODE' -Value $mode
+    return $mode
+}
 
 $theme = Get-LogbookTheme $cfg
 $brush = New-Object System.Windows.Media.BrushConverter
@@ -73,8 +82,8 @@ function Update-PairingView {
     if ($script:state.Paired) {
         $statusDot.Fill = $brush.ConvertFromString($theme.signalNormal)
         $statusText.Text = 'Terhubung ke server'
-        $deviceIdTxt.Text = "ID perangkat: $($script:state.DeviceId)"
-        $deviceIdTxt.Visibility = 'Visible'
+        $deviceIdTxt.Text = "ID perangkat  $($script:state.DeviceId)"
+        $pulseOn.Visibility = 'Visible'; $pulseOff.Visibility = 'Collapsed'
         # A paired device does not need a pairing code on screen; showing an
         # empty credential field next to a working connection reads as
         # something still being required.
@@ -83,8 +92,9 @@ function Update-PairingView {
         $disconnect.Visibility = 'Visible'
     } else {
         $statusDot.Fill = $brush.ConvertFromString($theme.muted)
-        $statusText.Text = 'Tidak terhubung (mode perangkat saja)'
-        $deviceIdTxt.Visibility = 'Collapsed'
+        $statusText.Text = 'Tidak terhubung'
+        $deviceIdTxt.Text = 'Pencatatan lokal tetap jalan.'
+        $pulseOn.Visibility = 'Collapsed'; $pulseOff.Visibility = 'Visible'
         $codeRow.Visibility = 'Visible'
         $connectBtn.Content = 'Hubungkan'
         $disconnect.Visibility = 'Collapsed'
@@ -129,9 +139,12 @@ $connectBtn.Add_Click({
         $r = Invoke-LogbookServerPairing -Url $url -Code $code
         if ($r.Ok) {
             $codeBox.Text = ''
+            $mode = Set-SyncChoice
             Update-PairingView
             $cat = if ($r.Category) { " sebagai $($r.Category)" } else { '' }
-            Set-Message "Berhasil terhubung$cat. Sesi berikutnya akan ikut tersinkron ke server." 'ok'
+            $tail = if ($mode -eq 'admin_full_sync') { 'Sesi berikutnya akan ikut tersinkron ke server.' }
+                    else { 'Data sesi tetap di komputer ini; server hanya melihat perangkat online.' }
+            Set-Message "Berhasil terhubung$cat. $tail" 'ok'
         } else {
             Set-Message $r.Error 'error'
         }
@@ -152,6 +165,17 @@ $disconnect.Add_Click({
     } else {
         Set-Message $r.Error 'error'
     }
+})
+
+# Changing the choice on an already-paired device takes effect at once:
+# log_physical.py and the heartbeat both read config.env on every run.
+$syncBox.Add_Click({
+    if (-not $script:state.Paired) { return }
+    try {
+        $mode = Set-SyncChoice
+        if ($mode -eq 'admin_full_sync') { Set-Message 'Data sesi akan dikirim ke server mulai sekarang.' 'ok' }
+        else { Set-Message 'Data sesi tidak lagi dikirim. Server hanya melihat perangkat ini online.' 'muted' }
+    } catch { Set-Message $_.Exception.Message 'error' }
 })
 
 $closeBtn.Add_Click({ $window.Close() })

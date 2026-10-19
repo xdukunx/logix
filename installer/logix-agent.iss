@@ -42,6 +42,9 @@ DisableProgramGroupPage=yes
 ; confirmation page -- the one custom page (server settings) already gates the
 ; only decision the operator makes.
 DisableReadyPage=yes
+; Shown on purpose: it is the one page that carries the brand panel before the
+; operator starts typing server details.
+DisableWelcomePage=no
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
@@ -49,7 +52,11 @@ OutputDir=Output
 OutputBaseFilename=LogixAgentSetup
 Compression=lzma2
 SolidCompression=yes
-WizardStyle=modern
+; Dark, on the dashboard's frame colour, with the bevel lines hidden: the same
+; ink-and-lime product a lab user sees on the sign-in screen and the dashboard
+; sidebar (Inno Setup 6.6+; older compilers reject the modifiers).
+WizardStyle=modern dark hidebevels
+WizardBackColor=#0F1012
 UninstallDisplayName={#AppName}
 #if FileExists(BrandBase + "logix.ico")
 SetupIconFile={#BrandDir}\logix.ico
@@ -78,8 +85,8 @@ en.SetupWindowTitle=Logix Setup
 id.SetupWindowTitle=Pemasangan Logix
 en.WelcomeLabel1=Welcome to Logix
 id.WelcomeLabel1=Selamat datang di Logix
-en.WelcomeLabel2=This sets up the Logix agent on this computer: the sign-in logbook, session timer, AnyDesk for remote help, and monitoring.%n%nIt only takes a moment. Click Next to continue.
-id.WelcomeLabel2=Ini memasang agen Logix di komputer ini: logbook sign-in, timer sesi, AnyDesk untuk bantuan jarak jauh, dan monitoring.%n%nHanya sebentar. Klik Berikutnya untuk melanjutkan.
+en.WelcomeLabel2=This sets up the Logix agent on this computer: the sign-in logbook, session timer, AnyDesk for remote help, and monitoring.%n%nIt only takes a moment.
+id.WelcomeLabel2=Ini memasang agen Logix di komputer ini: logbook sign-in, timer sesi, AnyDesk untuk bantuan jarak jauh, dan monitoring.%n%nHanya sebentar.
 en.FinishedHeadingLabel=Logix is ready
 id.FinishedHeadingLabel=Logix siap digunakan
 en.FinishedLabel=The Logix agent is installed and running. Lock and unlock this PC to see the sign-in screen, and the device shows up on the dashboard within a few seconds.
@@ -96,14 +103,16 @@ en.CfgDesc=Tell this device where the dashboard lives.
 id.CfgDesc=Beri tahu perangkat ini di mana dashboard berada.
 en.CfgBody=These are saved to C:\ProgramData\Logix\config.env and can be changed later. Ask your Logix admin for the server address and key.
 id.CfgBody=Data ini disimpan di C:\ProgramData\Logix\config.env dan bisa diubah nanti. Minta alamat server dan kunci ke admin Logix.
+en.CfgSync=Send session data to this server (name, NIM, purpose, times) so it shows in the admin's Riwayat
+id.CfgSync=Kirim data sesi ke server ini (nama, NIM, tujuan, jam) supaya muncul di Riwayat admin
 en.CfgUrl=Server URL (e.g. https://logix.example.org):
 id.CfgUrl=URL Server (mis. https://logix.example.org):
-en.CfgKey=Server API key (the ingest key from your server):
-id.CfgKey=Kunci API server (ingest key dari server kamu):
+en.CfgKey=Or the shared server API key (only without a pairing code):
+id.CfgKey=Atau API key server bersama (hanya jika tanpa kode pairing):
 en.CfgDevice=Device name (leave blank to use this PC's name):
 id.CfgDevice=Nama perangkat (kosongkan untuk memakai nama PC ini):
-en.CfgInvite=Enrollment code (from the dashboard; recommended):
-id.CfgInvite=Kode pendaftaran (dari dashboard; disarankan):
+en.CfgInvite=Pairing code (dashboard: Perangkat > Tambah perangkat; recommended):
+id.CfgInvite=Kode pairing (dashboard: Perangkat > Tambah perangkat; disarankan):
 en.CfgNeedUrl=Please enter the Logix server URL (e.g. https://logix.example.org).
 id.CfgNeedUrl=Masukkan URL server Logix (mis. https://logix.example.org).
 en.CfgNeedKey=Please enter the server API key (the ingest key from your Logix server).
@@ -131,6 +140,13 @@ Source: "assets\anydesk-7-0-0.exe"; DestDir: "{app}"; Flags: ignoreversion skipi
 Source: "{#SrcRoot}\windows\logo.png"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; Mascot icon, kept alongside the app so Add/Remove Programs shows it too.
 Source: "{#BrandDir}\logix.ico"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; The dashboard typeface (Plus Jakarta Sans, OFL) every client window loads
+; by URI from here -- see Get-LogbookFontFamily. ~90 KB for all three weights.
+Source: "{#SrcRoot}\windows\fonts\*"; DestDir: "{app}\fonts"; Flags: ignoreversion
+; Embeddable Python (stdlib only is all the core needs), fetched by build.ps1.
+; Every account on the PC uses this one, so a student account whose PATH has
+; no Python -- or only the Store stub -- still records its sessions.
+Source: "assets\python\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 ; Native Python logging core -> C:\ProgramData\Logix (Get-LogixCoreDir default)
 Source: "{#SrcRoot}\logix\log_physical.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
 Source: "{#SrcRoot}\logix\paths.py"; DestDir: "{commonappdata}\Logix"; Flags: ignoreversion
@@ -180,7 +196,7 @@ Name: "{group}\Koneksi Server Logix"; \
 ; launch; the headless wrapper never creates a window (see
 ; Start-HiddenPowerShell in logbook_common.ps1).
 Filename: "{sys}\conhost.exe"; \
-  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -InviteCode ""{code:GetInviteCode}"" -ServerCertPath ""{code:GetServerCert}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
+  Parameters: "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{app}\install_logbook_tasks.ps1"" -NonInteractive -RunNow -ServerUrl ""{code:GetServerUrl}"" -ServerApiKey ""{code:GetServerKey}"" -DeviceName ""{code:GetDeviceName}"" -InviteCode ""{code:GetInviteCode}"" -ServerCertPath ""{code:GetServerCert}"" -PrivacyMode ""{code:GetPrivacyMode}"" -AnyDeskInstaller ""{app}\anydesk-7-0-0.exe"""; \
   StatusMsg: "Registering Logix agent, installing AnyDesk, starting monitor..."; \
   Flags: runhidden waituntilterminated
 
@@ -209,6 +225,7 @@ Filename: "reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\Curre
 [Code]
 var
   ConfigPage: TInputQueryWizardPage;
+  SyncBox: TNewCheckBox;
 
 // Command-line overrides, so a lab can be imaged unattended instead of an
 // operator typing the same server URL into a wizard on every workstation:
@@ -254,10 +271,24 @@ begin
     ExpandConstant('{cm:CfgDesc}'),
     ExpandConstant('{cm:CfgBody}'));
   ConfigPage.Add(ExpandConstant('{cm:CfgUrl}'), False);
-  ConfigPage.Add(ExpandConstant('{cm:CfgKey}'), False);
-  ConfigPage.Add(ExpandConstant('{cm:CfgDevice}'), False);
+  // Pairing code right under the address: it is the recommended path (the
+  // device gets a key of its own), the shared key the legacy fallback.
   ConfigPage.Add(ExpandConstant('{cm:CfgInvite}'), False);
+  ConfigPage.Add(ExpandConstant('{cm:CfgDevice}'), False);
+  ConfigPage.Add(ExpandConstant('{cm:CfgKey}'), False);
   ConfigPage.Values[0] := 'http://localhost:8000';
+
+  // docs/PRIVACY.md: sending full session rows must be an explicit choice.
+  // Ticked by default because joining a lab server is done to see sessions
+  // there -- without it the device shows online and Riwayat stays empty --
+  // but it is on screen, worded plainly, and one click to clear.
+  SyncBox := TNewCheckBox.Create(ConfigPage);
+  SyncBox.Parent := ConfigPage.Surface;
+  SyncBox.Top := ConfigPage.Edits[3].Top + ConfigPage.Edits[3].Height + ScaleY(14);
+  SyncBox.Width := ConfigPage.SurfaceWidth;
+  SyncBox.Height := ScaleY(34);
+  SyncBox.Caption := ExpandConstant('{cm:CfgSync}');
+  SyncBox.Checked := True;
 end;
 
 // Don't let the operator continue with an empty server URL or key -- a device
@@ -295,7 +326,7 @@ end;
 
 function GetServerKey(Param: string): string;
 begin
-  Result := ParamOr('ServerKey', Trim(ConfigPage.Values[1]));
+  Result := ParamOr('ServerKey', Trim(ConfigPage.Values[3]));
 end;
 
 function GetDeviceName(Param: string): string;
@@ -307,7 +338,20 @@ end;
 // receives its own key; without it, it falls back to the shared bootstrap key.
 function GetInviteCode(Param: string): string;
 begin
-  Result := ParamOr('InviteCode', Trim(ConfigPage.Values[3]));
+  Result := ParamOr('InviteCode', Trim(ConfigPage.Values[1]));
+end;
+
+// /SYNCSESSIONS=0|1 on the command line wins; otherwise the page's checkbox.
+function GetPrivacyMode(Param: string): string;
+var
+  v: string;
+begin
+  v := ParamOr('SyncSessions', '');
+  if v = '' then
+  begin
+    if SyncBox.Checked then v := '1' else v := '0';
+  end;
+  if v = '1' then Result := 'admin_full_sync' else Result := 'local_only';
 end;
 
 // Path to the server's certificate, for a lab server that issues its own.
@@ -327,8 +371,12 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    if not Exec('cmd.exe', '/c where python || where py', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-      MsgBox(ExpandConstant('{cm:PyMissing}'), mbInformation, MB_OK);
+    // The bundled copy is what the agent uses first (Find-LogixPython).
+    // "where python" is no test on its own: stock Windows answers it with
+    // the WindowsApps Store stub, which runs nothing.
+    if not FileExists(ExpandConstant('{app}\python\python.exe')) then
+      if not Exec('cmd.exe', '/c where python | findstr /v /i WindowsApps', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+        MsgBox(ExpandConstant('{cm:PyMissing}'), mbInformation, MB_OK);
 
     // The [Run] step for yasbintegrate runs hidden, so its own Write-Host
     // instructions are never seen -- this is the one place left to tell the

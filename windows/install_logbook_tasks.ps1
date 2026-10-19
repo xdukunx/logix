@@ -39,7 +39,13 @@ param(
     # issues its own certificate (Caddyfile.lab), so a fresh workstation does not
     # trust it yet and every HTTPS call would fail. Importing it here is what
     # makes an unattended install over HTTPS possible at all.
-    [string]$ServerCertPath = ""
+    [string]$ServerCertPath = "",
+    # LOGIX_PRIVACY_MODE for config.env. Empty leaves config.env alone. The
+    # wizard always passes one (its "send session data" checkbox): a device
+    # joined to a server but left on local_only heartbeats and looks healthy
+    # while none of its sessions ever reach the dashboard.
+    [ValidateSet('', 'local_only', 'redacted_sync', 'admin_full_sync')]
+    [string]$PrivacyMode = ""
 )
 $ErrorActionPreference = 'Stop'
 
@@ -119,6 +125,7 @@ if (-not $PSBoundParameters.ContainsKey('Yasb') -and -not $NonInteractive) {
 if ($ServerUrl)    { Set-LogixConfigValue -Key 'LOGIX_SERVER_URL'     -Value $ServerUrl }
 if ($ServerApiKey) { Set-LogixConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value $ServerApiKey }
 if ($DeviceName)   { Set-LogixConfigValue -Key 'LOGIX_DEVICE_NAME'    -Value $DeviceName }
+if ($PrivacyMode)  { Set-LogixConfigValue -Key 'LOGIX_PRIVACY_MODE'   -Value $PrivacyMode }
 
 # --- Real device handshake ---------------------------------------------------
 # With an invite code we enroll for real instead of relying on the shared

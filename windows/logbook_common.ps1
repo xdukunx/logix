@@ -28,6 +28,23 @@ $Global:PopupLock = Join-Path $Global:StateDir 'popup.lock'
 # assignment is the same value and stays where it is.
 $Global:LockedFlagPath = Join-Path $Global:StateDir 'workstation_locked.flag'
 
+# The dashboard's typeface, bundled as three ~30 KB static TTFs (fonts\, OFL)
+# so every client window reads as the same product as the web UI. Loaded by
+# URI -- nothing is installed system-wide -- and Segoe UI is the named
+# fallback, so a copy without the fonts folder still renders, just in Segoe.
+function Get-LogbookFontFamily {
+    foreach ($dir in @((Join-Path $Global:InstallDir 'fonts'), (Join-Path $PSScriptRoot 'fonts'))) {
+        if ($dir -and (Test-Path (Join-Path $dir 'PlusJakartaSans-Regular.ttf'))) {
+            # Trailing slash matters: without it the base URI names a FILE
+            # called "fonts" and WPF silently falls back to Segoe UI.
+            $uri = ([Uri]((Resolve-Path $dir).Path.TrimEnd('\') + '\')).AbsoluteUri
+            return "$uri#Plus Jakarta Sans, Segoe UI"
+        }
+    }
+    return 'Segoe UI'
+}
+$Global:LxFontFamily = Get-LogbookFontFamily
+
 function Write-LogbookError {
     param([string]$Message)
     try {
@@ -639,17 +656,42 @@ function Get-LogixCoreDir {
 # the user can click) takes it off the critical path entirely.
 $script:logixPythonPath = $null
 $script:logixPythonResolved = $false
+# Order matters, and each step exists because a lab lost sessions without it:
+#   1. The copy the installer bundles (Program Files\Logix\python). Works for
+#      every account on the machine, whatever is or is not on its PATH.
+#   2. LOGIX_PYTHON from config.env, for an operator who wants a specific one.
+#   3. PATH -- but never the WindowsApps "python.exe". That is the Microsoft
+#      Store stub every stock Windows ships: it exists, so the old lookup took
+#      it, and it runs nothing, so every session was silently dropped.
+#   4. All-users installs, which a student account's PATH usually lacks when
+#      Python was installed "for me" by the admin account.
 function Find-LogixPython {
     if ($script:logixPythonResolved) { return $script:logixPythonPath }
+    $script:logixPythonResolved = $true
+    $candidates = New-Object System.Collections.Generic.List[string]
+    $candidates.Add((Join-Path $Global:InstallDir 'python\python.exe'))
+    $configured = Get-LogbookConfigEnv -Key 'LOGIX_PYTHON'
+    if ($configured) { $candidates.Add($configured.Trim().Trim('"')) }
     foreach ($cmd in @('python', 'py')) {
-        $found = Get-Command $cmd -ErrorAction SilentlyContinue
-        if ($found) {
-            $script:logixPythonPath = $found.Source
-            $script:logixPythonResolved = $true
-            return $script:logixPythonPath
+        foreach ($found in @(Get-Command $cmd -All -CommandType Application -ErrorAction SilentlyContinue)) {
+            $candidates.Add([string]$found.Source)
         }
     }
-    $script:logixPythonResolved = $true
+    foreach ($root in @($env:ProgramFiles, "$env:SystemRoot")) {
+        if (-not $root) { continue }
+        foreach ($p in @(Get-ChildItem -Path $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
+                         Sort-Object Name -Descending)) {
+            $candidates.Add((Join-Path $p.FullName 'python.exe'))
+        }
+        $candidates.Add((Join-Path $root 'py.exe'))
+    }
+    foreach ($c in $candidates) {
+        if (-not $c -or $c -like '*\WindowsApps\*') { continue }
+        if (Test-Path -LiteralPath $c -PathType Leaf) {
+            $script:logixPythonPath = $c
+            return $c
+        }
+    }
     return $null
 }
 
@@ -819,7 +861,9 @@ function Invoke-WSLLogbook {
     }
     try {
         $payload | ConvertTo-Json -Depth 5 | Out-File -FilePath $payloadPath -Encoding UTF8 -Force
-        Write-LogbookInfo "Bridge payload event=$Event sid=$SessionId nama=$Nama nim=$Nim tujuan=$Tujuan"
+        # No nama/nim here: this log sits in ProgramData, readable by every
+        # account on the machine.
+        Write-LogbookInfo "Bridge payload event=$Event sid=$SessionId"
         if (Test-LogbookUseWSL) {
             # The WSL bridge has no async path: it shells through wsl.exe,
             # where a detached launch buys far less and fails in ways that are
@@ -1336,7 +1380,9 @@ function Get-LogbookDeviceApiKey {
     # successful /api/enroll). Mirrors the server's own verify_api_key
     # fallback order: per-device key first, shared LOGIX_SERVER_API_KEY
     # from config.env as the bootstrap/unenrolled fallback.
-    $identityPath = 'C:\ProgramData\Logix\device.json'
+    # Same path the pairing writes (honours LOGIX_HOME); a hard-coded
+    # ProgramData path here silently fell back to the shared key.
+    $identityPath = Get-LogbookDeviceIdentityPath
     if (Test-Path $identityPath) {
         try {
             $obj = Get-Content $identityPath -Raw -ErrorAction Stop | ConvertFrom-Json
@@ -1655,6 +1701,11 @@ function Send-LogbookHeartbeat {
         $agentVersion = Get-LogbookAgentVersion
         if ($agentVersion) { $payload['agent_version'] = $agentVersion }
         $payload['agent_os'] = 'windows'
+        # So the dashboard can tell "online but deliberately not sending
+        # sessions" apart from "sessions lost". Same default as paths.py.
+        $privacyMode = Get-LogbookConfigEnv -Key 'LOGIX_PRIVACY_MODE'
+        if (-not $privacyMode) { $privacyMode = 'local_only' }
+        $payload['privacy_mode'] = $privacyMode.Trim().ToLower()
         # This machine's clock, so the server can measure skew. The agent
         # timestamps its own session events, so a wrong clock here files real
         # sessions under the wrong hour -- and across midnight, the wrong day.
@@ -2045,9 +2096,15 @@ function Get-LogbookPairingState {
         DeviceId  = ''
         Category  = ''
         HasKey    = $false
+        # Pre-ticked on a device that has never been paired: joining a lab
+        # server is done to get its sessions there, and the box is on screen
+        # to untick. Once paired it mirrors config.env exactly.
+        SyncSessions = $true
     }
     try {
+        $mode = Get-LogbookConfigEnv -Key 'LOGIX_PRIVACY_MODE'
         $url = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
+        if ($url -or $mode) { $state.SyncSessions = ([string]$mode).Trim().ToLower() -eq 'admin_full_sync' }
         if ($url) { $state.ServerUrl = $url.Trim() }
         $path = Get-LogbookDeviceIdentityPath
         if (Test-Path $path) {
@@ -2520,14 +2577,15 @@ function Build-LogbookClientResources($cfg) {
     <SolidColorBrush x:Key="LxCriticalEdge" Color="$($t.criticalEdge)"/>
     <SolidColorBrush x:Key="LxCriticalSoft" Color="$($t.criticalSoft)"/>
 
-    <!-- Two type voices only: Segoe UI for words, Consolas for time/ID/duration. -->
+    <!-- Two type voices only: Plus Jakarta Sans (the dashboard face) for words,
+         Consolas for time/ID/duration. -->
     <Style x:Key="LxLabel" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontFamily" Value="$($Global:LxFontFamily)"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Foreground" Value="{StaticResource LxMuted}"/>
     </Style>
     <Style x:Key="LxValue" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontFamily" Value="$($Global:LxFontFamily)"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Foreground" Value="{StaticResource LxText}"/>
       <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -2621,7 +2679,8 @@ function Build-LogbookClientResources($cfg) {
          the caller sets Background/Foreground for the primary + armed forms. -->
     <Style x:Key="LxPill" TargetType="Button">
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="FontFamily" Value="Segoe UI Semibold"/>
+      <Setter Property="FontFamily" Value="$($Global:LxFontFamily)"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="FontSize" Value="12.5"/>
       <Setter Property="Foreground" Value="{StaticResource LxText}"/>
       <Setter Property="Background" Value="Transparent"/>
@@ -2653,6 +2712,41 @@ function Build-LogbookClientResources($cfg) {
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter TargetName="PillBg" Property="Opacity" Value="0.5"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- Checkbox in the dashboard's idiom: a rounded tile that fills lime
+         with an ink tick. WPF's stock box is a white Win7 square that reads
+         as a different product on this surface. -->
+    <Style x:Key="LxCheck" TargetType="CheckBox">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <Grid Background="Transparent">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <Border x:Name="Box" Width="20" Height="20" CornerRadius="6" VerticalAlignment="Top" Margin="0,0,11,0"
+                      Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxMuted}" BorderThickness="1.5">
+                <Path x:Name="Tick" Data="M 4.5,10 L 8.5,14 L 15.5,6" Stroke="{StaticResource LxOnAccent}" StrokeThickness="2.2"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed"/>
+              </Border>
+              <ContentPresenter Grid.Column="1" VerticalAlignment="Top"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Box" Property="Background" Value="{StaticResource LxAccent}"/>
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource LxAccent}"/>
+                <Setter TargetName="Tick" Property="Visibility" Value="Visible"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource LxAccent}"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -2705,6 +2799,9 @@ function Build-LogbookPopupXaml($cfg) {
     $overlay = '#D8' + $surface.TrimStart('#')  # deep translucent scrim over the live desktop
 
     $logoText = ConvertTo-LogbookXmlText ([string]$cfg.branding.logoText)
+    # Uppercased BEFORE escaping: upper-casing escaped text turns &amp; into
+    # &AMP;, an entity XML does not know, and the popup would not load.
+    $logoMark = ConvertTo-LogbookXmlText (([string]$cfg.branding.logoText).ToUpper())
     $title    = ConvertTo-LogbookXmlText ([string]$cfg.branding.title)
     $subtitle = ConvertTo-LogbookXmlText ([string]$cfg.branding.subtitle)
     $tIntro   = ConvertTo-LogbookXmlText ([string]$cfg.text.intro)
@@ -2718,7 +2815,7 @@ function Build-LogbookPopupXaml($cfg) {
     $tHint    = ConvertTo-LogbookXmlText ([string]$cfg.text.hint)
     $tHeading = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'signinTitle' 'Mulai sesi')
 
-    $tJobType = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobTypeLabel' 'Jenis pekerjaan (opsional)')
+    $tJobType = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobTypeLabel' 'Jenis kerja (opsional)')
     $tJobId   = ConvertTo-LogbookXmlText (Get-LogbookText $cfg 'jobIdLabel' 'ID pekerjaan (opsional)')
 
     $accessItems  = (@($cfg.accessTypes) | ForEach-Object { "                <ComboBoxItem Content=`"$(ConvertTo-LogbookXmlText $_)`" />" }) -join "`r`n"
@@ -2770,7 +2867,7 @@ function Build-LogbookPopupXaml($cfg) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="True" AllowsTransparency="True"
-        Background="Transparent" FontFamily="Segoe UI">
+        Background="Transparent" FontFamily="$($Global:LxFontFamily)">
   <Window.Resources>
 $res
     <!-- Dark field: hairline border, radius 12, accent ring on focus. -->
@@ -2826,7 +2923,7 @@ $res
             <TextBlock Text="&gt;_" FontFamily="Consolas" FontSize="12" FontWeight="Bold"
                        Foreground="{StaticResource LxOnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Border>
-          <TextBlock Name="LogoText" Text="$logoText" FontFamily="Consolas" FontSize="13"
+          <TextBlock Name="LogoText" Text="$logoMark" FontFamily="$($Global:LxFontFamily)" FontWeight="Bold" FontSize="13"
                      Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
           <Image Name="MascotImage" Width="0" Height="0" Visibility="Collapsed"/>
         </StackPanel>
@@ -2956,7 +3053,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="True" Background="Transparent"
-        AllowsTransparency="True" FontFamily="Segoe UI">
+        AllowsTransparency="True" FontFamily="$($Global:LxFontFamily)">
   <Grid>
     <!-- Same scrim as the sign-in form (no screenshot, no blur pass). -->
     <Rectangle Name="Scrim" Fill="$overlay" />
@@ -2966,7 +3063,7 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
       <StackPanel>
         <Image Name="MascotImage" Height="96" MaxWidth="200" Stretch="Uniform" HorizontalAlignment="Center"
                RenderOptions.BitmapScalingMode="HighQuality" Visibility="Collapsed" Margin="0,0,0,10" />
-        <TextBlock Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="28" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
+        <TextBlock Text="$logoText" FontFamily="$($Global:LxFontFamily)" FontSize="28" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" />
         <TextBlock Text="$title" FontSize="15" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center" Margin="0,6,0,0" />
         <TextBlock Text="$subtitle" FontSize="12" Foreground="$muted" HorizontalAlignment="Center" Margin="0,1,0,0" />
         <Border Height="1" Background="$border" Margin="0,20,0,18" />
@@ -2975,15 +3072,15 @@ function Build-LogbookWelcomeBackXaml($cfg, $profile, [string]$detectedType) {
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Width="44" Height="44" CornerRadius="22" Background="$accent" VerticalAlignment="Center">
-              <TextBlock Text="$initials" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="$onAccent" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <TextBlock Text="$initials" FontFamily="$($Global:LxFontFamily)" FontSize="17" FontWeight="Bold" Foreground="$onAccent" HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
-              <TextBlock Text="$tContinue" FontFamily="Segoe UI Semibold" FontSize="17" FontWeight="Bold" Foreground="$text" TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="$tContinue" FontFamily="$($Global:LxFontFamily)" FontSize="17" FontWeight="Bold" Foreground="$text" TextTrimming="CharacterEllipsis" />
               <TextBlock Text="$meta" FontFamily="Consolas" FontSize="12" Foreground="$muted" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
           </Grid>
         </Border>
-        <Button Name="StartBtn" Height="50" Content="$tSubmit" FontFamily="Segoe UI Semibold" FontSize="19" FontWeight="Bold"
+        <Button Name="StartBtn" Height="50" Content="$tSubmit" FontFamily="$($Global:LxFontFamily)" FontSize="19" FontWeight="Bold"
                 Background="$accent" Foreground="$onAccent" BorderThickness="0" Cursor="Hand" />
         <Button Name="ChangeBtn" Content="$tNotYou" Background="Transparent" BorderThickness="0" Foreground="$muted"
                 FontSize="13" FontWeight="SemiBold" Cursor="Hand" Margin="0,12,0,0" HorizontalAlignment="Center" />
@@ -3018,7 +3115,7 @@ function Build-LogbookCountdownOverlayXaml($cfg) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
         Topmost="True" ShowInTaskbar="False" AllowsTransparency="True"
-        Background="#B805080D" FontFamily="Segoe UI">
+        Background="#B805080D" FontFamily="$($Global:LxFontFamily)">
   <Window.Resources>
 $res
   </Window.Resources>
@@ -3031,7 +3128,7 @@ $res
       <StackPanel HorizontalAlignment="Center">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,6">
           <Ellipse Name="OverlayDot" Width="8" Height="8" Fill="{StaticResource LxCritical}" VerticalAlignment="Center" Margin="0,0,7,0"/>
-          <TextBlock Name="OverlayTitle" Text="Sesi berakhir dalam" FontFamily="Segoe UI Semibold" FontSize="13"
+          <TextBlock Name="OverlayTitle" Text="Sesi berakhir dalam" FontFamily="$($Global:LxFontFamily)" FontWeight="SemiBold" FontSize="13"
                      Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
         </StackPanel>
         <TextBlock Name="CountNumber" Text="05:00" FontFamily="Consolas" FontSize="44" LineHeight="51"
@@ -3078,16 +3175,16 @@ function Build-LogbookLockXaml($cfg, [string]$Nama, [string]$Reason) {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" WindowState="Maximized"
-        Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="Segoe UI">
+        Topmost="True" ShowInTaskbar="True" Background="$surface" FontFamily="$($Global:LxFontFamily)">
   <Window.Resources>
 $res
   </Window.Resources>
   <Grid>
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
       <Image Name="MascotImage" Height="96" Stretch="Uniform" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,0,0,10"/>
-      <TextBlock Text="$logoText" FontFamily="Segoe UI Semibold" FontSize="30" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center"/>
+      <TextBlock Text="$logoText" FontFamily="$($Global:LxFontFamily)" FontSize="30" FontWeight="SemiBold" Foreground="$text" HorizontalAlignment="Center"/>
       <TextBlock Name="LockClock" Text="--:--" FontFamily="Consolas" FontSize="15" Foreground="$muted" HorizontalAlignment="Center" Margin="0,6,0,22"/>
-      <TextBlock Text="$tTitle" FontFamily="Segoe UI Semibold" FontSize="20" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" TextAlignment="Center"/>
+      <TextBlock Text="$tTitle" FontFamily="$($Global:LxFontFamily)" FontSize="20" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" TextAlignment="Center"/>
       <TextBlock Text="$tPaused" FontSize="14" Foreground="$muted" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,20"/>
       <Border Background="$elevated" CornerRadius="22" BorderBrush="$border" BorderThickness="1" Padding="20,16" Margin="0,0,0,20">
         <StackPanel>
@@ -3096,14 +3193,14 @@ $res
                violation left on this screen. -->
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,10">
             <Ellipse Width="8" Height="8" Fill="$warn" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <TextBlock Text="$tBadge" FontFamily="Segoe UI Semibold" FontSize="11" Foreground="$text" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBlock Text="$tBadge" FontFamily="$($Global:LxFontFamily)" FontWeight="SemiBold" FontSize="11" Foreground="$text" VerticalAlignment="Center" Margin="0,0,10,0"/>
             <TextBlock Text="$tElapsed" FontSize="12" Foreground="$muted" VerticalAlignment="Center"/>
           </StackPanel>
           <TextBlock Name="LockElapsed" Text="00:00:00" FontFamily="Consolas" FontSize="40" FontWeight="Bold" Foreground="$text" HorizontalAlignment="Center" Margin="0,0,0,12"/>
           <Grid>
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <TextBlock Text="$tUser" FontSize="12" Foreground="$muted" Width="120"/>
-            <TextBlock Grid.Column="1" Text="$namaX" FontFamily="Segoe UI Semibold" FontSize="13" Foreground="$text"/>
+            <TextBlock Grid.Column="1" Text="$namaX" FontFamily="$($Global:LxFontFamily)" FontWeight="SemiBold" FontSize="13" Foreground="$text"/>
           </Grid>
           <Grid Margin="0,6,0,0">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -3375,7 +3472,7 @@ function Build-LogbookTimerXaml($cfg, $session, $deviceName) {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" SizeToContent="WidthAndHeight"
         Topmost="True" ShowInTaskbar="False" AllowsTransparency="True"
-        Background="Transparent" FontFamily="Segoe UI" Left="0" Top="0">
+        Background="Transparent" FontFamily="$($Global:LxFontFamily)" Left="0" Top="0">
   <Window.Resources>
 $res
   </Window.Resources>
@@ -3471,7 +3568,7 @@ $res
           <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,0,0,10"/>
           <TextBlock Name="MessageMeta" Text="ADMIN" FontFamily="Consolas" FontSize="10.5"
                      Foreground="{StaticResource LxMuted}" Margin="0,0,0,4"/>
-          <TextBlock Name="MessageText" Text="" FontFamily="Segoe UI" FontSize="12.5" LineHeight="18"
+          <TextBlock Name="MessageText" Text="" FontFamily="$($Global:LxFontFamily)" FontSize="12.5" LineHeight="18"
                      Foreground="{StaticResource LxText}" TextWrapping="Wrap" Margin="0,0,0,12"/>
         </StackPanel>
 
@@ -3578,7 +3675,7 @@ $res
                   IsHitTestVisible="False"/>
             <TextBlock Name="SelesaiLabel" Text="$tSelesai" HorizontalAlignment="Center"
                        VerticalAlignment="Center" TextWrapping="NoWrap"
-                       FontFamily="Segoe UI Semibold" FontSize="12.5"
+                       FontFamily="$($Global:LxFontFamily)" FontWeight="SemiBold" FontSize="12.5"
                        Foreground="{StaticResource LxText}"/>
           </Grid>
         </Border>
@@ -3598,57 +3695,115 @@ $res
 "@
 }
 
+function Build-LogbookBrandMarkXaml([string]$Text = 'LOGIX') {
+    # The dashboard sidebar's mark: a lime tile with the prompt glyph, then the
+    # wordmark. Every standalone client window opens with it, so a lab user
+    # sees one product whether they are on the dashboard or at a workstation.
+    $label = ConvertTo-LogbookXmlText $Text.ToUpper()
+    return @"
+<StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+  <Border Width="26" Height="26" CornerRadius="8" Background="{StaticResource LxAccent}" Margin="0,0,10,0">
+    <TextBlock Text="&gt;_" FontFamily="Consolas" FontSize="12" FontWeight="Bold"
+               Foreground="{StaticResource LxOnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+  </Border>
+  <TextBlock Text="$label" FontFamily="$($Global:LxFontFamily)" FontWeight="Bold" FontSize="13"
+             Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+</StackPanel>
+"@
+}
+
+function Build-LogbookPulseXaml {
+    # The "Denyut" trace from the dashboard's network card, at card scale.
+    # PulseOn beats (a slow opacity breath, the only animation here -- cheap
+    # under software rendering); PulseOff is the flat line of a device that is
+    # not talking to anyone. The caller toggles which one is visible.
+    return @"
+<Grid Width="72" Height="30" VerticalAlignment="Center">
+  <Polyline Name="PulseOff" Points="0,15 72,15" Stroke="{StaticResource LxMuted}" StrokeThickness="2"
+            StrokeDashArray="2,2.5" StrokeDashCap="Round" Opacity="0.7"/>
+  <Polyline Name="PulseOn" Visibility="Collapsed" Stroke="{StaticResource LxAccent}" StrokeThickness="2.2"
+            StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+            Points="0,15 18,15 22,9 27,24 33,2 38,21 42,15 72,15">
+    <Polyline.Triggers>
+      <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+        <BeginStoryboard>
+          <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+            <DoubleAnimation Storyboard.TargetProperty="Opacity" From="1" To="0.35" Duration="0:0:1.1"/>
+          </Storyboard>
+        </BeginStoryboard>
+      </EventTrigger>
+    </Polyline.Triggers>
+  </Polyline>
+</Grid>
+"@
+}
+
 function Build-LogbookServerPairingXaml($cfg, $state) {
     # "Koneksi Server": the screen that makes the server optional in practice
     # and not just on paper. Deliberately shaped as a STATUS panel with actions
     # rather than as a wizard -- a wizard implies a thing you must finish, and
     # the correct outcome here is very often "stay unpaired".
     $res = Build-LogbookClientResources $cfg
+    $brand = Build-LogbookBrandMarkXaml ([string]$cfg.branding.logoText)
+    $pulse = Build-LogbookPulseXaml
     $serverUrl = ConvertTo-LogbookXmlText ([string]$state.ServerUrl)
     $deviceId  = ConvertTo-LogbookXmlText ([string]$state.DeviceId)
-    $idLine = if ($state.DeviceId) { "ID perangkat: $deviceId" } else { '' }
+    $idLine = if ($state.DeviceId) { "ID perangkat  $deviceId" } else { 'Pencatatan lokal tetap jalan.' }
+    $syncChecked = if ($state.SyncSessions) { 'True' } else { 'False' }
+    $font = $Global:LxFontFamily
 
     return @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" ResizeMode="NoResize" SizeToContent="Height"
-        Width="420" WindowStartupLocation="CenterScreen"
+        Width="436" WindowStartupLocation="CenterScreen"
         Topmost="False" ShowInTaskbar="True" AllowsTransparency="True"
-        Background="Transparent" FontFamily="Segoe UI">
+        Background="Transparent" FontFamily="$font">
   <Window.Resources>
 $res
   </Window.Resources>
-  <Border CornerRadius="20" Background="{StaticResource LxElevated}" Margin="18"
-          BorderBrush="{StaticResource LxHairline}" BorderThickness="1" Padding="26,24">
+  <Border CornerRadius="22" Background="{StaticResource LxElevated}" Margin="18"
+          BorderBrush="{StaticResource LxHairline}" BorderThickness="1" Padding="28,24,28,22">
     <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="14" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
     <StackPanel>
 
-      <Grid Margin="0,0,0,18">
-        <TextBlock Text="Koneksi Server" FontFamily="Segoe UI Semibold" FontSize="17"
-                   Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+      <Grid Margin="0,0,0,20">
+$brand
         <Button Name="CloseBtn" Content="Tutup" Style="{StaticResource LxPill}" Padding="12,5"
                 FontSize="11.5" HorizontalAlignment="Right" Foreground="{StaticResource LxMuted}"/>
       </Grid>
 
+      <TextBlock Text="Koneksi server" FontSize="22" FontWeight="Bold" Foreground="{StaticResource LxText}"/>
+      <TextBlock Text="Hubungkan PC ini ke dashboard lab." FontSize="12.5" Foreground="{StaticResource LxMuted}"
+                 Margin="0,4,0,18"/>
+
       <!-- Status first. Someone opening this screen is usually asking "is it
            connected?", not "how do I connect?" -->
-      <Border CornerRadius="14" Background="{StaticResource LxSurface}" Padding="14,12" Margin="0,0,0,18"
+      <Border CornerRadius="16" Background="{StaticResource LxSurface}" Padding="16,14" Margin="0,0,0,20"
               BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
-        <StackPanel>
-          <StackPanel Orientation="Horizontal">
-            <Ellipse Name="StatusDot" Width="8" Height="8" Fill="{StaticResource LxMuted}"
-                     VerticalAlignment="Center" Margin="0,0,9,0"/>
-            <TextBlock Name="StatusText" Text="Tidak terhubung" FontSize="13"
-                       Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal">
+              <Ellipse Name="StatusDot" Width="8" Height="8" Fill="{StaticResource LxMuted}"
+                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <TextBlock Name="StatusText" Text="Tidak terhubung" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{StaticResource LxText}" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Name="DeviceIdText" Text="$idLine" FontFamily="Consolas" FontSize="11"
+                       Foreground="{StaticResource LxMuted}" Margin="16,5,0,0" TextTrimming="CharacterEllipsis"/>
           </StackPanel>
-          <TextBlock Name="DeviceIdText" Text="$idLine" FontFamily="Consolas" FontSize="11"
-                     Foreground="{StaticResource LxMuted}" Margin="17,5,0,0"
-                     TextTrimming="CharacterEllipsis"/>
-        </StackPanel>
+          <Border Grid.Column="1" Margin="12,0,0,0">
+$pulse
+          </Border>
+        </Grid>
       </Border>
 
-      <TextBlock Text="Alamat server" FontSize="11.5" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
-      <Border CornerRadius="10" Background="{StaticResource LxSurface}" Padding="12,9" Margin="0,0,0,14"
+      <TextBlock Text="Alamat server" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
+      <Border CornerRadius="12" Background="{StaticResource LxSurface}" Padding="14,10" Margin="0,0,0,14"
               BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
         <TextBox Name="ServerBox" Text="$serverUrl" Background="Transparent" BorderThickness="0"
                  FontSize="12.5" FontFamily="Consolas" Foreground="{StaticResource LxText}"
@@ -3656,36 +3811,50 @@ $res
       </Border>
 
       <StackPanel Name="CodeRow">
-        <TextBlock Text="Kode pairing" FontSize="11.5" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
-        <Border CornerRadius="10" Background="{StaticResource LxSurface}" Padding="12,9" Margin="0,0,0,6"
+        <TextBlock Text="Kode pairing" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource LxMuted}" Margin="0,0,0,6"/>
+        <Border CornerRadius="12" Background="{StaticResource LxSurface}" Padding="14,10" Margin="0,0,0,6"
                 BorderBrush="{StaticResource LxHairline}" BorderThickness="1">
           <TextBox Name="CodeBox" Background="Transparent" BorderThickness="0"
                    FontSize="12.5" FontFamily="Consolas" Foreground="{StaticResource LxText}"
                    CaretBrush="{StaticResource LxAccent}"/>
         </Border>
-        <TextBlock Text="Minta kode sekali-pakai ini ke admin lab." FontSize="11"
-                   Foreground="{StaticResource LxMuted}" Margin="0,0,0,14"/>
+        <TextBlock Text="Kode sekali pakai dari admin: Perangkat, lalu Tambah perangkat." FontSize="11"
+                   Foreground="{StaticResource LxMuted}" Margin="0,0,0,16"/>
       </StackPanel>
 
-      <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-        <Button Name="ConnectBtn" Content="Hubungkan" Style="{StaticResource LxPill}" Padding="16,8"
+      <!-- The explicit admin_full_sync choice docs/PRIVACY.md requires.
+           Without it a paired device heartbeats (looks online) but none of
+           its sessions ever reach the server's Riwayat. -->
+      <CheckBox Name="SyncBox" IsChecked="$syncChecked" Style="{StaticResource LxCheck}" Margin="0,0,0,18">
+        <StackPanel>
+          <TextBlock Text="Kirim data sesi ke server" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource LxText}"/>
+          <TextBlock FontSize="11" TextWrapping="Wrap" LineHeight="16" Foreground="{StaticResource LxMuted}" Margin="0,3,0,0"
+                     Text="Nama, NIM, tujuan dan jam sesi dikirim ke server lab supaya muncul di Riwayat admin. Tanpa ini perangkat hanya terlihat online."/>
+        </StackPanel>
+      </CheckBox>
+
+      <DockPanel LastChildFill="False">
+        <Button Name="ConnectBtn" Content="Hubungkan" Style="{StaticResource LxPill}" Padding="16,9"
                 FontSize="12.5" Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
-                Foreground="{StaticResource LxOnAccent}" Margin="0,0,7,0"/>
-        <Button Name="TestBtn" Content="Uji koneksi" Style="{StaticResource LxPill}" Padding="14,8"
-                FontSize="12.5" Margin="0,0,7,0"/>
-        <Button Name="DisconnectBtn" Content="Putuskan" Style="{StaticResource LxPill}" Padding="14,8"
-                FontSize="12.5" Foreground="{StaticResource LxMuted}" Visibility="Collapsed"/>
-      </StackPanel>
+                Foreground="{StaticResource LxOnAccent}" Margin="0,0,8,0" DockPanel.Dock="Left"/>
+        <Button Name="TestBtn" Content="Uji koneksi" Style="{StaticResource LxPill}" Padding="14,9"
+                FontSize="12.5" DockPanel.Dock="Left"/>
+        <!-- Quiet and set apart on the right: leaving is the one action here
+             that cannot be undone without a new code from the admin. -->
+        <Button Name="DisconnectBtn" Content="Putuskan" Style="{StaticResource LxPill}" Padding="12,9"
+                FontSize="12" BorderBrush="Transparent" Foreground="{StaticResource LxCriticalSoft}"
+                Visibility="Collapsed" DockPanel.Dock="Right"/>
+      </DockPanel>
 
       <TextBlock Name="MessageText" Text="" FontSize="11.5" TextWrapping="Wrap" LineHeight="17"
-                 Foreground="{StaticResource LxMuted}" Margin="0,14,0,0"/>
+                 Foreground="{StaticResource LxMuted}" Margin="0,12,0,0"/>
 
-      <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,16,0,12"/>
+      <Border Height="1" Background="{StaticResource LxHairline}" Margin="0,14,0,12"/>
       <!-- Said plainly, because the alternative reading (that an unpaired
            device is a crippled one) is the exact misunderstanding this whole
            screen exists to prevent. -->
       <TextBlock FontSize="11" TextWrapping="Wrap" LineHeight="17" Foreground="{StaticResource LxMuted}"
-                 Text="Tanpa server pun Logix tetap mencatat sesi dan membuat laporan di komputer ini. Menghubungkan ke server hanya menambah pemantauan terpusat dan laporan gabungan."/>
+                 Text="Tanpa server pun Logix tetap mencatat sesi dan membuat laporan di komputer ini. Server hanya menambah pemantauan terpusat dan laporan gabungan."/>
     </StackPanel>
   </Border>
 </Window>

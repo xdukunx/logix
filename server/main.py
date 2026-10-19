@@ -290,6 +290,10 @@ DEVICE_COLUMNS = {
     # the workstation clock is BEHIND the server.
     "clock_skew_seconds": "REAL",
     "clock_skew_checked_at": "TEXT",
+    # When the agent last REPORTED privacy_mode. The column above defaults to
+    # local_only, so without this an agent too old to report it would read as
+    # "deliberately not sending sessions" -- a claim nobody made.
+    "privacy_mode_reported_at": "TEXT",
     # Set by PUT /api/devices/rename. Once true, upsert_device() (heartbeat
     # path) stops overwriting display_name with whatever the agent reports --
     # otherwise an admin rename would silently revert on the device's next
@@ -552,6 +556,9 @@ class LogPayload(BaseModel):
     job_type: Optional[str] = ""
     job_id: Optional[str] = ""
 
+PRIVACY_MODES = ("local_only", "redacted_sync", "admin_full_sync")
+
+
 class HeartbeatPayload(BaseModel):
     hostname: str
     status: str
@@ -581,6 +588,11 @@ class HeartbeatPayload(BaseModel):
     # server time to measure skew. Optional: an older agent omits it and no
     # skew is recorded, which is different from a skew of zero.
     client_time: Optional[str] = None
+    # The device's LOGIX_PRIVACY_MODE. Anything but admin_full_sync means its
+    # sessions never reach /api/log on purpose -- the device is online, yet
+    # Riwayat stays empty. Reported so the dashboard can say WHY instead of
+    # the admin guessing. Omitted by an older agent: stored value untouched.
+    privacy_mode: Optional[str] = None
 
 class ControlRequest(BaseModel):
     hostname: str
@@ -950,7 +962,8 @@ def measure_clock_skew(client_time: Optional[str], server_now: Optional[datetime
 def upsert_device(conn, hostname: str, display_name: str,
                   agent_version: Optional[str] = None,
                   agent_os: Optional[str] = None,
-                  client_time: Optional[str] = None) -> str:
+                  client_time: Optional[str] = None,
+                  privacy_mode: Optional[str] = None) -> str:
     now_dt = datetime.now()
     now = now_dt.isoformat()
 
@@ -965,6 +978,11 @@ def upsert_device(conn, hostname: str, display_name: str,
     if agent_os:
         extra_sets.append("agent_os = ?")
         extra_args.append(agent_os)
+    if privacy_mode in PRIVACY_MODES:
+        extra_sets.append("privacy_mode = ?")
+        extra_args.append(privacy_mode)
+        extra_sets.append("privacy_mode_reported_at = ?")
+        extra_args.append(now)
     skew = measure_clock_skew(client_time, now_dt)
     if skew is not None:
         extra_sets.append("clock_skew_seconds = ?")
@@ -1006,11 +1024,14 @@ def upsert_device(conn, hostname: str, display_name: str,
     else:
         conn.execute(
             "INSERT INTO devices (device_id, hostname, display_name, last_seen, created_at, updated_at, "
-            "agent_version, agent_os, clock_skew_seconds, clock_skew_checked_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "agent_version, agent_os, clock_skew_seconds, clock_skew_checked_at, "
+            "privacy_mode, privacy_mode_reported_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (str(uuid.uuid4()), hostname, display_name, now, now, now,
              agent_version or None, agent_os or None, skew,
-             now if skew is not None else None),
+             now if skew is not None else None,
+             privacy_mode if privacy_mode in PRIVACY_MODES else "local_only",
+             now if privacy_mode in PRIVACY_MODES else None),
         )
     conn.commit()
     return display_name
@@ -1874,6 +1895,7 @@ def post_heartbeat(payload: HeartbeatPayload, _: None = Depends(verify_api_key),
                 agent_version=payload.agent_version,
                 agent_os=payload.agent_os,
                 client_time=payload.client_time,
+                privacy_mode=payload.privacy_mode,
             )
         finally:
             conn.close()

@@ -29,6 +29,8 @@ export interface Device extends Record<string, unknown> {
   last_seen: string | null;
   policy_profile: string | null;
   privacy_mode: string | null;
+  /** Null until the agent reports its mode (older builds never do). */
+  privacy_mode_reported_at?: string | null;
 }
 
 export type CommandStatus = "queued" | "done" | "failed" | "expired";

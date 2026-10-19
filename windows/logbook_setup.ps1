@@ -27,73 +27,116 @@ if ([string]::IsNullOrWhiteSpace($deviceName)) { $deviceName = $env:COMPUTERNAME
 $serverUrl = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_URL'
 $serverKey = Get-LogbookConfigEnv -Key 'LOGIX_SERVER_API_KEY'
 $privacyMode = Get-LogbookConfigEnv -Key 'LOGIX_PRIVACY_MODE'
-if ([string]::IsNullOrWhiteSpace($privacyMode)) { $privacyMode = 'local_only' }
+# Nothing chosen yet on a fresh machine: preselect sending, same as the
+# "Koneksi Server" checkbox -- this screen exists to join a lab server. A
+# machine that already has a server URL but no mode really IS local_only
+# (paths.py's default), so show that truthfully instead.
+if ([string]::IsNullOrWhiteSpace($privacyMode)) {
+    $privacyMode = if ($serverUrl) { 'local_only' } else { 'admin_full_sync' }
+}
 
+$cfg = Get-LogbookConfig -MaxCacheAgeSeconds 86400
+$res = Build-LogbookClientResources $cfg
+$brand = Build-LogbookBrandMarkXaml ([string]$cfg.branding.logoText)
+$font = $Global:LxFontFamily
+
+# Same card, type and controls as "Koneksi Server" (logix_server.ps1), so the
+# first Logix window an operator ever sees already looks like the dashboard.
+# Field labels are sentence case on purpose; the old all-caps labels used a
+# LetterSpacing property WPF does not have, and the window never opened.
 $xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Logix Workstation Setup" Height="590" Width="480"
-        WindowStartupLocation="CenterScreen" Background="#0B0C0E" ResizeMode="NoResize"
-        FontFamily="Segoe UI, Tahoma, Geneva, Verdana, sans-serif">
-  <Grid Margin="24">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="*"/>
-      <RowDefinition Height="Auto"/>
-    </Grid.RowDefinitions>
+        Title="Logix Workstation Setup" Width="476" SizeToContent="Height"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" FontFamily="$font">
+  <Window.Resources>
+$res
+    <Style x:Key="SetupLabel" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{StaticResource LxMuted}"/>
+      <Setter Property="Margin" Value="0,0,0,6"/>
+    </Style>
+    <Style x:Key="SetupField" TargetType="Border">
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Background" Value="{StaticResource LxSurface}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource LxHairline}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="14,10"/>
+      <Setter Property="Margin" Value="0,0,0,14"/>
+    </Style>
+    <Style x:Key="SetupBox" TargetType="TextBox">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="Foreground" Value="{StaticResource LxText}"/>
+      <Setter Property="CaretBrush" Value="{StaticResource LxAccent}"/>
+    </Style>
+  </Window.Resources>
+  <Border CornerRadius="22" Background="{StaticResource LxElevated}" Margin="18"
+          BorderBrush="{StaticResource LxHairline}" BorderThickness="1" Padding="28,24,28,22">
+    <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="14" Direction="270" Opacity="0.5" Color="#000000"/></Border.Effect>
+    <StackPanel>
+      <Grid Margin="0,0,0,20">
+$brand
+        <TextBlock Text="SETUP" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource LxMuted}"
+                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+      </Grid>
+      <TextBlock Text="Siapkan workstation" FontSize="22" FontWeight="Bold" Foreground="{StaticResource LxText}"/>
+      <TextBlock Text="Beri nama PC ini dan hubungkan ke dashboard lab. Semua bisa diubah lagi nanti."
+                 FontSize="12.5" TextWrapping="Wrap" Foreground="{StaticResource LxMuted}" Margin="0,4,0,20"/>
 
-    <!-- Header Title -->
-    <StackPanel Grid.Row="0" Margin="0,0,0,24">
-      <TextBlock Text="LOGIX WORKSTATION SETUP" FontSize="18" FontWeight="Bold" Foreground="#C5F23A" LetterSpacing="1"/>
-      <TextBlock Text="Hubungkan workstation ini ke server administrasi pusat." FontSize="11" Foreground="#8D939C" Margin="0,4,0,0"/>
-    </StackPanel>
+      <TextBlock Text="Nama perangkat (tampil di dashboard)" Style="{StaticResource SetupLabel}"/>
+      <Border Style="{StaticResource SetupField}"><TextBox Name="DeviceNameBox" Style="{StaticResource SetupBox}"/></Border>
 
-    <!-- Inputs -->
-    <StackPanel Grid.Row="1" Margin="0,0,0,16">
-      <TextBlock Text="NAMA DEVICE (TAMPIL DI DASHBOARD ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,0,0,6"/>
-      <TextBox Name="DeviceNameBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <TextBlock Text="Alamat server" Style="{StaticResource SetupLabel}"/>
+      <Border Style="{StaticResource SetupField}"><TextBox Name="ServerUrlBox" Style="{StaticResource SetupBox}" FontFamily="Consolas"/></Border>
 
-      <TextBlock Text="URL SERVER ADMINISTRASI" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
-      <TextBox Name="ServerUrlBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="12"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Grid.Column="0">
+          <TextBlock Text="Kode pairing" Style="{StaticResource SetupLabel}"/>
+          <Border Style="{StaticResource SetupField}"><TextBox Name="EnrollCodeBox" Style="{StaticResource SetupBox}" FontFamily="Consolas"/></Border>
+        </StackPanel>
+        <StackPanel Grid.Column="2">
+          <TextBlock Text="atau API key server" Style="{StaticResource SetupLabel}"/>
+          <Border Style="{StaticResource SetupField}"><TextBox Name="ApiKeyBox" Style="{StaticResource SetupBox}" FontFamily="Consolas"/></Border>
+        </StackPanel>
+      </Grid>
+      <TextBlock Text="Kode pairing lebih aman: PC ini mendapat kunci sendiri. API key bersama hanya untuk server lama."
+                 FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource LxMuted}" Margin="0,-6,0,16"/>
 
-      <TextBlock Text="API KEY SERVER (OPSIONAL)" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
-      <TextBox Name="ApiKeyBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
-
-      <TextBlock Text="KODE ENROLLMENT (OPSIONAL, DARI ADMIN)" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
-      <TextBox Name="EnrollCodeBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13"/>
-      <TextBlock Text="Jika diisi, device ini akan didaftarkan otomatis dan mendapat API key sendiri (menggantikan API Key Server di atas)." FontSize="10" Foreground="#8D939C" Margin="0,4,0,0" TextWrapping="Wrap"/>
-
-      <TextBlock Text="MODE PRIVASI" FontSize="10" FontWeight="SemiBold" Foreground="#8D939C" Margin="0,16,0,6"/>
-      <ComboBox Name="PrivacyModeBox" Height="36" Padding="8,4" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" VerticalContentAlignment="Center" FontSize="13">
-        <ComboBoxItem Content="local_only" Tag="Tidak ada data yang meninggalkan device ini. Paling privat (default)."/>
-        <ComboBoxItem Content="redacted_sync" Tag="Hanya jam terpakai per pengguna (tersamarkan) yang dikirim -- tanpa nama, ID, atau IP. Via GSheet sync."/>
-        <ComboBoxItem Content="admin_full_sync" Tag="Data sesi lengkap dikirim ke server pusat. Pengguna harus diberi tahu."/>
+      <TextBlock Text="Data sesi" Style="{StaticResource SetupLabel}"/>
+      <ComboBox Name="PrivacyModeBox" Style="{StaticResource LxCombo}" Height="42">
+        <ComboBoxItem Uid="admin_full_sync" Content="Kirim data sesi ke server" Tag="Kirim ke server: nama, NIM, tujuan dan jam sesi muncul di Riwayat admin. Pengguna diberi tahu di layar masuk."/>
+        <ComboBoxItem Uid="redacted_sync" Content="Hanya jam pakai, disamarkan" Tag="Hanya jam pakai per pengguna yang disamarkan (tanpa nama, ID atau IP), lewat GSheet sync. Riwayat server tetap kosong."/>
+        <ComboBoxItem Uid="local_only" Content="Simpan di PC ini saja" Tag="Tidak ada yang keluar dari PC ini. Server hanya melihat perangkat online; Riwayat admin kosong."/>
       </ComboBox>
-      <TextBlock Name="PrivacyModeHint" FontSize="10" Foreground="#8D939C" Margin="0,4,0,0" TextWrapping="Wrap"/>
+      <TextBlock Name="PrivacyModeHint" FontSize="11" TextWrapping="Wrap" LineHeight="16"
+                 Foreground="{StaticResource LxMuted}" Margin="0,6,0,16"/>
+
+      <Border CornerRadius="14" Background="{StaticResource LxSurface}" BorderBrush="{StaticResource LxHairline}"
+              BorderThickness="1" Padding="14,12" Margin="0,0,0,18">
+        <TextBlock Name="StatusText" TextWrapping="Wrap" FontSize="12" LineHeight="17" Foreground="{StaticResource LxMuted}"
+                   Text="Isi alamat server, lalu tekan Uji koneksi."/>
+      </Border>
+
+      <DockPanel LastChildFill="False">
+        <Button Name="SaveBtn" Content="Simpan &amp; selesai" Style="{StaticResource LxPill}" Padding="18,9"
+                FontSize="12.5" Background="{StaticResource LxAccent}" BorderBrush="{StaticResource LxAccent}"
+                Foreground="{StaticResource LxOnAccent}" Margin="0,0,8,0" DockPanel.Dock="Left"/>
+        <Button Name="TestBtn" Content="Uji koneksi" Style="{StaticResource LxPill}" Padding="14,9"
+                FontSize="12.5" DockPanel.Dock="Left"/>
+        <Button Name="CancelBtn" Content="Batal" Style="{StaticResource LxPill}" Padding="12,9" FontSize="12"
+                BorderBrush="Transparent" Foreground="{StaticResource LxMuted}" DockPanel.Dock="Right"/>
+      </DockPanel>
     </StackPanel>
-
-    <!-- Status Report Area -->
-    <Border Grid.Row="2" Background="#1A1C20" BorderBrush="#2A2D33" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,16">
-      <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <TextBlock Name="StatusText" Text="Siap mengonfigurasi. Masukkan URL server dan klik 'Uji Koneksi' untuk memverifikasi." TextWrapping="Wrap" FontSize="12" Foreground="#8D939C"/>
-      </ScrollViewer>
-    </Border>
-
-    <!-- Footer Actions -->
-    <Grid Grid.Row="3">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="Auto"/>
-        <ColumnDefinition Width="Auto"/>
-      </Grid.ColumnDefinitions>
-      
-      <Button Name="TestBtn" Grid.Column="0" Content="Uji Koneksi" Height="36" Width="120" HorizontalAlignment="Left" Background="#1A1C20" Foreground="#EEF0F3" BorderBrush="#2A2D33" BorderThickness="1" FontWeight="SemiBold" Cursor="Hand"/>
-      
-      <Button Name="SaveBtn" Grid.Column="1" Content="Simpan &amp; Selesai" Height="36" Width="140" Margin="0,0,10,0" Background="#C5F23A" Foreground="#111214" BorderBrush="Transparent" FontWeight="Bold" Cursor="Hand"/>
-      <Button Name="CancelBtn" Grid.Column="2" Content="Batal" Height="36" Width="80" Background="#2A2D33" Foreground="#EEF0F3" BorderBrush="Transparent" FontWeight="SemiBold" Cursor="Hand"/>
-    </Grid>
-  </Grid>
+  </Border>
 </Window>
 "@
 
@@ -112,11 +155,25 @@ $testBtn = $window.FindName('TestBtn')
 $saveBtn = $window.FindName('SaveBtn')
 $cancelBtn = $window.FindName('CancelBtn')
 
+$theme = Get-LogbookTheme $cfg
+$brushConv = New-Object System.Windows.Media.BrushConverter
+function Set-SetupStatus([string]$Text, [string]$Kind = 'muted') {
+    $statusText.Text = $Text
+    $colour = switch ($Kind) {
+        'ok'    { $theme.signalNormal }
+        'warn'  { $theme.signalWarning }
+        'error' { $theme.criticalSoft }
+        default { $theme.muted }
+    }
+    $statusText.Foreground = $brushConv.ConvertFromString($colour)
+}
+$window.Add_MouseLeftButtonDown({ try { $window.DragMove() } catch { } })
+
 # Prefill Values
 $nameBox.Text = $deviceName
 $urlBox.Text = $serverUrl
 $keyBox.Text = $serverKey
-$selectedPrivacyItem = $privacyModeBox.Items | Where-Object { $_.Content -eq $privacyMode } | Select-Object -First 1
+$selectedPrivacyItem = $privacyModeBox.Items | Where-Object { $_.Uid -eq $privacyMode } | Select-Object -First 1
 if ($selectedPrivacyItem) { $privacyModeBox.SelectedItem = $selectedPrivacyItem } else { $privacyModeBox.SelectedIndex = 0 }
 $privacyModeHint.Text = $privacyModeBox.SelectedItem.Tag
 $privacyModeBox.Add_SelectionChanged({
@@ -125,16 +182,14 @@ $privacyModeBox.Add_SelectionChanged({
 
 # Link Test Connection Click
 $testBtn.Add_Click({
-    $statusText.Text = "Menghubungi server..."
-    $statusText.Foreground = [System.Windows.Media.Brushes]::Yellow
+    Set-SetupStatus "Menghubungi server..." 'muted'
     $window.UpdateLayout()
     
     $url = $urlBox.Text.Trim()
     $key = $keyBox.Text.Trim()
     
     if (-not $url) {
-        $statusText.Text = "Error: URL Server tidak boleh kosong."
-        $statusText.Foreground = [System.Windows.Media.Brushes]::Red
+        Set-SetupStatus "Isi alamat server dulu." 'error'
         return
     }
     
@@ -145,15 +200,12 @@ $testBtn.Add_Click({
         
         $res = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 5 -UseBasicParsing
         if ($res -and $res.branding) {
-            $statusText.Text = "Koneksi berhasil!`nJudul Branding: $($res.branding.title)`nTipe Akses: $(($res.accessTypes -join ', '))"
-            $statusText.Foreground = [System.Windows.Media.Brushes]::LightGreen
+            Set-SetupStatus "Server menjawab: $($res.branding.title). Tekan Simpan untuk menyelesaikan." 'ok'
         } else {
-            $statusText.Text = "Koneksi berhasil tetapi format config salah."
-            $statusText.Foreground = [System.Windows.Media.Brushes]::Orange
+            Set-SetupStatus "Ada yang menjawab di alamat itu, tetapi bukan server Logix." 'warn'
         }
     } catch {
-        $statusText.Text = "Koneksi Gagal: $($_.Exception.Message)"
-        $statusText.Foreground = [System.Windows.Media.Brushes]::Tomato
+        Set-SetupStatus "Server tidak bisa dihubungi: $($_.Exception.Message)" 'error'
     }
 })
 
@@ -163,14 +215,13 @@ $saveBtn.Add_Click({
     $url = $urlBox.Text.Trim()
     $key = $keyBox.Text.Trim()
     $enrollCode = $enrollCodeBox.Text.Trim()
-    $privacy = if ($privacyModeBox.SelectedItem) { [string]$privacyModeBox.SelectedItem.Content } else { 'local_only' }
+    $privacy = if ($privacyModeBox.SelectedItem) { [string]$privacyModeBox.SelectedItem.Uid } else { 'local_only' }
 
     # Device name is required (defaults to the hostname, so this only fires
     # if the user deliberately clears it) - it's how this workstation shows
     # up on the admin dashboard, with or without a server configured yet.
     if (-not $name) {
-        $statusText.Text = "Error: Nama Device tidak boleh kosong."
-        $statusText.Foreground = [System.Windows.Media.Brushes]::Red
+        Set-SetupStatus "Nama perangkat tidak boleh kosong." 'error'
         return
     }
 
@@ -179,8 +230,7 @@ $saveBtn.Add_Click({
     # per-device key must survive independently of this wizard running again.
     if ($enrollCode) {
         if (-not $url) {
-            $statusText.Text = "Error: URL Server wajib diisi untuk enrollment."
-            $statusText.Foreground = [System.Windows.Media.Brushes]::Red
+            Set-SetupStatus "Kode pairing butuh alamat server." 'error'
             return
         }
         try {
@@ -193,64 +243,28 @@ $saveBtn.Add_Click({
             $body = @{ invite_code = $enrollCode; hostname = $env:COMPUTERNAME; device_name = $name; os = 'windows'; os_version = [System.Environment]::OSVersion.VersionString } | ConvertTo-Json
             $enrolled = Invoke-RestMethod -Uri $enrollUrl -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 10 -UseBasicParsing
 
-            $identityPath = 'C:\ProgramData\Logix\device.json'
+            $identityPath = Get-LogbookDeviceIdentityPath
             $identityParent = Split-Path $identityPath
             if (-not (Test-Path $identityParent)) {
                 New-Item -ItemType Directory -Force -Path $identityParent | Out-Null
             }
             @{ device_id = $enrolled.device_id; api_key = $enrolled.api_key; category = $enrolled.category } | ConvertTo-Json | Out-File -FilePath $identityPath -Encoding UTF8 -Force
         } catch {
-            $statusText.Text = "Enrollment gagal: $($_.Exception.Message)"
-            $statusText.Foreground = [System.Windows.Media.Brushes]::Tomato
+            Set-SetupStatus "Pairing gagal: $($_.Exception.Message)" 'error'
             return
         }
     }
 
     try {
-        $cfgPath = 'C:\ProgramData\Logix\config.env'
-        $newLines = @()
-        $hasName = $false
-        $hasUrl = $false
-        $hasKey = $false
-        $hasPrivacy = $false
-
-        if (Test-Path $cfgPath) {
-            $lines = Get-Content $cfgPath
-            foreach ($line in $lines) {
-                $trimmed = $line.Trim()
-                if ($trimmed.StartsWith('LOGIX_DEVICE_NAME=') -or $trimmed.StartsWith('export LOGIX_DEVICE_NAME=')) {
-                    $newLines += "LOGIX_DEVICE_NAME=$name"
-                    $hasName = $true
-                } elseif ($trimmed.StartsWith('LOGIX_SERVER_URL=') -or $trimmed.StartsWith('export LOGIX_SERVER_URL=')) {
-                    $newLines += "LOGIX_SERVER_URL=$url"
-                    $hasUrl = $true
-                } elseif ($trimmed.StartsWith('LOGIX_SERVER_API_KEY=') -or $trimmed.StartsWith('export LOGIX_SERVER_API_KEY=')) {
-                    $newLines += "LOGIX_SERVER_API_KEY=$key"
-                    $hasKey = $true
-                } elseif ($trimmed.StartsWith('LOGIX_PRIVACY_MODE=') -or $trimmed.StartsWith('export LOGIX_PRIVACY_MODE=')) {
-                    $newLines += "LOGIX_PRIVACY_MODE=$privacy"
-                    $hasPrivacy = $true
-                } else {
-                    $newLines += $line
-                }
-            }
-        }
-
-        if (-not $hasName) { $newLines += "LOGIX_DEVICE_NAME=$name" }
-        if (-not $hasUrl) { $newLines += "LOGIX_SERVER_URL=$url" }
-        if (-not $hasKey) { $newLines += "LOGIX_SERVER_API_KEY=$key" }
-        if (-not $hasPrivacy) { $newLines += "LOGIX_PRIVACY_MODE=$privacy" }
-
-        $parent = Split-Path $cfgPath
-        if (-not (Test-Path $parent)) {
-            New-Item -ItemType Directory -Force -Path $parent | Out-Null
-        }
-
-        $newLines | Out-File -FilePath $cfgPath -Encoding UTF8 -Force
+        # The shared writer (Set-LogbookConfigValue): same file, same quoting,
+        # same LOGIX_HOME resolution as the pairing screen and the installer.
+        Set-LogbookConfigValue -Key 'LOGIX_DEVICE_NAME' -Value $name
+        Set-LogbookConfigValue -Key 'LOGIX_SERVER_URL' -Value $url
+        Set-LogbookConfigValue -Key 'LOGIX_SERVER_API_KEY' -Value $key
+        Set-LogbookConfigValue -Key 'LOGIX_PRIVACY_MODE' -Value $privacy
         $window.Close()
     } catch {
-        $statusText.Text = "Gagal menyimpan: $($_.Exception.Message)"
-        $statusText.Foreground = [System.Windows.Media.Brushes]::Tomato
+        Set-SetupStatus "Gagal menyimpan: $($_.Exception.Message)" 'error'
     }
 })
 
