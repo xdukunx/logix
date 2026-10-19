@@ -18,6 +18,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# The embeddable Python the Windows installer bundles runs with a ._pth file,
+# which leaves the script's own directory off sys.path: without this line
+# "import paths" fails and not one session gets recorded.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths
 
 DEFAULT_DB = paths.default_db()

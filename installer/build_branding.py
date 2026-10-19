@@ -42,7 +42,7 @@ WINDOWS_DIR = HERE.parent / "windows"
 BRAND_TOP = (29, 31, 35)      # #1D1F23
 BRAND_BOTTOM = (11, 12, 14)   # #0B0C0E
 WORDMARK = "Logix"
-TAGLINE = "Lab Access Logbook"
+TAGLINE = "Lab Komputasi FTMM"
 
 # Default source names tried in order when --source isn't given.
 SOURCE_CANDIDATES = ["mascot-source.png", "mascot-source.jpg", "mascot-source.jpeg",
@@ -98,9 +98,21 @@ def vertical_gradient(w: int, h: int, top: tuple, bottom: tuple) -> Image.Image:
     return base
 
 
-def load_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    names = (["arialbd.ttf", "seguisb.ttf", "segoeui.ttf"] if bold
-             else ["segoeui.ttf", "arial.ttf"])
+# The dashboard's typeface, from the static TTFs the Windows client bundles.
+FONT_DIR = WINDOWS_DIR / "fonts"
+ACCENT = (197, 242, 58)       # --lx-accent #C5F23A
+ON_ACCENT = (17, 18, 20)      # --lx-on-accent #111214
+FRAME = (15, 16, 18)          # --lx-frame #0F1012
+FRAME_RAISE = (29, 31, 35)    # --lx-frame-raise #1D1F23
+FRAME_TEXT = (242, 243, 245)  # --lx-frame-text
+FRAME_MUTED = (139, 144, 152) # --lx-frame-muted
+
+
+def load_font(size: int, bold: bool = True, weight: str = "") -> ImageFont.FreeTypeFont:
+    style = weight or ("Bold" if bold else "Regular")
+    bundled = FONT_DIR / f"PlusJakartaSans-{style}.ttf"
+    names = [str(bundled)] + (["arialbd.ttf", "seguisb.ttf", "segoeui.ttf"] if bold
+                              else ["segoeui.ttf", "arial.ttf"])
     for name in names:
         try:
             return ImageFont.truetype(name, size)
@@ -109,47 +121,94 @@ def load_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
+def draw_brand_mark(draw: ImageDraw.ImageDraw, x: int, y: int, scale: int, label: str = "LOGIX") -> None:
+    """The dashboard sidebar's mark: a lime tile with the prompt glyph, then
+    the wordmark -- the same thing every client window now opens with."""
+    tile = 22 * scale
+    draw.rounded_rectangle((x, y, x + tile, y + tile), radius=7 * scale, fill=ACCENT)
+    mono = None
+    for name in ("consolab.ttf", "consola.ttf"):
+        try:
+            mono = ImageFont.truetype(name, 11 * scale)
+            break
+        except OSError:
+            continue
+    mono = mono or load_font(11 * scale)
+    gl, gt, gr, gb = draw.textbbox((0, 0), ">_", font=mono)
+    draw.text((x + (tile - (gr - gl)) / 2 - gl, y + (tile - (gb - gt)) / 2 - gt), ">_", font=mono, fill=ON_ACCENT)
+    word = load_font(11 * scale, weight="Bold")
+    wl, wt, wr, wb = draw.textbbox((0, 0), label, font=word)
+    draw.text((x + tile + 8 * scale - wl, y + (tile - (wb - wt)) / 2 - wt), label, font=word, fill=FRAME_TEXT)
+
+
+def draw_pulse(draw: ImageDraw.ImageDraw, x0: int, x1: int, y: int, scale: int) -> None:
+    """The "Denyut" trace: flat, one heartbeat, flat."""
+    u = scale
+    mid = x0 + (x1 - x0) * 0.42
+    pts = [(x0, y), (mid - 14 * u, y), (mid - 10 * u, y - 7 * u), (mid - 5 * u, y + 10 * u),
+           (mid + 1 * u, y - 16 * u), (mid + 6 * u, y + 7 * u), (mid + 10 * u, y), (x1, y)]
+    draw.line(pts, fill=ACCENT, width=round(2.2 * u), joint="curve")
+
+
 def build_wizard_image(mascot: Image.Image, out: Path, scale: int = 3) -> None:
     # Inno modern welcome image is 164x314 at 100%; render at 3x and let Inno
-    # downscale for crispness on any DPI.
+    # downscale for crispness on any DPI. Composed like the dashboard's login
+    # panel: brand mark top-left, the lab's mascot, the pulse, the headline.
     w, h = 164 * scale, 314 * scale
-    panel = vertical_gradient(w, h, BRAND_TOP, BRAND_BOTTOM)
-
-    # Mascot centred in the upper ~65% of the panel.
-    art = fit_within(mascot, int(w * 0.72), int(h * 0.52))
-    ax = (w - art.width) // 2
-    ay = int(h * 0.10)
-    panel.paste(art, (ax, ay), art)
-
+    u = scale
+    panel = Image.new("RGB", (w, h), FRAME)
     draw = ImageDraw.Draw(panel)
-    wordmark_font = load_font(round(20 * scale), bold=True)
-    tagline_font = load_font(round(8 * scale), bold=False)
+    pad = 14 * u
 
-    # Stack wordmark + tagline from real glyph metrics so the descender of
-    # "Logix" never collides with the tagline, at any scale.
-    wm_l, wm_t, wm_r, wm_b = draw.textbbox((0, 0), WORDMARK, font=wordmark_font)
-    tg_l, tg_t, tg_r, tg_b = draw.textbbox((0, 0), TAGLINE, font=tagline_font)
-    gap = round(6 * scale)
-    block_h = (wm_b - wm_t) + gap + (tg_b - tg_t)
-    top = h - block_h - round(24 * scale)  # bottom margin
+    draw_brand_mark(draw, pad, pad, u)
 
-    wm_x = (w - (wm_r - wm_l)) / 2 - wm_l
-    draw.text((wm_x, top - wm_t), WORDMARK, font=wordmark_font, fill=(255, 255, 255))
-    tg_x = (w - (tg_r - tg_l)) / 2 - tg_l
-    draw.text((tg_x, top + (wm_b - wm_t) + gap - tg_t), TAGLINE,
-              font=tagline_font, fill=(200, 214, 245))
+    # Mascot on a raised disc, the way the dashboard lifts cards off the frame.
+    disc = 112 * u
+    cx, cy = w // 2, 112 * u
+    draw.ellipse((cx - disc // 2, cy - disc // 2, cx + disc // 2, cy + disc // 2), fill=FRAME_RAISE)
+    art = fit_within(mascot, int(disc * 0.78), int(disc * 0.78))
+    panel.paste(art, (cx - art.width // 2, cy - art.height // 2), art)
 
-    panel.convert("RGB").save(out, "BMP")
+    draw_pulse(draw, pad, w - pad, 190 * u, u)
+
+    # Headline, the login page's: "Denyut" on a lime chip, then the rest.
+    big = load_font(17 * u, weight="Bold")
+    y = 214 * u
+    word = "Denyut"
+    l, t, r, b = draw.textbbox((0, 0), word, font=big)
+    chip_pad = 4 * u
+    draw.rounded_rectangle((pad, y - 2 * u, pad + (r - l) + chip_pad * 2, y + (b - t) + 6 * u),
+                           radius=5 * u, fill=ACCENT)
+    draw.text((pad + chip_pad - l, y + 2 * u - t), word, font=big, fill=ON_ACCENT)
+    draw.text((pad + (r - l) + chip_pad * 2 + 5 * u - l, y + 2 * u - t), "lab,", font=big, fill=FRAME_TEXT)
+    draw.text((pad - l, y + 26 * u - t), "terbaca sekilas.", font=big, fill=FRAME_TEXT)
+
+    small = load_font(7 * u, weight="SemiBold")
+    draw.text((pad, h - pad - 9 * u), TAGLINE.upper(), font=small, fill=FRAME_MUTED)
+
+    panel.save(out, "BMP")
 
 
 def build_wizard_small(mascot: Image.Image, out: Path, scale: int = 3) -> None:
-    # Inno modern header logo is 55x58 at 100%. The header is white, so sit the
-    # mascot on white rather than the brand panel.
+    # Inno modern header logo is 55x58 at 100%. The wizard runs in its dark
+    # style on the frame colour, so the brand tile sits on that, not on white.
     w, h = 55 * scale, 58 * scale
-    canvas = Image.new("RGBA", (w, h), (255, 255, 255, 255))
-    art = fit_within(mascot, int(w * 0.9), int(h * 0.9))
-    canvas.paste(art, ((w - art.width) // 2, (h - art.height) // 2), art)
-    canvas.convert("RGB").save(out, "BMP")
+    canvas = Image.new("RGB", (w, h), FRAME)
+    draw = ImageDraw.Draw(canvas)
+    tile = 40 * scale
+    x, y = (w - tile) // 2, (h - tile) // 2
+    draw.rounded_rectangle((x, y, x + tile, y + tile), radius=12 * scale, fill=ACCENT)
+    mono = None
+    for name in ("consolab.ttf", "consola.ttf"):
+        try:
+            mono = ImageFont.truetype(name, 19 * scale)
+            break
+        except OSError:
+            continue
+    mono = mono or load_font(19 * scale)
+    gl, gt, gr, gb = draw.textbbox((0, 0), ">_", font=mono)
+    draw.text((x + (tile - (gr - gl)) / 2 - gl, y + (tile - (gb - gt)) / 2 - gt), ">_", font=mono, fill=ON_ACCENT)
+    canvas.save(out, "BMP")
 
 
 def build_icon(mascot: Image.Image, out: Path) -> None:

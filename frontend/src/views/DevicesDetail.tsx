@@ -9,7 +9,7 @@ import { Callout, Mono, SectionLabel, Skeleton, StatusDot } from "../ui/base";
 import { Button } from "../ui/controls";
 import { formatLogTime, timeAgo } from "../util";
 import { Swatch, Tag } from "./DevicesBento";
-import { SYNC_LABEL, SYNC_STATUS, agentVersion, isOutdated, nameOf, skewMinutes } from "./DevicesModel";
+import { SYNC_LABEL, SYNC_STATUS, agentVersion, isOutdated, nameOf, skewMinutes, withholdsSessions } from "./DevicesModel";
 
 export interface Invite {
   invite_code: string;
@@ -89,7 +89,7 @@ export const InviteTicket = ({ invite, onCopy }: { invite: Invite; onCopy?: () =
       }}
     >
       <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", opacity: 0.75 }}>
-        Kode undangan
+        Kode pairing
       </div>
       <div
         className="lx-mono"
@@ -308,7 +308,14 @@ export const DetailBody = ({
           {detailRow("Sistem operasi", typeof d.agent_os === "string" && d.agent_os ? d.agent_os : "-")}
           {detailRow(
             "Terdaftar",
-            typeof d.enrolled_at === "string" && d.enrolled_at ? <Mono>{formatLogTime(d.enrolled_at)}</Mono> : "Tanpa kode undangan",
+            typeof d.enrolled_at === "string" && d.enrolled_at ? <Mono>{formatLogTime(d.enrolled_at)}</Mono> : "Tanpa kode pairing",
+          )}
+          {withholdsSessions(d) && (
+            <Callout tone="warning">
+              Perangkat ini online, tetapi sesinya tidak dikirim ke server (mode privasi{" "}
+              <Mono>{d.privacy_mode ?? "local_only"}</Mono>), jadi tidak muncul di Riwayat. Ubah lewat{" "}
+              <strong>Koneksi Server Logix</strong> di perangkat itu: centang "Kirim data sesi ke server".
+            </Callout>
           )}
           {skew !== null && (
             <Callout tone="warning">

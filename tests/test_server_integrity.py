@@ -215,6 +215,33 @@ def test_an_older_agent_does_not_blank_a_known_agent_version(monkeypatch, tmp_pa
     assert device["agent_version"] == "1.2.3"
 
 
+def _device(client, headers, hostname):
+    return next(d for d in client.get("/api/devices", headers=headers).json() if d["hostname"] == hostname)
+
+
+def test_heartbeat_records_the_privacy_mode_so_the_dashboard_can_explain_an_empty_riwayat(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "WS-1", "status": "ACTIVE", "privacy_mode": "local_only"})
+        first = _device(client, headers, "WS-1")
+        client.post("/api/heartbeat", json={"hostname": "WS-1", "status": "ACTIVE", "privacy_mode": "admin_full_sync"})
+        second = _device(client, headers, "WS-1")
+    assert first["privacy_mode"] == "local_only" and first["privacy_mode_reported_at"]
+    assert second["privacy_mode"] == "admin_full_sync"
+
+
+def test_an_agent_that_never_reports_privacy_mode_is_not_flagged_as_withholding(monkeypatch, tmp_path):
+    module = _load_main(monkeypatch, tmp_path)
+    with TestClient(module.app) as client:
+        headers = _login(client)
+        client.post("/api/heartbeat", json={"hostname": "WS-OLD", "status": "ACTIVE"})
+        client.post("/api/heartbeat", json={"hostname": "WS-OLD", "status": "ACTIVE", "privacy_mode": "bogus"})
+        device = _device(client, headers, "WS-OLD")
+    # The column's local_only default is not a report; nothing claimed it.
+    assert device["privacy_mode_reported_at"] is None
+
+
 # --- retention ----------------------------------------------------------------
 
 def test_retention_redacts_personal_fields_but_keeps_the_session_shape(monkeypatch, tmp_path):

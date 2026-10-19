@@ -5,7 +5,9 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $iscc = @(
     'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
-    'C:\Program Files\Inno Setup 6\ISCC.exe'
+    'C:\Program Files\Inno Setup 6\ISCC.exe',
+    # winget --scope user puts it here.
+    (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if (-not $iscc) {
@@ -34,6 +36,35 @@ if ($mascot) {
     }
 } else {
     Write-Host 'No installer\branding\mascot-source.* found; using stock wizard images.' -ForegroundColor Yellow
+}
+
+# Bundle the embeddable Python the agent logs sessions with (Find-LogixPython
+# prefers {app}\python). Without it a lab PC records sessions only if a real
+# Python happens to be on the signed-in account's PATH -- and on stock Windows
+# the only "python" there is the Store stub, which runs nothing.
+$pyVersion = '3.12.10'
+$pyDir = Join-Path $here 'assets\python'
+if (-not (Test-Path (Join-Path $pyDir 'python.exe'))) {
+    $zipName = "python-$pyVersion-embed-amd64.zip"
+    $zip = Join-Path $env:TEMP $zipName
+    Write-Host "Fetching $zipName from python.org..." -ForegroundColor Cyan
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri "https://www.python.org/ftp/python/$pyVersion/$zipName" -OutFile $zip -UseBasicParsing
+        New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
+        Expand-Archive -Path $zip -DestinationPath $pyDir -Force
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+        # Trust the signature, not the download: python.exe must carry a valid
+        # Python Software Foundation Authenticode signature, or it is not shipped.
+        $sig = Get-AuthenticodeSignature (Join-Path $pyDir 'python.exe')
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Python Software Foundation') {
+            Remove-Item $pyDir -Recurse -Force
+            throw "python.exe signature check failed ($($sig.Status))."
+        }
+    } catch {
+        Write-Host "WARNING: could not bundle Python: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host '  The installer will build without it; PCs then need Python 3 installed for all users.' -ForegroundColor Yellow
+    }
 }
 
 & $iscc (Join-Path $here 'logix-agent.iss')

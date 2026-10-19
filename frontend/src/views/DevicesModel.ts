@@ -99,6 +99,14 @@ export interface Reason {
   value?: string;
 }
 
+/**
+ * The device said it keeps sessions to itself (LOGIX_PRIVACY_MODE is not
+ * admin_full_sync): it heartbeats, so it looks healthy, but nothing it records
+ * reaches Riwayat. Only ever true for a device that actually reported its mode.
+ */
+export const withholdsSessions = (d: Device) =>
+  Boolean(d.privacy_mode_reported_at) && d.privacy_mode !== "admin_full_sync";
+
 export const reasonText = (r: Reason) => (r.value ? `${r.label} ${r.value}` : r.label);
 
 export interface Issue {
@@ -118,6 +126,7 @@ export const attentionList = (list: Device[], newest: string | null): Issue[] =>
       if (isOutdated(device, newest)) reasons.push({ label: "Agent", value: `${agentVersion(device)} → ${newest}` });
       const skew = skewMinutes(device);
       if (skew !== null) reasons.push({ label: "Jam selisih", value: `${skew} mnt` });
+      if (withholdsSessions(device)) reasons.push({ label: "Sesi tidak dikirim ·", value: device.privacy_mode ?? "local_only" });
       return { device, reasons };
     })
     .filter((x) => x.reasons.length > 0)

@@ -202,7 +202,7 @@ export default function Devices() {
         }
       : { category: inviteCategory };
     try {
-      const res = await sendJson("/api/enroll/invite", "POST", body, "Gagal membuat kode undangan");
+      const res = await sendJson("/api/enroll/invite", "POST", body, "Gagal membuat kode pairing");
       const { invite_code, expires_at } = (await res.json()) as { invite_code: string; expires_at: string };
       setInvite({ invite_code, expires_at, issuedAt: Date.now(), deviceId: device?.device_id ?? null });
     } catch (err) {
@@ -217,7 +217,7 @@ export default function Devices() {
         invite &&
         navigator.clipboard
           .writeText(invite.invite_code)
-          .then(() => toast("Kode undangan disalin."))
+          .then(() => toast("Kode pairing disalin."))
           .catch(() => toast("Gagal menyalin.", "alert"))
     : undefined;
 
@@ -436,7 +436,7 @@ export default function Devices() {
       ) : list.length === 0 ? (
         <EmptyState
           title="Belum ada perangkat terdaftar"
-          description="Buat kode undangan lewat tombol di kanan atas, lalu masukkan kodenya di client Windows perangkat baru."
+          description="Buat kode pairing lewat tombol di kanan atas, lalu masukkan kodenya di installer atau di Koneksi Server Logix pada PC itu."
         />
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap }}>
@@ -524,7 +524,7 @@ export default function Devices() {
         isOpen={deleteTarget !== null}
         onClose={() => setDeleteTarget(null)}
         title={`Hapus ${deleteTarget ? nameOf(deleteTarget).id : ""}?`}
-        description="Perangkat hilang dari daftar, kehilangan kredensialnya, dan tidak bisa mendaftar ulang sendiri lewat heartbeat — hanya lewat kode undangan baru. Riwayat sesinya tetap tersimpan."
+        description="Perangkat hilang dari daftar, kehilangan kredensialnya, dan tidak bisa mendaftar ulang sendiri lewat heartbeat — hanya lewat kode pairing baru. Riwayat sesinya tetap tersimpan."
         accentEdge="alert"
         footer={
           <ModalActions
