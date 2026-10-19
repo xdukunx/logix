@@ -98,3 +98,6 @@ frontend/test-results/
 # forbids committing.
 frontend/diagnose-*.png
 pytest.log
+
+# Rust build output (agent\). Cargo.lock IS committed: logix.exe is a binary.
+agent/target/

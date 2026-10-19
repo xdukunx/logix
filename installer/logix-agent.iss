@@ -143,6 +143,9 @@ Source: "{#BrandDir}\logix.ico"; DestDir: "{app}"; Flags: ignoreversion skipifso
 ; The dashboard typeface (Plus Jakarta Sans, OFL) every client window loads
 ; by URI from here -- see Get-LogbookFontFamily. ~90 KB for all three weights.
 Source: "{#SrcRoot}\windows\fonts\*"; DestDir: "{app}\fonts"; Flags: ignoreversion
+; The native agent + session core (agent\, built by build.ps1 with cargo).
+; Runs as the resident monitor and records every session event; ~1.8 MB.
+Source: "{#SrcRoot}\agent\target\release\logix.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 ; Embeddable Python (stdlib only is all the core needs), fetched by build.ps1.
 ; Every account on the PC uses this one, so a student account whose PATH has
 ; no Python -- or only the Store stub -- still records its sessions.
@@ -219,10 +222,23 @@ Filename: "{sys}\conhost.exe"; \
 ; name there). Runs as the uninstalling admin's HKCU -- same account that
 ; installed, in the single-operator lab setup this targets.
 Filename: "schtasks.exe"; Parameters: "/End /TN ""Logix Agent Monitor"""; Flags: runhidden; RunOnceId: "StopTask"
+Filename: "taskkill.exe"; Parameters: "/F /IM logix.exe"; Flags: runhidden; RunOnceId: "KillAgent"
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ""Logix Agent Monitor"" /F"; Flags: runhidden; RunOnceId: "DelTask"
 Filename: "reg.exe"; Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v LogixAgentMonitor /f"; Flags: runhidden; RunOnceId: "DelRunKey"
 
 [Code]
+// An upgrade replaces logix.exe, and Windows will not overwrite a running
+// exe: stop the agent (both generations) before any file is copied. The
+// [Run] step registers and starts it again.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec('schtasks.exe', '/End /TN "Logix Agent Monitor"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM logix.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
+
 var
   ConfigPage: TInputQueryWizardPage;
   SyncBox: TNewCheckBox;

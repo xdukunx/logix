@@ -102,6 +102,11 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
         Say "  stopping agent pid $($_.ProcessId)"
         try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { }
     }
+# The native agent too: Windows will not overwrite an exe that is running.
+Get-Process -Name 'logix' -ErrorAction SilentlyContinue | ForEach-Object {
+    Say "  stopping native agent pid $($_.Id)"
+    try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch { }
+}
 
 # ---- copy ---------------------------------------------------------------------
 $copied = 0; $missing = @()
@@ -137,6 +142,32 @@ foreach ($r in $retiredCoreFiles) {
 
 $logo = Join-Path $repo 'logo.png'
 if (Test-Path $logo) { Copy-Item $logo (Join-Path $InstallDir 'logo.png') -Force }
+
+# The dashboard typeface every client window loads (Get-LogbookFontFamily).
+$fonts = Join-Path $repo 'fonts'
+if (Test-Path $fonts) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $InstallDir 'fonts') | Out-Null
+    Copy-Item (Join-Path $fonts '*') (Join-Path $InstallDir 'fonts') -Force
+    Say "copied fonts" 'Green'
+}
+
+# The native agent + session core (agent\, cargo build --release).
+$native = Join-Path (Split-Path $repo -Parent) 'agent\target\release\logix.exe'
+if (Test-Path $native) {
+    Copy-Item $native (Join-Path $InstallDir 'logix.exe') -Force
+    Say "copied logix.exe (native agent)" 'Green'
+    # Point the existing task at it: same task, same triggers, new action.
+    if ($task -and $task.TaskName -eq $taskName) {
+        try {
+            $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" `
+                -Argument '--headless "C:\Program Files\Logix\logix.exe" agent'
+            Set-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -Action $action | Out-Null
+            Say "task now runs the native agent" 'Green'
+        } catch { Say "could not switch the task to logix.exe: $($_.Exception.Message)" 'Yellow' }
+    }
+} else {
+    Say "no agent\target\release\logix.exe -- run 'cargo build --release' in agent\ for the native agent" 'DarkGray'
+}
 
 # VERSION rides along with the scripts on purpose: it is what the agent reports
 # in every heartbeat, so it has to describe the code that was just copied. Ship

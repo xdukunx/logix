@@ -38,6 +38,21 @@ if ($mascot) {
     Write-Host 'No installer\branding\mascot-source.* found; using stock wizard images.' -ForegroundColor Yellow
 }
 
+# The native agent (agent\). Built here so the installer always ships the
+# logix.exe that matches these scripts; skipped with a warning when there is
+# no Rust toolchain, and the installer then falls back to the PowerShell monitor.
+$cargo = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+if (-not $cargo -and (Test-Path "$env:USERPROFILE\.cargo\bin\cargo.exe")) { $cargo = "$env:USERPROFILE\.cargo\bin\cargo.exe" }
+if ($cargo) {
+    Write-Host 'Building the native agent (cargo build --release)...' -ForegroundColor Cyan
+    Push-Location (Join-Path $here '..\agent')
+    try { & $cargo build --release; if ($LASTEXITCODE -ne 0) { throw "cargo exited $LASTEXITCODE" } }
+    catch { Write-Host "WARNING: native agent build failed: $($_.Exception.Message)" -ForegroundColor Yellow }
+    finally { Pop-Location }
+} else {
+    Write-Host 'WARNING: no Rust toolchain (cargo); the installer will ship without logix.exe.' -ForegroundColor Yellow
+}
+
 # Bundle the embeddable Python the agent logs sessions with (Find-LogixPython
 # prefers {app}\python). Without it a lab PC records sessions only if a real
 # Python happens to be on the signed-in account's PATH -- and on stock Windows

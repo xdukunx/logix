@@ -909,7 +909,11 @@ $retryCallIdx = $monitorSrc.IndexOf('Invoke-LogbookPeriodicSyncRetry')
 Assert ($monitorTickIdx -ge 0 -and $retryCallIdx -gt $monitorTickIdx) `
     "the call is inside the heartbeat loop, not just defined and forgotten"
 Assert ($commonSrc -match 'function Get-LogbookSyncRetrySeconds') "the retry interval is its own named setting"
-Assert ($commonSrc -match "Start-Process -FilePath \`$python") `
+# Asserted on the function body, not on one call line: the core is now
+# logix.exe when installed (Python otherwise), and what matters is that the
+# attempt is launched detached, whichever program it is.
+$retryFnBody = [regex]::Match($commonSrc, '(?s)function Invoke-LogbookPeriodicSyncRetry \{.*?\r?\n\}').Value
+Assert ($retryFnBody -match 'Start-Process -FilePath \$core\.Exe' -and $retryFnBody -notmatch '& \$core') `
     "the retry launches detached (Start-Process), never runs the sync attempt inline on the heartbeat thread"
 $periodicFn = [regex]::Match($commonSrc, '(?s)function Invoke-LogbookPeriodicSyncRetry \{.*?\n\}').Value
 Assert ($periodicFn -ne '') "Invoke-LogbookPeriodicSyncRetry is defined"

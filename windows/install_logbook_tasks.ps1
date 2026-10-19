@@ -203,6 +203,18 @@ $files = @(
     'logix_yasb.ps1',
     'uninstall_logbook.ps1'
 )
+# The native agent + session core. The wizard ships it beside this script; a
+# run from a git checkout takes the cargo build output instead.
+$nativeExe = Join-Path $installDir 'logix.exe'
+foreach ($cand in @((Join-Path $PSScriptRoot 'logix.exe'), (Join-Path $PSScriptRoot '..\agent\target\release\logix.exe'))) {
+    if ((Test-Path $cand) -and -not ((Resolve-Path $cand).Path -ieq $nativeExe)) {
+        try {
+            Get-Process -Name 'logix' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path $cand -Destination $nativeExe -Force
+        } catch { Write-Host "Could not copy logix.exe: $($_.Exception.Message)" -ForegroundColor Yellow }
+        break
+    }
+}
 foreach ($f in $files) {
     $src = Join-Path $PSScriptRoot $f
     $dst = Join-Path $installDir $f
@@ -318,6 +330,7 @@ try {
     foreach ($p in $monitors) {
         if ([int]$p.ProcessId -ne [int]$PID) { Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction SilentlyContinue }
     }
+    Get-Process -Name 'logix' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 } catch {}
 
 # conhost --headless: on Windows 11, Windows Terminal is the default console
@@ -326,7 +339,18 @@ try {
 # below, that meant a terminal tab popping up on the user's desktop every 30
 # minutes. The headless conhost wrapper never creates a window (see
 # Start-HiddenPowerShell in logbook_common.ps1 for the full story).
-$monitorCmd = '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
+#
+# logix.exe agent is the monitor when it is installed: the same job natively,
+# ~11 MB resident instead of a whole PowerShell runtime (~100 MB) on every lab
+# PC. logbook_monitor.ps1 remains the fallback for a copy without it. Both
+# hold the same mutex, so they can never run side by side.
+if (Test-Path $nativeExe) {
+    $monitorCmd = '--headless "C:\Program Files\Logix\logix.exe" agent'
+    Write-Host 'Agent: native logix.exe' -ForegroundColor Green
+} else {
+    $monitorCmd = '--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Program Files\Logix\logbook_monitor.ps1"'
+    Write-Host 'Agent: PowerShell monitor (logix.exe not found)' -ForegroundColor Yellow
+}
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument $monitorCmd
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $TaskUser
 # Self-heal trigger: everything (popup on unlock, heartbeats, remote

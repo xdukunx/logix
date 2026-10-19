@@ -77,6 +77,9 @@ try {
     }
 } catch {}
 
+# The native agent holds its exe open; stop it before the files go.
+try { Get-Process -Name 'logix' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue } catch {}
+
 # 2. Scheduled tasks (current + legacy names).
 foreach ($t in @(
     'Logix Agent Monitor',

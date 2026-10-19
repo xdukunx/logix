@@ -728,16 +728,25 @@ function Remove-StaleLogbookPayloads {
     } catch { }
 }
 
+# The program that records session events and syncs them: logix.exe beside
+# the scripts when it is there (a native build of log_physical.py -- same
+# flags, same database, ~15 ms and ~3 MB per event), otherwise the Python
+# core. Returns @{ Exe; Args } with Args the leading arguments (the script
+# path for Python, nothing for logix.exe), or $null when neither exists.
+function Get-LogixCoreCommand {
+    $native = Join-Path $Global:InstallDir 'logix.exe'
+    if (Test-Path -LiteralPath $native) { return @{ Exe = $native; Args = @() } }
+    $python = Find-LogixPython
+    $script = Join-Path (Get-LogixCoreDir) 'log_physical.py'
+    if ($python -and (Test-Path $script)) { return @{ Exe = $python; Args = @($script) } }
+    return $null
+}
+
 function Invoke-NativeBridge {
     param([string]$PayloadPath, [string]$Event, [string]$SessionId, [switch]$Async)
-    $python = Find-LogixPython
-    if (-not $python) {
-        Write-LogbookError "Native bridge: no python/py found on PATH for event $Event"
-        return $false
-    }
-    $script = Join-Path (Get-LogixCoreDir) 'log_physical.py'
-    if (-not (Test-Path $script)) {
-        Write-LogbookError "Native bridge: log_physical.py not found at $script (run install/install.py on this machine first) for event $Event"
+    $core = Get-LogixCoreCommand
+    if (-not $core) {
+        Write-LogbookError "Native bridge: neither logix.exe nor Python + log_physical.py is installed, for event $Event"
         return $false
     }
     # Local ErrorActionPreference override: this file sets 'Stop' globally, and
@@ -772,9 +781,8 @@ function Invoke-NativeBridge {
             # is housekeeping for PREVIOUS dispatches -- nothing about this
             # one needs it done first. Initialize-LogbookStartPathWarmup does
             # the real sweep while the form is being built.
-            Start-Process -FilePath $python `
-                -ArgumentList @(('"{0}"' -f $script), '--json-file', ('"{0}"' -f $PayloadPath)) `
-                -WindowStyle Hidden | Out-Null
+            $quoted = @($core.Args | ForEach-Object { '"{0}"' -f $_ }) + @('--json-file', ('"{0}"' -f $PayloadPath))
+            Start-Process -FilePath $core.Exe -ArgumentList $quoted -WindowStyle Hidden | Out-Null
             Write-LogbookInfo "Native bridge dispatched async event=$Event sid=$SessionId"
             return $true
         } catch {
@@ -786,7 +794,8 @@ function Invoke-NativeBridge {
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & $python $script --json-file $PayloadPath 2>&1
+        $coreArgs = @($core.Args) + @('--json-file', $PayloadPath)
+        $output = & $core.Exe @coreArgs 2>&1
         $rc = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $prevEap
@@ -4262,18 +4271,16 @@ function Invoke-LogbookPeriodicSyncRetry {
     if ((Get-Date) -lt $script:nextSyncRetryAt) { return }
     $script:nextSyncRetryAt = (Get-Date).AddSeconds((Get-LogbookSyncRetrySeconds))
     try {
-        $python = Find-LogixPython
-        if (-not $python) { return }
-        $syncScript = Join-Path (Get-LogixCoreDir) 'log_physical.py'
-        if (-not (Test-Path $syncScript)) { return }
+        $core = Get-LogixCoreCommand
+        if (-not $core) { return }
         # Quoted by hand, not via the -ArgumentList array form: Start-Process
         # does not quote array elements containing spaces even then (see
         # ps51-startprocess-quoting-conhost) -- immaterial for this fixed
         # flag today, but matches how every other Start-Process call in this
         # codebase is written so the next person copying this one does not
         # inherit a bug the very next time an argument needs a space.
-        Start-Process -FilePath $python -ArgumentList @(('"{0}"' -f $syncScript), '--sync-to-server') `
-            -WindowStyle Hidden | Out-Null
+        $quoted = @($core.Args | ForEach-Object { '"{0}"' -f $_ }) + @('--sync-to-server')
+        Start-Process -FilePath $core.Exe -ArgumentList $quoted -WindowStyle Hidden | Out-Null
     } catch {
         Write-LogbookError "Periodic sync retry failed to launch: $($_.Exception.Message)"
     }
